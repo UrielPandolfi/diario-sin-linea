@@ -16,6 +16,30 @@ def normalize_content(value: str) -> str:
     return collapsed
 
 
+_QUOTE_MAP = str.maketrans({
+    "\u201c": '"',
+    "\u201d": '"',
+    "\u00ab": '"',
+    "\u00bb": '"',
+    "\u2018": "'",
+    "\u2019": "'",
+    "`": "'",
+})
+
+
+def normalize_excerpt(value: str) -> str:
+    collapsed = normalize_content(value).translate(_QUOTE_MAP)
+    return collapsed.casefold()
+
+
+def excerpt_in_source(excerpt: str, *blobs: str | None) -> bool:
+    needle = normalize_excerpt(excerpt)
+    if not needle:
+        return False
+    haystack = normalize_excerpt(" ".join(part for part in blobs if part))
+    return needle in haystack
+
+
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 

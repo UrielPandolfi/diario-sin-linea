@@ -68,6 +68,18 @@ export type AdminEventDetail = AdminEvent & {
     started_at: string | null;
     finished_at: string | null;
   }[];
+  claims: {
+    id: string;
+    canonical_text: string;
+    status: string;
+    importance: string;
+    claim_type: string | null;
+    evidence: {
+      evidence_type: string;
+      excerpt: string | null;
+      source_item_id: string;
+    }[];
+  }[];
 };
 
 export async function adminFetch(path: string, init: RequestInit = {}) {

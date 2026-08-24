@@ -7,9 +7,12 @@ T = TypeVar("T", bound=BaseModel)
 
 
 class OpenAIStructuredProvider:
-    def __init__(self, *, api_key: str, model: str) -> None:
+    def __init__(self, *, api_key: str, model: str, base_url: str | None = None) -> None:
         self.model = model
-        self.client = OpenAI(api_key=api_key)
+        kwargs: dict = {"api_key": api_key}
+        if base_url:
+            kwargs["base_url"] = base_url
+        self.client = OpenAI(**kwargs)
 
     def generate_structured(
         self,

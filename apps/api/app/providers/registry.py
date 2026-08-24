@@ -14,6 +14,7 @@ from app.providers.voyage_provider import VoyageEmbeddingProvider
 class ModelRole(StrEnum):
     LIGHT_PROCESSING = "light_processing"
     AMBIGUOUS_DEDUP = "ambiguous_dedup"
+    CLAIM_RESOLUTION = "claim_resolution"
     EMBEDDING = "embedding"
 
 
@@ -36,6 +37,9 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
     elif role == ModelRole.AMBIGUOUS_DEDUP:
         provider_name = settings.ambiguous_dedup_provider
         model = settings.ambiguous_dedup_model
+    elif role == ModelRole.CLAIM_RESOLUTION:
+        provider_name = settings.claim_resolution_provider
+        model = settings.claim_resolution_model
     else:
         raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
 
@@ -50,6 +54,12 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
         )
     if provider_name.lower() == "openai":
         return OpenAIStructuredProvider(api_key=api_key, model=model)
+    if provider_name.lower() == "deepseek":
+        return OpenAIStructuredProvider(
+            api_key=api_key,
+            model=model,
+            base_url="https://api.deepseek.com",
+        )
     raise ProviderNotConfiguredError(
         f"Proveedor LLM no soportado todavía: {provider_name}"
     )

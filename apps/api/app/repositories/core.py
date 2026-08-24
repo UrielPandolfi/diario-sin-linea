@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     Article,
+    Claim,
     Entity,
     Event,
     EventEmbedding,
@@ -110,9 +111,12 @@ class EventRepository:
         stmt = (
             select(Event)
             .options(
-                selectinload(Event.event_sources).selectinload(EventSource.source_item),
+                selectinload(Event.event_sources)
+                .selectinload(EventSource.source_item)
+                .selectinload(SourceItem.source),
                 selectinload(Event.event_entities),
                 selectinload(Event.updates),
+                selectinload(Event.claims).selectinload(Claim.evidence),
             )
             .where(Event.id == event_id)
         )

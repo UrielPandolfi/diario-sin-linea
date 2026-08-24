@@ -11,6 +11,7 @@ export default function AdminEventDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [researching, setResearching] = useState(false);
+  const [resolvingClaims, setResolvingClaims] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -43,6 +44,32 @@ export default function AdminEventDetailPage() {
     }
   }
 
+  async function onResolveClaims() {
+    if (!params.id) return;
+    setResolvingClaims(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`/api/v1/admin/events/${params.id}/claims`, {
+        method: "POST",
+      });
+      if (response.status === 409) {
+        setNotice("Ya hay una resolución de claims en curso.");
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Error ${response.status}`);
+      }
+      setNotice("Resolución de claims encolada.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudieron resolver los claims.");
+    } finally {
+      setResolvingClaims(false);
+    }
+  }
+
   useEffect(() => {
     if (!params.id) return;
     void load().catch((err: unknown) => {
@@ -70,14 +97,24 @@ export default function AdminEventDetailPage() {
           </p>
         ) : null}
         {event ? (
-          <button
-            type="button"
-            disabled={researching}
-            onClick={() => void onResearch()}
-            className="mt-4 border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
-          >
-            {researching ? "Investigando…" : "Investigar"}
-          </button>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={researching}
+              onClick={() => void onResearch()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {researching ? "Investigando…" : "Investigar"}
+            </button>
+            <button
+              type="button"
+              disabled={resolvingClaims}
+              onClick={() => void onResolveClaims()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {resolvingClaims ? "Resolviendo…" : "Resolver claims"}
+            </button>
+          </div>
         ) : null}
       </div>
 
@@ -136,6 +173,43 @@ export default function AdminEventDetailPage() {
                   </li>
                 ))}
               </ul>
+            )}
+          </section>
+
+          <section className="border border-border bg-surface">
+            <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
+              Claims
+            </h2>
+            {(event.claims ?? []).length === 0 ? (
+              <p className="px-4 py-6 font-sans text-sm text-secondary">Sin claims.</p>
+            ) : (
+              <table className="w-full font-sans text-sm">
+                <thead>
+                  <tr className="border-b border-border text-left text-secondary">
+                    <th className="px-4 py-2 font-medium">Claim</th>
+                    <th className="px-4 py-2 font-medium">Estado</th>
+                    <th className="px-4 py-2 font-medium">Importancia</th>
+                    <th className="px-4 py-2 font-medium">Fuentes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {(event.claims ?? []).map((claim) => (
+                    <tr
+                      key={claim.id}
+                      className={claim.status === "CONFLICTING" ? "bg-hover text-accent-ochre" : ""}
+                    >
+                      <td className="px-4 py-3 text-primary">{claim.canonical_text}</td>
+                      <td className="px-4 py-3">{claim.status}</td>
+                      <td className="px-4 py-3">{claim.importance}</td>
+                      <td className="px-4 py-3 text-xs">
+                        {claim.evidence
+                          .map((row) => `${row.evidence_type}${row.excerpt ? `: ${row.excerpt}` : ""}`)
+                          .join(" · ") || "—"}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </section>
 

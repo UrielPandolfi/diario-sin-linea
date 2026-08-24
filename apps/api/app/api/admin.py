@@ -17,7 +17,7 @@ from app.repositories import (
 )
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.source_service import SourceService
-from app.workers.tasks import poll_source, research_event
+from app.workers.tasks import poll_source, research_event, resolve_event_claims
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -70,6 +70,24 @@ def _item_out(item) -> dict:
         "published_at": _iso(item.published_at),
         "detected_at": _iso(item.detected_at),
         "processing_status": item.processing_status.value,
+    }
+
+
+def _claim_out(claim) -> dict:
+    return {
+        "id": str(claim.id),
+        "canonical_text": claim.canonical_text,
+        "status": claim.status.value,
+        "importance": claim.importance.value,
+        "claim_type": claim.claim_type,
+        "evidence": [
+            {
+                "evidence_type": row.evidence_type.value,
+                "excerpt": row.excerpt,
+                "source_item_id": str(row.source_item_id),
+            }
+            for row in claim.evidence
+        ],
     }
 
 
@@ -199,6 +217,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             }
             for link in event.event_entities
         ],
+        "claims": [_claim_out(claim) for claim in event.claims],
         "pipeline_runs": [
             {
                 "id": str(run.id),
@@ -227,4 +246,20 @@ def enqueue_research(event_id: UUID, db: DbSession) -> dict:
     if running is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
     research_event.delay(str(event_id), "admin")
+    return {"queued": True, "event_id": str(event_id)}
+
+
+@router.post(
+    "/events/{event_id}/claims",
+    dependencies=[Depends(require_admin)],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_claims(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    running = PipelineRunRepository(db).get_running(event_id, "claim_resolution")
+    if running is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    resolve_event_claims.delay(str(event_id), "admin")
     return {"queued": True, "event_id": str(event_id)}

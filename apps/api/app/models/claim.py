@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, Uuid, func, text
+from sqlalchemy import DateTime, Enum, ForeignKey, String, Text, UniqueConstraint, Uuid, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -72,6 +72,13 @@ class Claim(TimestampMixin, Base):
 
 class ClaimEvidence(TimestampMixin, Base):
     __tablename__ = "claim_evidence"
+    __table_args__ = (
+        UniqueConstraint(
+            "claim_id",
+            "source_item_id",
+            name="uq_claim_evidence_claim_id_source_item_id",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     claim_id: Mapped[UUID] = mapped_column(
