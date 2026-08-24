@@ -1,0 +1,12 @@
+.git
+.github
+.next
+node_modules
+**/__pycache__
+**/.venv
+**/.pytest_cache
+**/.next
+**/node_modules
+.env
+*.md
+.cursor

@@ -1,0 +1,3699 @@
+
+# MASTER PROMPT — SIN LÍNEA MVP
+
+Quiero que trabajes como **arquitecto de software senior + backend engineer + frontend engineer + AI systems engineer** sobre un proyecto real llamado **Sin Línea**.
+
+Tu objetivo es comenzar a construir el **MVP funcional** de Sin Línea respetando estrictamente la arquitectura, filosofía editorial y límites definidos en este documento.
+
+No quiero una demo visual falsa ni una arquitectura llena de placeholders que “parece” completa.
+
+Quiero construir primero el **motor mínimo real del producto**, de forma incremental, testeable y extensible.
+
+---
+
+# 0. REGLA PRINCIPAL DE TRABAJO
+
+Antes de modificar código:
+
+1. Inspecciona completamente el repositorio.
+2. Entiende qué existe y qué no.
+3. Conserva cualquier código válido existente.
+4. No reescribas cosas innecesariamente.
+5. Identifica dependencias, estructura y estado actual.
+6. Propón internamente el camino más simple.
+7. Comienza a implementar.
+
+No quiero que te quedes únicamente en un plan.
+
+Después de inspeccionar el proyecto, **empieza a construirlo**.
+
+Trabaja milestone por milestone.
+
+Nunca intentes implementar todo Sin Línea de una sola vez.
+
+Cada milestone debe dejar el sistema:
+
+* ejecutable;
+* coherente;
+* testeable;
+* con migrations válidas;
+* sin romper lo anterior.
+
+Si una funcionalidad pertenece al futuro pero no al MVP:
+
+**NO LA IMPLEMENTES.**
+
+Puedes dejar preparada una interfaz o estructura razonable únicamente cuando hacerlo sea trivial y evite acoplamiento futuro.
+
+No construyas abstracciones especulativas gigantes.
+
+---
+
+# 1. QUÉ ES SIN LÍNEA
+
+Sin Línea es un medio informativo digital automatizado.
+
+No funciona alrededor del concepto tradicional de “noticia”.
+
+El objeto principal del sistema es el:
+
+`EVENT`
+
+o **suceso**.
+
+Una publicación detectada en una fuente no constituye automáticamente una nueva noticia.
+
+Puede ser:
+
+* una señal de un suceso nuevo;
+* una fuente adicional de un suceso existente;
+* una repetición;
+* una confirmación;
+* una contradicción;
+* una corrección;
+* una actualización.
+
+Ejemplo:
+
+25 medios publican sobre un choque entre dos colectivos.
+
+Sin Línea NO debe generar 25 noticias.
+
+Debe existir:
+
+`1 event`
+
+con:
+
+`25 source_items / evidencias`
+
+asociadas.
+
+El artículo público es simplemente una representación actual del conocimiento disponible sobre ese `event`.
+
+---
+
+# 2. PRINCIPIO EDITORIAL FUNDAMENTAL
+
+Sin Línea no intenta imponer una narrativa.
+
+Debe informar:
+
+> qué ocurrió, qué sabemos, quién sostiene cada información y qué todavía no sabemos.
+
+Prioridad editorial:
+
+**precisión → claridad → contexto → brevedad**
+
+No utilizar:
+
+* clickbait;
+* dramatización;
+* framing político;
+* adjetivación editorial;
+* lenguaje partidario;
+* interpretación moral;
+* opiniones del medio;
+* inferencias no respaldadas.
+
+No existen “hechos positivos” o “hechos negativos”.
+
+Existen hechos.
+
+El lector los interpreta.
+
+---
+
+# 3. PRINCIPIO TÉCNICO FUNDAMENTAL
+
+La arquitectura objetivo es:
+
+**monolito modular + workers asíncronos**
+
+No microservicios.
+
+No Kubernetes.
+
+No infraestructura innecesaria.
+
+La aplicación debe comenzar sencilla y poder separarse posteriormente si la escala lo requiere.
+
+Además:
+
+> código para lo determinista; IA solamente cuando hace falta interpretar, comparar, clasificar o redactar.
+
+No utilizar LLMs para resolver problemas que una comparación, query SQL, hash o regla simple puede solucionar.
+
+---
+
+# 4. FLUJO CENTRAL DEL SISTEMA
+
+El flujo conceptual completo es:
+
+**FUENTES VIGILADAS**
+
+↓
+
+**detectar publicación nueva**
+
+↓
+
+**normalizar SourceItem**
+
+↓
+
+**extraer posible suceso**
+
+↓
+
+**buscar si el Event ya existe**
+
+↓
+
+**si es ambiguo, resolver duplicado**
+
+↓
+
+**crear Event o asociar al existente**
+
+↓
+
+**investigar el suceso en Internet**
+
+↓
+
+**incorporar nuevas fuentes**
+
+↓
+
+**extraer claims**
+
+↓
+
+**relacionar claims con evidencia**
+
+↓
+
+**resolver soporte / contradicción / incertidumbre**
+
+↓
+
+**verificar externamente solamente cuando corresponda**
+
+↓
+
+**construir ArticleContext estructurado**
+
+↓
+
+**redactar**
+
+↓
+
+**auditar**
+
+↓
+
+**READY_FOR_REVIEW**
+
+↓
+
+**publicar manualmente durante el MVP**
+
+↓
+
+**seguir actualizando el mismo Event**
+
+---
+
+# 5. UNA ACLARACIÓN CRÍTICA SOBRE LAS FUENTES
+
+Las noticias siempre nacen inicialmente desde las **fuentes vigiladas que yo configure manualmente**.
+
+No quiero un crawler recorriendo todo Internet continuamente buscando noticias.
+
+## Funcionamiento correcto
+
+Yo cargaré manualmente fuentes como:
+
+* medios;
+* organismos;
+* municipios;
+* agencias;
+* sitios públicos;
+* etc.
+
+Estas son las:
+
+`MONITORED SOURCES`
+
+Son nuestro radar.
+
+El sistema consulta esas fuentes periódicamente.
+
+Cuando aparece una publicación nueva:
+
+1. se ingesta;
+2. se detecta el posible suceso;
+3. se comprueba si ya existe;
+4. recién entonces comienza la investigación web sobre ese suceso.
+
+La investigación web sí puede recorrer Internet y descubrir otras fuentes.
+
+Ejemplo:
+
+`Rosario3` está vigilado.
+
+Rosario3 publica:
+
+> Chocaron dos colectivos en Pellegrini y Corrientes.
+
+Sin Línea detecta el suceso.
+
+Entonces busca:
+
+* Municipalidad;
+* La Capital;
+* Cadena 3;
+* redes oficiales;
+* otra prensa local;
+* fuentes primarias;
+* etc.
+
+Estas nuevas fuentes pueden utilizarse como evidencia aunque **no sean fuentes vigiladas**.
+
+---
+
+# 6. FUENTES DESCUBIERTAS ≠ FUENTES VIGILADAS
+
+Cuando una investigación encuentra una fuente nueva útil:
+
+debe poder guardarse en `sources`.
+
+Pero:
+
+`is_monitored = false`
+
+por defecto.
+
+Registrar una fuente NO significa comenzar a vigilarla.
+
+Solo yo decidiré desde Admin qué fuentes pertenecen al radar permanente.
+
+Ejemplo:
+
+```text
+source:
+  name: Página 12
+  domain: pagina12.com.ar
+  method: RSS
+  feed_url: ...
+  is_monitored: false
+```
+
+Si posteriormente yo la habilito:
+
+```text
+is_monitored = true
+```
+
+recién entonces entra al radar.
+
+Esta separación es obligatoria.
+
+---
+
+# 7. PRIORIDAD DE INGESTA
+
+Para fuentes vigiladas:
+
+1. API oficial si existe.
+2. RSS / Atom.
+3. HTTP simple.
+4. Extracción HTML.
+
+NO implementar todavía crawling complejo con navegador.
+
+## MVP
+
+Implementar:
+
+* RSS / Atom;
+* HTTP;
+* extracción HTML con Trafilatura.
+
+Dejar fuera del MVP:
+
+* Playwright;
+* browser automation;
+* crawling avanzado;
+* scraping distribuido.
+
+Si una fuente no puede leerse todavía:
+
+registrar el error claramente.
+
+No construir una infraestructura enorme para resolverla.
+
+---
+
+# 8. STACK DEL MVP
+
+## Frontend
+
+* Next.js
+* React
+* TypeScript
+* App Router
+* Tailwind CSS
+
+## Backend
+
+* Python
+* FastAPI
+* SQLAlchemy 2
+* Pydantic
+* Alembic
+
+## Base de datos
+
+* PostgreSQL
+* pgvector
+
+## Jobs
+
+* Redis
+* Celery
+
+## Extracción
+
+* feedparser o equivalente robusto para RSS
+* httpx
+* Trafilatura
+
+## IA
+
+Utilizar adapters por proveedor y roles internos.
+
+Nunca hardcodear modelos dentro del dominio.
+
+## Desarrollo
+
+* Docker
+* Docker Compose
+
+## CI
+
+GitHub Actions básico:
+
+* backend tests;
+* frontend lint;
+* frontend typecheck;
+* build.
+
+---
+
+# 9. COSAS QUE NO PERTENECEN AL MVP
+
+NO implementar ahora:
+
+* mapa;
+* MapLibre;
+* PostGIS;
+* feed vertical tipo reels;
+* cuentas de usuario;
+* Better Auth;
+* perfiles;
+* Seguidos;
+* seguimiento personalizado;
+* Guardados;
+* notificaciones personales;
+* comentarios;
+* recomendaciones personales;
+* algoritmo basado en historial del usuario;
+* suscripciones;
+* Mercado Pago;
+* paywall;
+* donaciones;
+* personalización avanzada;
+* RAG complejo;
+* Perplexity Deep Research;
+* Grok/X;
+* Gemini Maps;
+* Playwright;
+* Typesense como servicio independiente;
+* Cloudflare R2 obligatorio;
+* OpenTelemetry completo;
+* Grafana;
+* infraestructura distribuida;
+* microservicios;
+* Kubernetes.
+
+No implementarlos “por si acaso”.
+
+---
+
+# 10. COSAS QUE SÍ DEBEMOS PREPARAR DESDE EL MVP
+
+Aunque el mapa no existe todavía, cada `Event` debe poder almacenar:
+
+* país;
+* provincia;
+* localidad;
+* barrio si se conoce;
+* dirección textual;
+* latitud opcional;
+* longitud opcional;
+* nivel de precisión de la ubicación.
+
+Ejemplo:
+
+```text
+country_code = AR
+province = Santa Fe
+locality = Rosario
+neighborhood = Centro
+address_text = Pellegrini y Corrientes
+latitude = -32....
+longitude = -60....
+location_precision = INTERSECTION
+```
+
+No hace falta geocodificar automáticamente todos los eventos todavía.
+
+Las coordenadas pueden ser `NULL`.
+
+Pero el modelo debe soportarlas.
+
+Esto permitirá agregar PostGIS y el mapa posteriormente sin rediseñar el dominio.
+
+---
+
+# 11. ESTRUCTURA RECOMENDADA DEL REPOSITORIO
+
+Si el repositorio está vacío o no existe una estructura mejor, utilizar algo similar a:
+
+```text
+sin-linea/
+│
+├── apps/
+│   ├── web/
+│   │   ├── app/
+│   │   ├── components/
+│   │   ├── features/
+│   │   ├── lib/
+│   │   └── ...
+│   │
+│   └── api/
+│       ├── app/
+│       │   ├── api/
+│       │   ├── core/
+│       │   ├── domain/
+│       │   ├── models/
+│       │   ├── repositories/
+│       │   ├── services/
+│       │   ├── pipelines/
+│       │   ├── providers/
+│       │   ├── workers/
+│       │   ├── prompts/
+│       │   └── schemas/
+│       │
+│       ├── migrations/
+│       └── tests/
+│
+├── infra/
+│   └── docker/
+│
+├── docker-compose.yml
+├── .env.example
+├── README.md
+└── ...
+```
+
+No sigas esta estructura ciegamente si el proyecto ya posee otra organización limpia.
+
+---
+
+# 12. MODELO DE DATOS PRINCIPAL
+
+PostgreSQL es la fuente de verdad.
+
+Las tablas principales deben ser como mínimo:
+
+---
+
+## sources
+
+Representa una fuente conocida.
+
+Campos orientativos:
+
+```text
+id
+name
+domain
+homepage_url
+source_type
+preferred_ingestion_method
+feed_url
+endpoint_url
+is_monitored
+is_enabled
+last_success_at
+last_failure_at
+failure_count
+metadata_json
+created_at
+updated_at
+```
+
+Enums posibles:
+
+```text
+RSS
+API
+HTML
+UNKNOWN
+```
+
+No confundas:
+
+`is_monitored`
+
+con:
+
+`is_enabled`
+
+Una fuente puede estar registrada pero no vigilada.
+
+---
+
+## source_items
+
+Cada publicación individual detectada.
+
+```text
+id
+source_id
+external_id
+url
+canonical_url
+title
+raw_text
+clean_text
+excerpt
+author
+published_at
+detected_at
+content_hash
+metadata_json
+processing_status
+created_at
+```
+
+`url + hash` deben ayudar a mantener idempotencia.
+
+Nunca reprocesar una publicación idéntica innecesariamente.
+
+---
+
+## events
+
+Objeto central del sistema.
+
+```text
+id
+public_id
+slug
+event_type
+title_internal
+status
+
+started_at
+detected_at
+last_material_update_at
+
+country_code
+province
+locality
+neighborhood
+address_text
+latitude
+longitude
+location_precision
+
+relevance_score
+short_summary
+
+created_at
+updated_at
+```
+
+Estados:
+
+```text
+DETECTED
+PROCESSING
+READY_FOR_REVIEW
+PUBLISHED
+UPDATING
+CLOSED
+ARCHIVED
+FAILED
+```
+
+---
+
+## event_sources
+
+Relación entre Event y SourceItem.
+
+```text
+id
+event_id
+source_item_id
+relation_type
+is_primary
+added_at
+```
+
+`relation_type`:
+
+```text
+INITIAL
+CONFIRMING
+ADDITIONAL
+CONTRADICTING
+CORRECTING
+REPEATING
+```
+
+---
+
+## claims
+
+Afirmaciones estructuradas.
+
+```text
+id
+event_id
+canonical_text
+claim_type
+importance
+status
+subject
+predicate
+object_text
+normalized_value
+unit
+occurred_at
+created_at
+updated_at
+```
+
+Estados:
+
+```text
+SUPPORTED
+SINGLE_SOURCE
+CONFLICTING
+UNCERTAIN
+DISPROVEN
+OUTDATED
+```
+
+---
+
+## claim_evidence
+
+```text
+id
+claim_id
+source_item_id
+evidence_type
+excerpt
+source_url
+confidence
+created_at
+```
+
+`evidence_type`:
+
+```text
+SUPPORTS
+CONTRADICTS
+QUALIFIES
+MENTIONS
+```
+
+---
+
+## entities
+
+```text
+id
+name
+normalized_name
+entity_type
+metadata_json
+```
+
+Tipos posibles:
+
+```text
+PERSON
+ORGANIZATION
+COMPANY
+GOVERNMENT
+PLACE
+OTHER
+```
+
+---
+
+## event_entities
+
+```text
+event_id
+entity_id
+role
+```
+
+---
+
+## articles
+
+Una sola representación pública actual de un Event.
+
+```text
+id
+event_id
+slug
+headline
+summary
+body
+status
+published_at
+updated_at
+current_version
+hero_image_url
+created_at
+```
+
+---
+
+## article_versions
+
+```text
+id
+article_id
+version_number
+headline
+summary
+body
+change_reason
+created_at
+```
+
+Nunca destruir una versión anterior.
+
+---
+
+## corrections
+
+```text
+id
+article_id
+article_version_id
+description
+reason
+created_at
+```
+
+---
+
+# 13. EVENT UPDATES
+
+Agregar también:
+
+`event_updates`
+
+porque será útil tanto para la experiencia "Ahora" como para futuras timelines.
+
+```text
+id
+event_id
+update_type
+headline
+summary
+is_material
+occurred_at
+created_at
+```
+
+Ejemplos:
+
+```text
+EVENT_CREATED
+NEW_INFORMATION
+OFFICIAL_CONFIRMATION
+CORRECTION
+CONFLICT_FOUND
+CONFLICT_RESOLVED
+ARTICLE_UPDATED
+```
+
+No crear un update público porque otra fuente simplemente repitió la misma información.
+
+---
+
+# 14. PIPELINE RUNS
+
+Necesitamos trazabilidad sencilla.
+
+Crear una entidad ligera como:
+
+`pipeline_runs`
+
+o equivalente.
+
+Debe permitir saber:
+
+```text
+event_id
+stage
+status
+started_at
+finished_at
+attempt
+error_message
+metadata
+```
+
+Estados:
+
+```text
+PENDING
+RUNNING
+SUCCESS
+RETRY
+FAILED
+```
+
+No hace falta construir observabilidad enterprise.
+
+Solamente necesitamos poder inspeccionar qué sucedió.
+
+---
+
+# 15. PROVIDERS DE IA
+
+Los modelos no deben aparecer dispersos por el código.
+
+Crear roles internos.
+
+Ejemplo:
+
+```python
+class ModelRole(str, Enum):
+    LIGHT_PROCESSING = "light_processing"
+    AMBIGUOUS_DEDUP = "ambiguous_dedup"
+    CLAIM_RESOLUTION = "claim_resolution"
+    VERIFICATION = "verification"
+    WRITING = "writing"
+    AUDITING = "auditing"
+```
+
+Luego resolverlos mediante configuración.
+
+Ejemplo `.env`:
+
+```env
+LIGHT_PROCESSING_PROVIDER=openai
+LIGHT_PROCESSING_MODEL=...
+
+AMBIGUOUS_DEDUP_PROVIDER=openai
+AMBIGUOUS_DEDUP_MODEL=...
+
+CLAIM_RESOLUTION_PROVIDER=deepseek
+CLAIM_RESOLUTION_MODEL=...
+
+VERIFICATION_PROVIDER=openai
+VERIFICATION_MODEL=...
+
+WRITING_PROVIDER=anthropic
+WRITING_MODEL=...
+
+AUDITING_PROVIDER=openai
+AUDITING_MODEL=...
+```
+
+No inventes IDs actuales de modelos.
+
+Los IDs reales deben configurarse mediante variables de entorno.
+
+---
+
+# 16. ROLES CONCEPTUALES DE IA
+
+La configuración objetivo es:
+
+### Procesamiento ligero
+
+**GPT-5.6 Luna**
+
+Responsabilidades:
+
+* extracción;
+* clasificación;
+* entidades;
+* fechas;
+* normalización;
+* generación de JSON;
+* relevancia;
+* representación inicial del suceso;
+* claims.
+
+---
+
+### Embeddings
+
+**Voyage 4**
+
+Uso:
+
+* representación semántica;
+* deduplicación;
+* recuperación de sucesos similares.
+
+Guardar embeddings mediante pgvector.
+
+---
+
+### Duplicados ambiguos
+
+**GPT-5.6 Terra**
+
+Solo cuando reglas y embeddings no permitan determinar con suficiente confianza si dos señales pertenecen al mismo suceso.
+
+No llamarlo para cada SourceItem.
+
+---
+
+### Resolución barata de claims
+
+**DeepSeek V4 Pro**
+
+Debe ser la primera capa de interpretación de claims.
+
+Determina principalmente:
+
+* soportado;
+* una sola fuente;
+* conflicto;
+* incertidumbre;
+* posible información obsoleta;
+* necesidad de investigación adicional.
+
+---
+
+### Verificación escalada
+
+**GPT-5.6 Sol**
+
+Solo para claims difíciles.
+
+Nunca enviarle automáticamente todas las noticias completas.
+
+---
+
+### Redacción
+
+**Claude Sonnet 5**
+
+Recibe información estructurada.
+
+No debe utilizar artículos originales libremente como material editorial.
+
+---
+
+### Auditoría
+
+**GPT-5.6 Sol**
+
+Audita el artículo final.
+
+---
+
+# 17. INTERFAZ DE PROVIDERS
+
+Construir una interfaz desacoplada.
+
+Algo conceptualmente similar a:
+
+```python
+class StructuredLLMProvider(Protocol):
+    async def generate_structured(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        input_data: dict,
+        response_schema: type[BaseModel],
+    ) -> BaseModel:
+        ...
+```
+
+Y otra para texto:
+
+```python
+class TextLLMProvider(Protocol):
+    async def generate_text(...):
+        ...
+```
+
+Los servicios de dominio NO deben conocer:
+
+* OpenAI SDK;
+* Anthropic SDK;
+* DeepSeek SDK.
+
+Los adapters sí.
+
+---
+
+# 18. STRUCTURED OUTPUTS
+
+Toda etapa automatizable debe utilizar esquemas Pydantic.
+
+No parsear texto libre con regex si el proveedor soporta structured outputs.
+
+Ejemplo para extracción de suceso:
+
+```python
+class EventCandidate(BaseModel):
+    event_type: str
+    what_happened: str
+    occurred_at: datetime | None
+    country_code: str | None
+    province: str | None
+    locality: str | None
+    neighborhood: str | None
+    address_text: str | None
+    latitude: float | None
+    longitude: float | None
+    entities: list[ExtractedEntity]
+    short_summary: str
+```
+
+Validar siempre los resultados antes de persistirlos.
+
+---
+
+# 19. INGESTION PIPELINE
+
+Proceso:
+
+```text
+poll monitored source
+↓
+fetch feed/page
+↓
+detect unseen item
+↓
+normalize
+↓
+hash
+↓
+save SourceItem
+↓
+enqueue event detection
+```
+
+Todas las tareas deben ser idempotentes.
+
+Si Celery ejecuta dos veces el mismo job:
+
+no debe crear dos SourceItems.
+
+---
+
+# 20. DETECCIÓN DE SUCESOS
+
+Para cada nuevo SourceItem:
+
+Luna debe extraer:
+
+* qué ocurrió;
+* dónde;
+* cuándo;
+* protagonistas;
+* tipo;
+* resumen;
+* entidades.
+
+Después buscar Events recientes candidatos.
+
+Nunca comparar con toda la base.
+
+Limitar primero mediante:
+
+* ventana temporal;
+* categoría;
+* localidad cuando exista;
+* entidades relevantes.
+
+Luego utilizar embeddings.
+
+---
+
+# 21. DEDUPLICACIÓN
+
+La decisión debe utilizar tres niveles.
+
+## Nivel 1 — Código
+
+Comparaciones deterministas:
+
+* tiempo;
+* lugar;
+* entidades;
+* tipo de hecho;
+* URL;
+* hashes;
+* campos normalizados.
+
+---
+
+## Nivel 2 — Voyage
+
+Comparar embedding del EventCandidate con Events recientes.
+
+Definir thresholds configurables:
+
+```env
+EVENT_MATCH_HIGH_THRESHOLD=
+EVENT_MATCH_LOW_THRESHOLD=
+```
+
+No fijar números mágicos en múltiples archivos.
+
+---
+
+## Nivel 3 — Terra
+
+Solo cuando:
+
+```text
+LOW_THRESHOLD <= similarity < HIGH_THRESHOLD
+```
+
+o cuando existan señales contradictorias.
+
+Terra recibe:
+
+* candidato;
+* 2-5 Events candidatos;
+* metadata esencial.
+
+Debe devolver:
+
+```json
+{
+  "decision": "EXISTING_EVENT | NEW_EVENT",
+  "event_id": "...",
+  "confidence": 0.0,
+  "reason": "..."
+}
+```
+
+---
+
+# 22. INVESTIGACIÓN WEB
+
+La investigación se dispara DESPUÉS de detectar un suceso.
+
+Nunca usar búsqueda web global como radar permanente.
+
+Crear:
+
+```python
+class SearchProvider(Protocol):
+    async def search(self, query: SearchQuery) -> list[SearchResult]:
+        ...
+```
+
+El primer proveedor del MVP puede ser:
+
+**Brave Search**
+
+Pero debe estar desacoplado.
+
+Posteriormente podremos cambiarlo por:
+
+* Exa;
+* Gemini Grounding;
+* Perplexity Sonar;
+* otro.
+
+Sin modificar el pipeline principal.
+
+---
+
+# 23. ESTRATEGIA DE INVESTIGACIÓN
+
+No queremos:
+
+> las primeras 10 URLs de Google.
+
+Queremos diversidad y evidencia útil.
+
+Buscar preferentemente:
+
+1. fuente primaria u oficial;
+2. medio cercano al hecho;
+3. otra fuente independiente;
+4. documentos o datos públicos;
+5. fuentes adicionales solo cuando aporten algo.
+
+La investigación termina cuando nuevas búsquedas dejan de aportar información material.
+
+En el MVP puede existir un límite configurable de búsquedas para controlar costes.
+
+Ejemplo:
+
+```env
+MAX_RESEARCH_QUERIES_PER_EVENT=4
+MAX_RESEARCH_RESULTS_PER_QUERY=5
+```
+
+---
+
+# 24. FUENTES ENCONTRADAS EN LA WEB
+
+Por cada resultado útil:
+
+1. guardar URL;
+2. intentar HTTP;
+3. extraer texto con Trafilatura;
+4. registrar la fuente si todavía no existe;
+5. guardar SourceItem;
+6. asociarlo al Event.
+
+Estas fuentes:
+
+`is_monitored = false`
+
+salvo decisión manual posterior.
+
+---
+
+# 25. CLAIMS
+
+Después de reunir las fuentes del Event:
+
+extraer afirmaciones relevantes.
+
+No guardar cada oración trivial como claim.
+
+Ejemplos:
+
+```text
+"Hubo un choque entre dos colectivos."
+"El accidente ocurrió a las 14:20."
+"Se registraron seis heridos."
+"El tránsito permanece cortado."
+"El ministro afirmó X."
+```
+
+Cada claim debe poder rastrearse hasta evidencia.
+
+---
+
+# 26. RESOLUCIÓN DE CLAIMS
+
+DeepSeek recibe preferentemente:
+
+* claim;
+* snippets;
+* fuente;
+* metadata;
+* contexto mínimo.
+
+NO todas las páginas completas salvo necesidad.
+
+Debe producir algo como:
+
+```json
+{
+  "status": "SUPPORTED",
+  "confidence": 0.91,
+  "evidence_ids": [],
+  "conflicts": [],
+  "needs_external_verification": false,
+  "reason": "..."
+}
+```
+
+---
+
+# 27. CUÁNDO VERIFICAR REALMENTE
+
+No quiero que Sol revise exhaustivamente todas las afirmaciones.
+
+Se verifica especialmente:
+
+* declaraciones atribuidas a políticos;
+* declaraciones de instituciones;
+* dichos atribuidos a medios;
+* figuras públicas;
+* citas;
+* datos históricos comprobables;
+* cargos;
+* fechas;
+* resultados previos;
+* leyes;
+* decretos;
+* estadísticas;
+* elecciones;
+* presupuestos;
+* registros públicos;
+* cifras importantes;
+* documentos;
+* acusaciones;
+* responsabilidades;
+* causalidad;
+* claims de alto impacto;
+* rumores comprobables;
+* claims importantes sostenidos por una sola fuente.
+
+---
+
+# 28. CUÁNDO NO SOBREVERIFICAR
+
+Ejemplo:
+
+Tres medios locales reportan un incendio.
+
+Todos coinciden en:
+
+* lugar;
+* hora aproximada;
+* existencia del incendio.
+
+No necesitamos llamar a Sol para preguntarle:
+
+> ¿realmente hubo un incendio?
+
+Si las fuentes difieren:
+
+Fuente A:
+
+`2 muertos`
+
+Fuente B:
+
+`3 muertos`
+
+y no existe información capaz de resolverlo:
+
+NO llamar repetidamente a modelos intentando fabricar certeza.
+
+El estado correcto puede seguir siendo:
+
+`CONFLICTING`
+
+y el artículo debe decir:
+
+> Las fuentes consultadas informaron cifras diferentes, de entre dos y tres fallecidos.
+
+La incertidumbre es un resultado válido.
+
+---
+
+# 29. VERIFICACIÓN DIRIGIDA
+
+Cuando un claim sí necesita verificación:
+
+crear una búsqueda específica para ESE claim.
+
+Ejemplo:
+
+```text
+Claim:
+"El gobernador afirmó que la provincia redujo su deuda un 30 %."
+
+Buscar:
+- discurso original;
+- publicación oficial;
+- estadísticas;
+- documentos;
+- entrevistas.
+```
+
+Después enviar a Sol únicamente:
+
+* claim;
+* evidencia encontrada;
+* contexto necesario.
+
+No enviar el Event entero si no hace falta.
+
+---
+
+# 30. ARTICLE CONTEXT
+
+Claude jamás debería recibir simplemente:
+
+> acá tenés ocho artículos, escribime una noticia.
+
+Antes de redactar construir:
+
+`ArticleContext`
+
+Ejemplo:
+
+```json
+{
+  "event": {},
+  "confirmed_claims": [],
+  "single_source_claims": [],
+  "conflicting_claims": [],
+  "uncertain_claims": [],
+  "entities": [],
+  "timeline": [],
+  "context": [],
+  "sources": []
+}
+```
+
+Esta capa es fundamental.
+
+Debe separar investigación de redacción.
+
+---
+
+# 31. REDACCIÓN
+
+Claude debe escribir:
+
+* titular;
+* resumen corto;
+* cuerpo.
+
+Regla:
+
+> contar qué ocurrió, qué sabemos, cómo lo sabemos y qué todavía no sabemos.
+
+---
+
+# 32. TITULARES
+
+Correcto:
+
+> Un colectivo chocó contra un automóvil en avenida Pellegrini y hubo cuatro heridos
+
+Incorrecto:
+
+> Terror en Rosario: brutal accidente conmociona a la ciudad
+
+No usar:
+
+* brutal;
+* escándalo;
+* histórico;
+* devastador;
+* polémico;
+* contundente;
+
+salvo que estén dentro de una atribución relevante.
+
+---
+
+# 33. ATRIBUCIÓN
+
+Si alguien afirma algo:
+
+el artículo debe conservar la atribución.
+
+Correcto:
+
+> Milei afirmó que...
+
+Incorrecto:
+
+> Argentina logró...
+
+cuando la única evidencia es una declaración de Milei.
+
+---
+
+# 34. CONTRADICCIONES
+
+No elegir arbitrariamente.
+
+Ejemplo:
+
+> La Policía informó que participaron unas 200 personas. La organización estimó una asistencia de 600. No existe hasta el momento una medición independiente que permita resolver la diferencia.
+
+---
+
+# 35. LONGITUD
+
+No imponer cantidad artificial de palabras.
+
+Un hecho sencillo:
+
+200 palabras pueden ser suficientes.
+
+Una modificación económica importante:
+
+puede necesitar 700.
+
+Una investigación compleja:
+
+puede superar 1.000.
+
+---
+
+# 36. RESUMEN CORTO
+
+Cada Event / Article necesita también:
+
+`short_summary`
+
+aproximadamente 1-3 frases.
+
+Será utilizado por:
+
+* Home;
+* cards;
+* futuro feed vertical;
+* futuros productos.
+
+No debe ser clickbait.
+
+---
+
+# 37. ACTUALIZACIONES
+
+Una nueva fuente NO implica automáticamente reescribir el artículo.
+
+Comparar los nuevos claims con el estado actual.
+
+Ejemplo:
+
+```text
+Otro medio repite que hubo un choque
+→ no actualizar.
+
+Se informa por primera vez que hubo heridos
+→ actualizar.
+
+Municipalidad confirma cuatro heridos
+→ actualizar.
+
+Otra cuenta repite un rumor conocido
+→ no actualizar.
+
+Se confirma corte de tránsito
+→ actualizar si aporta utilidad.
+```
+
+---
+
+# 38. CAMBIO MATERIAL
+
+Crear una función/servicio explícito:
+
+`MaterialChangeDetector`
+
+Puede usar reglas primero.
+
+Se considera material normalmente:
+
+* nuevo claim importante;
+* confirmación de información incierta;
+* cambio de cifra relevante;
+* resolución de contradicción;
+* corrección;
+* nueva consecuencia importante;
+* información práctica nueva.
+
+No usar un LLM si una comparación estructurada puede resolverlo.
+
+---
+
+# 39. VERSIONADO
+
+Cuando existe un cambio material:
+
+```text
+Article current
+↓
+guardar ArticleVersion
+↓
+generar nueva versión
+↓
+auditar
+↓
+revisión
+↓
+publicar
+```
+
+No borrar silenciosamente información anterior.
+
+---
+
+# 40. AUDITORÍA FINAL
+
+Sol recibe:
+
+* ArticleContext;
+* artículo redactado;
+* claims;
+* evidencia.
+
+Debe revisar:
+
+* afirmaciones sin respaldo;
+* números;
+* nombres;
+* fechas;
+* atribuciones;
+* contradicciones;
+* causalidad;
+* inferencias;
+* framing;
+* adjetivación;
+* omisiones materiales detectables.
+
+Respuesta estructurada:
+
+```json
+{
+  "passed": true,
+  "issues": [
+    {
+      "type": "UNSUPPORTED_CLAIM",
+      "severity": "HIGH",
+      "text": "...",
+      "explanation": "...",
+      "suggested_fix": "..."
+    }
+  ]
+}
+```
+
+---
+
+# 41. LOOP DE CORRECCIÓN
+
+Si falla:
+
+```text
+Claude draft
+↓
+Sol audit
+↓
+issues
+↓
+Claude rewrite
+↓
+Sol reaudit
+```
+
+Limitar iteraciones:
+
+```env
+MAX_AUDIT_REWRITE_CYCLES=2
+```
+
+Si sigue fallando:
+
+`READY_FOR_REVIEW`
+
+con alerta visible en Admin.
+
+Nunca hacer loops infinitos.
+
+---
+
+# 42. PUBLICACIÓN EN EL MVP
+
+Inicialmente NO publicar automáticamente.
+
+Usar:
+
+```env
+AUTO_PUBLISH=false
+```
+
+Cuando un artículo supera el pipeline:
+
+`READY_FOR_REVIEW`
+
+Admin puede:
+
+* revisar;
+* publicar;
+* rechazar;
+* volver a procesar.
+
+Posteriormente podremos activar:
+
+`AUTO_PUBLISH=true`
+
+sin rediseñar el pipeline.
+
+---
+
+# 43. ADMIN DEL MVP
+
+El Admin debe ser deliberadamente simple.
+
+No quiero crear un CMS enorme.
+
+Rutas principales:
+
+```text
+/admin
+/admin/sources
+/admin/events
+/admin/events/[id]
+```
+
+---
+
+# 44. ADMIN — DASHBOARD
+
+Mostrar únicamente información útil:
+
+```text
+Fuentes vigiladas
+Eventos detectados hoy
+Eventos procesando
+Listos para revisar
+Publicados
+Errores
+```
+
+No construir gráficos sofisticados.
+
+---
+
+# 45. ADMIN — SOURCES
+
+Debe permitir:
+
+* crear fuente;
+* editar;
+* activar/desactivar;
+* marcar como vigilada;
+* dejar de vigilar;
+* editar RSS URL;
+* seleccionar método;
+* ejecutar ingesta manual;
+* ver último éxito;
+* ver último error.
+
+Este panel es importante porque inicialmente **yo cargaré las fuentes manualmente desde aquí**.
+
+---
+
+# 46. ADMIN — EVENTS
+
+Tabla sencilla:
+
+```text
+Estado
+Hora
+Localidad
+Suceso
+Fuentes
+Claims
+Última actualización
+```
+
+Filtros mínimos:
+
+* estado;
+* localidad;
+* fecha.
+
+---
+
+# 47. ADMIN — EVENT DETAIL
+
+Esta será la pantalla más importante del Admin.
+
+Mostrar:
+
+## Suceso
+
+* título interno;
+* estado;
+* lugar;
+* hora;
+* resumen;
+* relevancia.
+
+## Fuentes
+
+Todas las publicaciones vinculadas.
+
+## Claims
+
+Tabla:
+
+```text
+Claim
+Estado
+Fuentes
+Importancia
+```
+
+## Conflictos
+
+Mostrar claramente claims `CONFLICTING`.
+
+## Artículo
+
+Preview.
+
+## Pipeline
+
+Últimos stages y errores.
+
+## Acciones
+
+* reprocess;
+* research again;
+* regenerate article;
+* publish;
+* archive.
+
+No construir edición colaborativa ni CMS avanzado.
+
+---
+
+# 48. SEGURIDAD DEL ADMIN
+
+No implementar Better Auth todavía.
+
+Pero tampoco dejar `/admin` completamente abierto en producción.
+
+Implementar una protección mínima mediante una contraseña/token de administrador configurado por entorno.
+
+No exponer secretos en JavaScript del navegador.
+
+Puede resolverse mediante:
+
+* login interno mínimo;
+* cookie `httpOnly`;
+* validación server-side.
+
+No crear usuarios, roles ni recuperación de contraseña en el MVP.
+
+Un solo administrador es suficiente.
+
+---
+
+# 49. HOME DEL MVP
+
+La Home debe comenzar a transmitir la sensación de un producto informativo dinámico, no de un portal tradicional.
+
+Desktop:
+
+```text
+┌───────────────┬──────────────────────────┬────────────────────┐
+│ Navegación    │ Feed principal           │ Ahora              │
+│               │                          │                    │
+│               │                          │ Cerca tuyo         │
+└───────────────┴──────────────────────────┴────────────────────┘
+```
+
+---
+
+# 50. NAVEGACIÓN DEL MVP
+
+No implementar las opciones que necesitan cuenta.
+
+En MVP:
+
+* Inicio
+* En vivo
+* Buscar
+* Local
+
+NO mostrar todavía como funcionalidades activas:
+
+* Seguidos;
+* Notificaciones;
+* Guardados;
+* Perfil.
+
+No crear pantallas falsas para estas opciones.
+
+Podrán agregarse posteriormente.
+
+---
+
+# 51. FEED PRINCIPAL
+
+Centro de la Home.
+
+No cronológico puro.
+
+Debe mezclar:
+
+* relevancia;
+* actualidad;
+* cercanía a la localidad seleccionada.
+
+No existe personalización por usuario todavía.
+
+Por tanto NO implementar todavía un verdadero:
+
+`Para vos`
+
+basado en comportamiento.
+
+Usar en MVP:
+
+* Principal
+* Local
+* Argentina
+
+`Principal` será en el futuro `Para vos`.
+
+---
+
+# 52. RANKING DEL FEED
+
+Crear un servicio:
+
+`FeedRankingService`
+
+No mezclar esta lógica directamente en controllers.
+
+Conceptualmente:
+
+```text
+feed_score =
+relevance
++
+freshness
++
+locality_boost
+```
+
+No introducir:
+
+* ideología;
+* “positivo”;
+* “negativo”;
+* engagement;
+* clickbait;
+* popularidad social.
+
+Los pesos deben estar centralizados y ser configurables.
+
+Ejemplo conceptual:
+
+```env
+FEED_RELEVANCE_WEIGHT=
+FEED_FRESHNESS_WEIGHT=
+FEED_LOCALITY_WEIGHT=
+```
+
+No importa inicialmente encontrar la fórmula perfecta.
+
+Sí importa que sea reemplazable y determinista.
+
+---
+
+# 53. RELEVANCIA
+
+Guardar:
+
+```text
+relevance_score: 0-100
+```
+
+La arquitectura debe permitir mejorar posteriormente el criterio editorial.
+
+No inventar sistemas basados en viralidad.
+
+La relevancia representa cuánto puede importar o resultar útil el suceso para una persona.
+
+No decide si algo se publica o no.
+
+Principalmente decide prioridad.
+
+---
+
+# 54. CARDS
+
+Cada card del feed debe mostrar:
+
+* localidad;
+* tiempo desde publicación;
+* titular;
+* resumen corto;
+* fuentes;
+* última actualización.
+
+Ejemplo:
+
+```text
+ROSARIO · hace 18 min
+
+Cortaron avenida Pellegrini tras un choque entre dos colectivos
+
+Dos unidades colisionaron esta tarde a la altura de Corrientes.
+Servicios de emergencia trabajan en la zona.
+
+Fuentes: Rosario3 · Municipalidad +2
+
+Actualizado hace 6 min
+```
+
+---
+
+# 55. ACCIONES DE CARD
+
+Como no tenemos cuentas:
+
+NO implementar:
+
+* Seguir;
+* Comentar;
+* Guardar.
+
+Sí puede existir:
+
+`Compartir`
+
+porque puede utilizar:
+
+* Web Share API;
+* copiar enlace.
+
+No requiere backend social.
+
+---
+
+# 56. IMÁGENES
+
+No obligar a cada noticia a tener imagen.
+
+Una noticia puede ser únicamente texto.
+
+Mostrar imagen solamente cuando exista una imagen útil asociada.
+
+En el MVP:
+
+guardar opcionalmente:
+
+`hero_image_url`
+
+No construir todavía:
+
+* procesamiento avanzado de imágenes;
+* almacenamiento R2 obligatorio;
+* generación automática;
+* galerías.
+
+---
+
+# 57. AHORA
+
+Panel derecho.
+
+Objetivo:
+
+dar la sensación de que están ocurriendo cosas mientras el lector utiliza Sin Línea.
+
+Ejemplo:
+
+```text
+AHORA
+
+19:03 · Córdoba
+Incendio en un depósito de zona industrial
+
+18:58 · Rosario
+Corte total en avenida Alberdi
+
+18:51 · Mendoza
+Defensa Civil emitió alerta por viento
+```
+
+Características:
+
+* compacto;
+* cronológico;
+* todo Argentina;
+* eventos y actualizaciones materiales;
+* hora;
+* localidad;
+* titular corto.
+
+No utilizar ranking complejo.
+
+Principalmente:
+
+`occurred_at DESC`
+
+o momento de actualización pública.
+
+---
+
+# 58. CERCA TUYO
+
+Debajo de Ahora.
+
+No utilizar geolocalización sofisticada todavía.
+
+El usuario podrá seleccionar una localidad.
+
+Ejemplo:
+
+`Rosario`
+
+Guardar selección en:
+
+`localStorage`
+
+No requiere cuenta.
+
+Cerca tuyo muestra acontecimientos recientes especialmente útiles en esa localidad:
+
+* cortes;
+* accidentes;
+* incendios;
+* transporte;
+* servicios;
+* seguridad;
+* alertas;
+* emergencias;
+* hechos locales relevantes.
+
+No hace falta que todos estos tipos tengan reglas específicas desde el día uno.
+
+Primero filtrar Events recientes por localidad y relevancia práctica.
+
+---
+
+# 59. SELECTOR DE LOCALIDAD
+
+Crear un selector sencillo.
+
+Ejemplo:
+
+```text
+Tu localidad: Rosario ▼
+```
+
+El usuario puede cambiarla.
+
+Persistir localmente.
+
+No almacenar perfiles.
+
+No solicitar permisos de GPS obligatoriamente.
+
+Podemos agregar detección automática posteriormente.
+
+---
+
+# 60. EN VIVO
+
+Ruta:
+
+`/live`
+
+o `/en-vivo`
+
+Debe ser el flujo cronológico puro.
+
+Sin algoritmo.
+
+Mostrar Events / actualizaciones públicas:
+
+```text
+19:03
+18:58
+18:51
+18:49
+...
+```
+
+Todo Argentina.
+
+Filtros simples por localidad pueden agregarse si son fáciles.
+
+No crear un sistema complejo.
+
+---
+
+# 61. BUSCAR
+
+Ruta:
+
+`/buscar`
+
+No desplegar Typesense todavía.
+
+Para MVP utilizar búsqueda PostgreSQL.
+
+Preferir:
+
+* PostgreSQL Full Text Search;
+
+o una implementación sencilla equivalente.
+
+Buscar:
+
+* titular;
+* resumen;
+* cuerpo;
+* localidad;
+* entidades.
+
+Encapsularlo en:
+
+`SearchService`
+
+para posteriormente sustituirlo por Typesense sin cambiar frontend.
+
+---
+
+# 62. LOCAL
+
+Ruta:
+
+`/local`
+
+Muestra feed filtrado por la localidad elegida.
+
+Ejemplo:
+
+```text
+Rosario
+```
+
+Puede reutilizar exactamente el componente del Feed.
+
+No duplicar lógica.
+
+---
+
+# 63. MOBILE
+
+En mobile:
+
+desaparecen las tres columnas.
+
+Feed ocupa pantalla.
+
+Navegación inferior:
+
+* Inicio
+* En vivo
+* Buscar
+* Local
+
+Ahora y Cerca tuyo deben seguir siendo accesibles de manera sencilla.
+
+Puede hacerse mediante:
+
+* sección horizontal;
+* drawer;
+* tabs;
+* bloques antes/después del feed.
+
+Elegir la opción más limpia.
+
+No construir una navegación móvil excesivamente compleja.
+
+---
+
+# 64. PÁGINA DEL ARTÍCULO
+
+Ruta:
+
+```text
+/noticias/[slug]
+```
+
+Debe mostrar:
+
+* localidad;
+* fecha;
+* titular;
+* resumen;
+* cuerpo;
+* última actualización;
+* fuentes utilizadas.
+
+Las fuentes deben enlazar a su URL original.
+
+No esconder las fuentes.
+
+---
+
+# 65. FUENTES EN EL ARTÍCULO
+
+Al final:
+
+```text
+Fuentes utilizadas
+
+Municipalidad de Rosario
+Rosario3
+La Capital
+...
+```
+
+No significa que todas tengan el mismo peso.
+
+Solo muestra de dónde provino evidencia.
+
+---
+
+# 66. ACTUALIZADO
+
+Cuando un artículo recibe cambio material:
+
+mostrar:
+
+```text
+Actualizado: 22:14
+```
+
+No mostrar una nueva hora porque se corrigió un typo interno.
+
+Solo cambios materiales.
+
+---
+
+# 67. EXPERIENCIA VISUAL
+
+Sin Línea debe verse como una aplicación moderna de información.
+
+No como:
+
+* diario tradicional;
+* WordPress genérico;
+* portal lleno de banners;
+* dashboard SaaS.
+
+Utilizar una interfaz sobria y moderna.
+
+Paleta principal:
+
+```text
+Fondo:            #111315
+Superficies:       #171A1D
+Bordes:            #2A2E33
+Texto principal:   #ECE8DF
+Texto secundario:  #A0A6AC
+Verde petróleo:    #4E6B66
+Azul grisáceo:     #60748A
+Ocre suave:        #A8844F
+```
+
+Crear CSS variables / Tailwind tokens.
+
+No llenar la interfaz de colores.
+
+No utilizar gradients llamativos.
+
+No utilizar glassmorphism exagerado.
+
+No hacer cards gigantes con bordes redondeados estilo SaaS.
+
+La información debe dominar.
+
+---
+
+# 68. REAL TIME
+
+La arquitectura objetivo utilizará SSE.
+
+Dentro del MVP podemos implementarlo una vez que el pipeline básico funcione.
+
+Endpoint conceptual:
+
+```text
+GET /api/v1/stream
+```
+
+Eventos:
+
+```text
+event.created
+event.updated
+article.published
+```
+
+Frontend puede actualizar:
+
+* Ahora;
+* En vivo;
+* Feed.
+
+Utilizar Redis Pub/Sub como canal interno.
+
+Si implementar SSE en el primer milestone complica la foundation:
+
+NO priorizarlo sobre el pipeline.
+
+Debe entrar después de tener publicación end-to-end funcionando.
+
+---
+
+# 69. API PÚBLICA
+
+Diseñar endpoints aproximadamente así:
+
+```text
+GET /api/v1/feed
+GET /api/v1/live
+GET /api/v1/now
+GET /api/v1/nearby
+GET /api/v1/search
+GET /api/v1/articles/{slug}
+GET /api/v1/localities
+GET /api/v1/stream
+```
+
+---
+
+# 70. FEED API
+
+Ejemplo:
+
+```text
+GET /api/v1/feed?scope=main&locality=Rosario&cursor=...
+```
+
+Scopes:
+
+```text
+main
+local
+argentina
+```
+
+Utilizar paginación mediante cursor si es razonable.
+
+Evitar offset para feeds grandes si no hace falta.
+
+---
+
+# 71. LIVE API
+
+```text
+GET /api/v1/live?cursor=...
+```
+
+Orden:
+
+cronológico descendente.
+
+---
+
+# 72. NOW API
+
+```text
+GET /api/v1/now
+```
+
+Devolver solamente últimos sucesos / updates materiales.
+
+Payload mínimo.
+
+---
+
+# 73. NEARBY API
+
+```text
+GET /api/v1/nearby?locality=Rosario
+```
+
+Ventana de tiempo configurable:
+
+```env
+NEARBY_WINDOW_HOURS=12
+```
+
+---
+
+# 74. ADMIN API
+
+Ejemplo:
+
+```text
+GET    /api/v1/admin/sources
+POST   /api/v1/admin/sources
+PATCH  /api/v1/admin/sources/{id}
+POST   /api/v1/admin/sources/{id}/poll
+
+GET    /api/v1/admin/events
+GET    /api/v1/admin/events/{id}
+
+POST   /api/v1/admin/events/{id}/research
+POST   /api/v1/admin/events/{id}/reprocess
+POST   /api/v1/admin/events/{id}/regenerate
+POST   /api/v1/admin/events/{id}/publish
+POST   /api/v1/admin/events/{id}/archive
+```
+
+No es obligatorio copiar exactamente estas URLs si existe una convención mejor.
+
+---
+
+# 75. CELERY
+
+Separar conceptualmente jobs:
+
+```text
+ingestion
+event_detection
+research
+claim_extraction
+claim_resolution
+verification
+writing
+auditing
+publishing
+```
+
+No hace falta crear nueve workers físicos.
+
+Al comienzo puede haber:
+
+```text
+worker-general
+worker-ai
+```
+
+o incluso un worker único configurable.
+
+Las queues pueden existir lógicamente.
+
+---
+
+# 76. IDEMPOTENCIA
+
+Obligatoria.
+
+Ejemplos:
+
+poll RSS dos veces:
+
+→ no crear dos SourceItems.
+
+Procesar SourceItem dos veces:
+
+→ no crear dos Events.
+
+Ejecutar writing dos veces:
+
+→ no publicar dos Articles.
+
+Celery puede reintentar sin miedo.
+
+---
+
+# 77. RETRIES
+
+Network failures:
+
+usar retry con backoff.
+
+Errores permanentes:
+
+marcar FAILED.
+
+No hacer loops infinitos.
+
+Ejemplo:
+
+```env
+JOB_MAX_RETRIES=3
+```
+
+---
+
+# 78. LOGGING
+
+Logging estructurado.
+
+Cada stage debería incluir:
+
+```text
+event_id
+source_item_id
+stage
+provider
+model_role
+duration
+status
+```
+
+No imprimir API keys.
+
+---
+
+# 79. COST CONTROL
+
+Toda llamada de IA debe pasar por un servicio común.
+
+Registrar como mínimo:
+
+```text
+provider
+model_role
+model
+input_tokens
+output_tokens
+duration
+event_id
+```
+
+Si el SDK ofrece coste directamente, guardarlo.
+
+Si no:
+
+no inventarlo.
+
+Esto permitirá medir cuánto cuesta procesar noticias.
+
+Puede almacenarse en:
+
+`ai_runs`
+
+o una tabla equivalente.
+
+No necesitamos un dashboard económico avanzado ahora.
+
+---
+
+# 80. PROMPTS
+
+Los prompts NO deben quedar hardcodeados dentro de services enormes.
+
+Utilizar:
+
+```text
+app/prompts/
+```
+
+Ejemplo:
+
+```text
+event_extraction.md
+claim_extraction.md
+claim_resolution.md
+deduplication.md
+verification.md
+article_writing.md
+article_audit.md
+```
+
+Versionarlos junto con el código.
+
+---
+
+# 81. TESTING
+
+No llamar APIs reales durante tests.
+
+Crear fake providers.
+
+Ejemplo:
+
+```python
+FakeLLMProvider
+FakeEmbeddingProvider
+FakeSearchProvider
+```
+
+---
+
+# 82. TESTS PRIORITARIOS
+
+## Source ingestion
+
+* nuevo item;
+* item repetido;
+* hash idéntico;
+* fuente desactivada;
+* fuente no vigilada no se pollea.
+
+## Event detection
+
+* crea Event;
+* encuentra Event existente;
+* duplicado evidente;
+* duplicado ambiguo.
+
+## Claims
+
+* supported;
+* single source;
+* conflicting.
+
+## Updates
+
+* repetición no genera ArticleVersion;
+* nuevo claim material sí;
+* corrección crea nueva versión.
+
+## Publishing
+
+* draft no público;
+* READY_FOR_REVIEW;
+* publish manual;
+* artículo publicado aparece en feed.
+
+---
+
+# 83. INTEGRATION TEST PRINCIPAL
+
+Crear un escenario completo fake:
+
+### Fuente A
+
+publica:
+
+> Dos colectivos chocaron en Pellegrini y Corrientes.
+
+### Fuente B encontrada mediante FakeSearch
+
+publica:
+
+> El choque dejó seis heridos.
+
+### Fuente C
+
+informa:
+
+> El tránsito permanece cortado.
+
+El pipeline debe terminar con:
+
+```text
+1 Event
+3 SourceItems
+claims asociados
+Article draft
+READY_FOR_REVIEW
+```
+
+Después:
+
+```text
+admin publish
+```
+
+y el artículo debe aparecer:
+
+* `/feed`;
+* `/live`;
+* `/now`;
+* `/local?locality=Rosario`.
+
+---
+
+# 84. NO MOCKEAR LA APLICACIÓN REAL
+
+Los proveedores pueden estar fakes durante tests.
+
+Pero la arquitectura real debe permitir utilizar APIs verdaderas mediante `.env`.
+
+No quiero endpoints que devuelvan JSON hardcodeado fingiendo que el backend existe.
+
+---
+
+# 85. CONFIGURACIÓN
+
+Crear `.env.example`.
+
+Nunca incluir secretos.
+
+Debe incluir como mínimo:
+
+```env
+DATABASE_URL=
+REDIS_URL=
+
+ADMIN_PASSWORD=
+APP_SECRET=
+
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+DEEPSEEK_API_KEY=
+VOYAGE_API_KEY=
+BRAVE_API_KEY=
+
+LIGHT_PROCESSING_PROVIDER=
+LIGHT_PROCESSING_MODEL=
+
+AMBIGUOUS_DEDUP_PROVIDER=
+AMBIGUOUS_DEDUP_MODEL=
+
+CLAIM_RESOLUTION_PROVIDER=
+CLAIM_RESOLUTION_MODEL=
+
+VERIFICATION_PROVIDER=
+VERIFICATION_MODEL=
+
+WRITING_PROVIDER=
+WRITING_MODEL=
+
+AUDITING_PROVIDER=
+AUDITING_MODEL=
+
+AUTO_PUBLISH=false
+
+MAX_RESEARCH_QUERIES_PER_EVENT=
+MAX_RESEARCH_RESULTS_PER_QUERY=
+MAX_AUDIT_REWRITE_CYCLES=
+
+JOB_MAX_RETRIES=
+
+FEED_RELEVANCE_WEIGHT=
+FEED_FRESHNESS_WEIGHT=
+FEED_LOCALITY_WEIGHT=
+
+NEARBY_WINDOW_HOURS=
+```
+
+---
+
+# 86. NO INVENTAR CONFIGURACIONES DE MODELOS
+
+No asumir que:
+
+```text
+gpt-5.6-luna
+```
+
+es necesariamente el ID exacto de API.
+
+El nombre conceptual y el ID real son cosas diferentes.
+
+El modelo se configura.
+
+---
+
+# 87. MANEJO DE ERRORES DE IA
+
+Si un provider devuelve:
+
+* JSON inválido;
+* timeout;
+* rate limit;
+* error transitorio;
+
+manejarlo explícitamente.
+
+Structured output inválido:
+
+1. retry limitado;
+2. registrar error;
+3. FAILED si no se puede recuperar.
+
+Nunca persistir datos corruptos silenciosamente.
+
+---
+
+# 88. ESTADOS DEL PIPELINE
+
+Evitar estados imposibles.
+
+Ejemplo:
+
+un artículo no puede pasar:
+
+```text
+PROCESSING
+→ PUBLISHED
+```
+
+sin:
+
+```text
+WRITING
+AUDITING
+READY_FOR_REVIEW
+```
+
+durante el MVP.
+
+Centralizar las transiciones.
+
+---
+
+# 89. NO USAR BOOLS PARA TODO
+
+Cuando algo tiene varios estados:
+
+usar Enum.
+
+Por ejemplo:
+
+```text
+claim_status
+event_status
+article_status
+pipeline_status
+```
+
+No:
+
+```text
+is_processed
+is_processing
+is_failed
+is_ready
+...
+```
+
+---
+
+# 90. FECHAS
+
+Guardar timestamps en UTC.
+
+Frontend presenta hora local apropiada.
+
+Sin Línea está inicialmente orientado a Argentina.
+
+No hardcodear UTC-3 dentro de la base.
+
+---
+
+# 91. SLUGS
+
+Articles necesitan URLs estables.
+
+Ejemplo:
+
+```text
+/noticias/choque-colectivos-pellegrini-corrientes-rosario
+```
+
+El slug no debe cambiar porque el titular se modifique ligeramente.
+
+---
+
+# 92. SOURCE TRACEABILITY
+
+Toda información importante debe poder llegar hasta:
+
+```text
+Article
+↓
+Claim
+↓
+ClaimEvidence
+↓
+SourceItem
+↓
+Source
+```
+
+Esta trazabilidad es una de las propiedades esenciales del sistema.
+
+---
+
+# 93. EL ARTÍCULO NO ES LA FUENTE DE VERDAD
+
+Nunca utilizar el cuerpo del Article como lugar primario donde vive el conocimiento del Event.
+
+Los datos viven en:
+
+* Event;
+* Claims;
+* Evidence;
+* Sources.
+
+El artículo puede regenerarse.
+
+---
+
+# 94. SEARCH ENGINE FUTURO
+
+Hoy:
+
+PostgreSQL.
+
+Mañana:
+
+Typesense.
+
+Por eso:
+
+```python
+SearchService
+```
+
+debe aislar al frontend de la implementación.
+
+No levantar Typesense en Docker todavía.
+
+---
+
+# 95. GEOGRAFÍA FUTURA
+
+Hoy:
+
+```text
+province
+locality
+lat
+lon
+precision
+```
+
+Mañana:
+
+PostGIS.
+
+No instalar PostGIS todavía únicamente por el mapa futuro.
+
+---
+
+# 96. INFRAESTRUCTURA FUTURA
+
+Objetivo futuro:
+
+* Cloudflare;
+* R2;
+* Fly.io São Paulo;
+* Sentry;
+* OpenTelemetry;
+* Grafana.
+
+Pero NO forma parte del primer milestone.
+
+Docker local debe funcionar primero.
+
+---
+
+# 97. README
+
+Mantener README actualizado.
+
+Debe explicar:
+
+* qué es Sin Línea;
+* arquitectura;
+* cómo iniciar;
+* env vars;
+* migrations;
+* backend;
+* frontend;
+* Celery;
+* cómo crear una fuente;
+* cómo iniciar polling;
+* cómo correr tests.
+
+No escribir documentación enorme de features inexistentes.
+
+---
+
+# 98. DX
+
+Quiero iniciar todo idealmente con:
+
+```bash
+docker compose up
+```
+
+o pocos comandos claramente documentados.
+
+Servicios iniciales:
+
+```text
+postgres
+redis
+api
+worker
+web
+```
+
+No más si no son necesarios.
+
+---
+
+# 99. MIGRATIONS
+
+Nunca depender de:
+
+`create_all()`
+
+como sistema de producción.
+
+Utilizar Alembic desde el comienzo.
+
+---
+
+# 100. PRIMEROS MILESTONES
+
+No hagas todo este documento de una sola vez.
+
+---
+
+## MILESTONE 0 — FOUNDATION
+
+Objetivo:
+
+tener infraestructura local funcional.
+
+Implementar:
+
+* estructura repositorio;
+* FastAPI;
+* Next.js;
+* PostgreSQL;
+* pgvector;
+* Redis;
+* Celery;
+* Docker Compose;
+* `.env.example`;
+* health endpoints;
+* Alembic;
+* logging;
+* tests base;
+* CI básico.
+
+Resultado:
+
+```text
+docker compose up
+```
+
+levanta la aplicación.
+
+---
+
+# 101. MILESTONE 1 — CORE DOMAIN
+
+Implementar modelos:
+
+* Source;
+* SourceItem;
+* Event;
+* EventSource;
+* Claim;
+* ClaimEvidence;
+* Entity;
+* EventEntity;
+* EventUpdate;
+* Article;
+* ArticleVersion;
+* Correction;
+* PipelineRun.
+
+Agregar:
+
+* repositories;
+* services esenciales;
+* migrations;
+* schemas;
+* tests.
+
+No implementar todavía IA real.
+
+---
+
+# 102. MILESTONE 2 — SOURCES + INGESTION
+
+Implementar:
+
+* Admin mínimo;
+* CRUD sources;
+* `is_monitored`;
+* RSS polling;
+* HTTP ingestion;
+* Trafilatura;
+* hashes;
+* SourceItems;
+* Celery;
+* retries;
+* ingesta manual desde Admin.
+
+Este milestone es especialmente importante.
+
+Al terminar quiero poder:
+
+1. abrir Admin;
+2. agregar una fuente RSS;
+3. marcarla como vigilada;
+4. ejecutar poll;
+5. ver SourceItems nuevos en DB.
+
+---
+
+# 103. MILESTONE 3 — EVENT DETECTION
+
+Agregar:
+
+* provider de procesamiento ligero;
+* `EventCandidate`;
+* Voyage embeddings;
+* búsqueda de candidatos;
+* deduplicación;
+* Terra solamente en ambiguos;
+* crear o vincular Event.
+
+Al terminar:
+
+un SourceItem debe convertirse realmente en Event.
+
+---
+
+# 104. MILESTONE 4 — RESEARCH
+
+Agregar:
+
+* SearchProvider;
+* Brave adapter;
+* queries dirigidas;
+* HTTP fetch;
+* Trafilatura;
+* descubrimiento de fuentes;
+* registro `is_monitored=false`;
+* EventSource.
+
+---
+
+# 105. MILESTONE 5 — CLAIMS
+
+Agregar:
+
+* claim extraction;
+* claim normalization;
+* ClaimEvidence;
+* DeepSeek resolution;
+* estados;
+* conflictos.
+
+---
+
+# 106. MILESTONE 6 — VERIFICATION
+
+Agregar:
+
+* VerificationPolicy;
+* reglas;
+* búsquedas específicas;
+* Sol escalado.
+
+No verificar todo.
+
+---
+
+# 107. MILESTONE 7 — WRITING
+
+Agregar:
+
+* ArticleContext;
+* Claude adapter;
+* titular;
+* summary;
+* body;
+* article draft;
+* MaterialChangeDetector;
+* versioning.
+
+---
+
+# 108. MILESTONE 8 — AUDIT
+
+Agregar:
+
+* Sol audit;
+* issues;
+* rewrite cycle;
+* READY_FOR_REVIEW.
+
+---
+
+# 109. MILESTONE 9 — PUBLICATION
+
+Agregar:
+
+* publicación manual;
+* public article API;
+* feed API;
+* live;
+* now;
+* local;
+* search PostgreSQL.
+
+---
+
+# 110. MILESTONE 10 — PRODUCT UI
+
+Construir finalmente:
+
+* Home;
+* layout tres columnas;
+* feed;
+* Ahora;
+* Cerca tuyo;
+* En vivo;
+* Buscar;
+* Local;
+* página noticia;
+* responsive mobile.
+
+No construir primero una UI bonita sobre datos falsos.
+
+El frontend público debe apoyarse sobre el pipeline real.
+
+---
+
+# 111. MILESTONE 11 — REAL TIME
+
+Cuando todo lo anterior funcione:
+
+* Redis Pub/Sub;
+* SSE;
+* actualización de Ahora;
+* actualización de En vivo;
+* invalidación/refresh del feed.
+
+---
+
+# 112. QUÉ QUIERO QUE HAGAS AHORA
+
+Tu trabajo actual NO es implementar los once milestones de una vez.
+
+Haz lo siguiente:
+
+### Paso 1
+
+Inspecciona el repositorio completo.
+
+### Paso 2
+
+Explica brevemente qué existe y qué falta.
+
+### Paso 3
+
+Define cómo adaptarás Milestone 0 al estado actual.
+
+### Paso 4
+
+COMIENZA inmediatamente la implementación.
+
+### Paso 5
+
+Completa primero:
+
+**Milestone 0 — Foundation**
+
+y después, si queda todo estable:
+
+**Milestone 1 — Core Domain**
+
+No avances a IA real mientras foundation y dominio no funcionen correctamente.
+
+---
+
+# 113. CRITERIOS DE FINALIZACIÓN DEL PRIMER TRABAJO
+
+Antes de considerar terminados Foundation + Core:
+
+debe funcionar:
+
+```bash
+docker compose up
+```
+
+Backend:
+
+```text
+GET /health
+→ 200
+```
+
+PostgreSQL conectado.
+
+Redis conectado.
+
+Celery inicia.
+
+Migrations funcionan.
+
+Frontend inicia.
+
+Modelos principales existen.
+
+Tests principales pasan.
+
+Frontend puede comunicarse con Backend.
+
+No debe haber secrets commiteados.
+
+---
+
+# 114. CALIDAD DE CÓDIGO
+
+Quiero código:
+
+* claro;
+* simple;
+* tipado;
+* modular;
+* testeable;
+* mantenible.
+
+No quiero:
+
+* clases enormes;
+* funciones de 500 líneas;
+* lógica de negocio dentro de controllers;
+* prompts dentro de endpoints;
+* SQL disperso;
+* proveedores externos acoplados al dominio.
+
+---
+
+# 115. PRINCIPIO YAGNI
+
+Si algo no es necesario todavía:
+
+no lo construyas.
+
+Sin Línea debe crecer desde un núcleo sólido.
+
+No desde una arquitectura gigantesca imaginaria.
+
+---
+
+# 116. PRINCIPIO DE COSTE
+
+Antes de llamar IA:
+
+pregunta conceptualmente:
+
+> ¿esto puede resolverse correctamente mediante código?
+
+Si sí:
+
+usar código.
+
+Ejemplo:
+
+duplicado URL:
+
+hash.
+
+No LLM.
+
+Comparar timestamps:
+
+código.
+
+No LLM.
+
+Comprobar si una fuente está registrada:
+
+SQL.
+
+No LLM.
+
+Interpretar si dos descripciones distintas narran el mismo suceso:
+
+embedding / LLM si realmente es necesario.
+
+---
+
+# 117. PRINCIPIO DE INCERTIDUMBRE
+
+El sistema debe soportar naturalmente:
+
+> no sabemos.
+
+No obligues a ningún modelo a elegir entre:
+
+A o B
+
+cuando la evidencia no permite hacerlo.
+
+`CONFLICTING`
+
+y:
+
+`UNCERTAIN`
+
+son estados válidos del conocimiento.
+
+---
+
+# 118. PRINCIPIO DE ACTUALIZACIÓN
+
+Sin Línea no publica una sucesión infinita de URLs sobre el mismo hecho.
+
+El Event vive.
+
+La información evoluciona.
+
+El Article evoluciona.
+
+Ejemplo:
+
+```text
+14:00
+Incendio detectado.
+
+14:12
+Calle cortada.
+
+14:23
+Bomberos confirma que no hay heridos.
+
+14:57
+Informan causa preliminar.
+```
+
+Debe seguir existiendo:
+
+```text
+1 Event
+1 Article
+4 EventUpdates
+N ArticleVersions cuando corresponda
+```
+
+---
+
+# 119. PRINCIPIO DEL PRODUCTO
+
+La Home debe transmitir tres niveles:
+
+### CENTRO
+
+**Lo importante para entender qué está pasando.**
+
+Feed ordenado por:
+
+* relevancia;
+* actualidad;
+* cercanía.
+
+### AHORA
+
+**Lo que acaba de pasar.**
+
+Cronológico y rápido.
+
+### CERCA TUYO
+
+**Lo que puede afectarme directamente donde estoy.**
+
+Localidad seleccionada.
+
+Esta separación debe mantenerse clara tanto en backend como frontend.
+
+---
+
+# 120. DEFINICIÓN FINAL DEL MVP
+
+El MVP estará completo cuando yo pueda:
+
+1. entrar al Admin;
+2. cargar manualmente varias fuentes;
+3. marcar cuáles quiero vigilar;
+4. dejar el sistema consultándolas;
+5. detectar automáticamente publicaciones nuevas;
+6. transformar esas publicaciones en Events;
+7. evitar duplicados;
+8. investigar cada Event en Internet;
+9. descubrir otras fuentes;
+10. extraer claims;
+11. representar contradicciones;
+12. verificar únicamente cuando corresponde;
+13. generar un artículo;
+14. auditarlo;
+15. revisarlo en Admin;
+16. publicarlo;
+17. verlo en Home;
+18. verlo en En vivo;
+19. verlo en Ahora;
+20. verlo en Local;
+21. buscarlo;
+22. actualizar ese mismo Event cuando aparezca información nueva;
+23. mantener historial de versiones;
+24. conservar evidencia y fuentes.
+
+Si conseguimos eso:
+
+**tenemos el verdadero MVP de Sin Línea.**
+
+No necesitamos todavía ninguna otra feature.
+
+---
+
+# 121. REGLA FINAL
+
+Ante cualquier duda entre:
+
+**hacer más**
+
+o:
+
+**hacer correctamente el núcleo**
+
+elige:
+
+**hacer correctamente el núcleo.**
+
+No sacrifiques:
+
+* trazabilidad;
+* idempotencia;
+* modelo Event-centric;
+* claims;
+* evidencia;
+* versionado;
+* desacoplamiento de modelos;
+
+para terminar más rápido una interfaz.
+
+Sin Línea se construye alrededor de:
+
+**Radar → Suceso → Evidencia → Claims → Investigación → Resolución → Verificación cuando corresponde → Redacción → Auditoría → Publicación → Actualización continua.**
+
+Empieza ahora inspeccionando el repositorio y construyendo Foundation.  el proyecto este no tiene nada aun, comienza todo desde 0 y construye este mvp que está detallado.
