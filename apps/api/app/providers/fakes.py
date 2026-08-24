@@ -12,6 +12,7 @@ class FakeStructuredLLM:
     def __init__(self, responses: dict[str, BaseModel | Exception | list] | None = None) -> None:
         self.responses = responses or {}
         self.calls: list[str] = []
+        self.user_prompts: list[str] = []
 
     def generate_structured(
         self,
@@ -21,6 +22,7 @@ class FakeStructuredLLM:
         schema: type[T],
     ) -> T:
         self.calls.append(schema.__name__)
+        self.user_prompts.append(user_prompt)
         payload = self.responses.get(schema.__name__)
         if payload is None:
             raise ProviderNotConfiguredError(f"No hay fake para {schema.__name__}")

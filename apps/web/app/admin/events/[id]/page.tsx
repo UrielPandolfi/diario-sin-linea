@@ -12,6 +12,7 @@ export default function AdminEventDetailPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [researching, setResearching] = useState(false);
   const [resolvingClaims, setResolvingClaims] = useState(false);
+  const [verifying, setVerifying] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -70,6 +71,32 @@ export default function AdminEventDetailPage() {
     }
   }
 
+  async function onVerify() {
+    if (!params.id) return;
+    setVerifying(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`/api/v1/admin/events/${params.id}/verify`, {
+        method: "POST",
+      });
+      if (response.status === 409) {
+        setNotice("Ya hay una verificación en curso.");
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Error ${response.status}`);
+      }
+      setNotice("Verificación encolada.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo verificar.");
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   useEffect(() => {
     if (!params.id) return;
     void load().catch((err: unknown) => {
@@ -113,6 +140,14 @@ export default function AdminEventDetailPage() {
               className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
             >
               {resolvingClaims ? "Resolviendo…" : "Resolver claims"}
+            </button>
+            <button
+              type="button"
+              disabled={verifying}
+              onClick={() => void onVerify()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {verifying ? "Verificando…" : "Verificar"}
             </button>
           </div>
         ) : null}

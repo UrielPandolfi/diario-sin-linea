@@ -118,6 +118,44 @@ def _outlet_token(item: SourceItem, source: Source | None) -> str:
     return (domain or str(item.source_id)).lower()
 
 
+def _claim_published_at(claim: Claim) -> datetime | None:
+    supports: list[datetime] = []
+    others: list[datetime] = []
+    for row in claim.evidence:
+        item = row.source_item
+        if item is None or item.published_at is None:
+            continue
+        when = _aware(item.published_at)
+        if when is None:
+            continue
+        if row.evidence_type == EvidenceType.SUPPORTS:
+            supports.append(when)
+        else:
+            others.append(when)
+    pool = supports or others
+    return max(pool) if pool else None
+
+
+def _competing_clock(members: list[Claim]) -> dict[Claim, datetime] | None:
+    occurred = {claim: _aware(claim.occurred_at) for claim in members}
+    published = {claim: _claim_published_at(claim) for claim in members}
+    occurred_complete = all(value is not None for value in occurred.values())
+    published_complete = all(value is not None for value in published.values())
+
+    if occurred_complete:
+        if len(set(occurred.values())) > 1:
+            return occurred  # type: ignore[return-value]
+        if published_complete and len(set(published.values())) > 1:
+            return published  # type: ignore[return-value]
+        if published_complete or all(value is None for value in published.values()):
+            return occurred  # type: ignore[return-value]
+        return None
+
+    if published_complete:
+        return published  # type: ignore[return-value]
+    return None
+
+
 def _independent_support_tokens(claim: Claim) -> set[str]:
     tokens: set[str] = set()
     for row in claim.evidence:
@@ -466,9 +504,11 @@ class ClaimService:
         for comp_key, members in groups.items():
             lines.append(f"\ncomparison_key={comp_key}")
             for index, claim in members:
+                occurred = claim.occurred_at.isoformat() if claim.occurred_at else ""
                 lines.append(
                     f"{index}. assertion_key={assertion_key_for(claim)}\n"
                     f"canonical_text={claim.canonical_text}\n"
+                    f"occurred_at={occurred}\n"
                     f"subject={claim.subject or ''} predicate={claim.predicate or ''} "
                     f"object_text={claim.object_text or ''} normalized_value={claim.normalized_value or ''} "
                     f"unit={claim.unit or ''}"
@@ -476,11 +516,14 @@ class ClaimService:
                 for row in claim.evidence:
                     item = row.source_item
                     domain = ""
+                    published = ""
                     if item is not None:
                         domain = _outlet_token(item, item.source if item.source is not None else None)
+                        if item.published_at is not None:
+                            published = item.published_at.isoformat()
                     lines.append(
                         f"  - evidence_type={row.evidence_type.value} domain={domain} "
-                        f"url={row.source_url or ''} excerpt={row.excerpt or ''}"
+                        f"published_at={published} url={row.source_url or ''} excerpt={row.excerpt or ''}"
                     )
         return "\n".join(lines)
 
@@ -500,6 +543,10 @@ class ClaimService:
             if item is not None and item.needs_external_verification:
                 needs.append({"claim_id": str(claim.id), "claim_ref": index})
 
+        self._reconcile_competing_values(claims)
+        return needs
+
+    def _reconcile_competing_values(self, claims: list[Claim]) -> None:
         groups: dict[str, list[Claim]] = defaultdict(list)
         for claim in claims:
             groups[comparison_key_for(claim)].append(claim)
@@ -507,10 +554,26 @@ class ClaimService:
             keys = {assertion_key_for(claim) for claim in members}
             if len(keys) < 2:
                 continue
+            clock = _competing_clock(members)
+            if clock is None:
+                for claim in members:
+                    if claim.status not in {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}:
+                        claim.status = ClaimStatus.UNCERTAIN
+                continue
+            latest = max(clock.values())
+            latest_members = [claim for claim in members if clock[claim] == latest]
             for claim in members:
-                if claim.status not in _PROTECTED_STATUSES:
-                    claim.status = ClaimStatus.CONFLICTING
-        return needs
+                if clock[claim] < latest and claim.status != ClaimStatus.DISPROVEN:
+                    claim.status = ClaimStatus.OUTDATED
+            latest_keys = {assertion_key_for(claim) for claim in latest_members}
+            if len(latest_keys) >= 2:
+                for claim in latest_members:
+                    if claim.status != ClaimStatus.DISPROVEN:
+                        claim.status = ClaimStatus.CONFLICTING
+                continue
+            for claim in latest_members:
+                if claim.status == ClaimStatus.CONFLICTING:
+                    claim.status = self._clamp_supported(claim, self._heuristic_status(claim))
 
     def _heuristic_status(self, claim: Claim) -> ClaimStatus:
         types = {row.evidence_type for row in claim.evidence}
@@ -524,11 +587,15 @@ class ClaimService:
         return ClaimStatus.UNCERTAIN
 
     def _clamp_supported(self, claim: Claim, status: ClaimStatus) -> ClaimStatus:
-        if status != ClaimStatus.SUPPORTED:
-            return status
-        tokens = _independent_support_tokens(claim)
-        if len(tokens) >= 2:
-            return ClaimStatus.SUPPORTED
-        if len(tokens) == 1:
-            return ClaimStatus.SINGLE_SOURCE
-        return ClaimStatus.UNCERTAIN
+        return clamp_supported_status(claim, status)
+
+
+def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
+    if status != ClaimStatus.SUPPORTED:
+        return status
+    tokens = _independent_support_tokens(claim)
+    if len(tokens) >= 2:
+        return ClaimStatus.SUPPORTED
+    if len(tokens) == 1:
+        return ClaimStatus.SINGLE_SOURCE
+    return ClaimStatus.UNCERTAIN

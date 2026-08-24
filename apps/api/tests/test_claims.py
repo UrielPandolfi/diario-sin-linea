@@ -45,7 +45,16 @@ def _source(session: Session, **overrides):
     return SourceService(session).create(SourceCreate(**payload))
 
 
-def _item(session: Session, source_id, *, url: str, title: str, body: str, content_hash: str):
+def _item(
+    session: Session,
+    source_id,
+    *,
+    url: str,
+    title: str,
+    body: str,
+    content_hash: str,
+    published_at: datetime | None = None,
+):
     return SourceItemService(session).ingest(
         SourceItemCreate(
             source_id=source_id,
@@ -54,6 +63,7 @@ def _item(session: Session, source_id, *, url: str, title: str, body: str, conte
             content_hash=content_hash,
             title=title,
             clean_text=body,
+            published_at=published_at,
         )
     ).item
 
@@ -85,6 +95,7 @@ def _extracted(
     object_text: str | None = None,
     normalized_value: str | None = None,
     unit: str | None = None,
+    occurred_at: datetime | None = None,
 ) -> ExtractedClaim:
     return ExtractedClaim(
         canonical_text=text,
@@ -95,6 +106,7 @@ def _extracted(
         object_text=object_text or text,
         normalized_value=normalized_value,
         unit=unit,
+        occurred_at=occurred_at,
         evidence=evidence,
     )
 
@@ -297,14 +309,27 @@ def test_conflicting_supports_and_contradicts(db_session: Session) -> None:
     assert _event_claims(db_session, event.id)[0].status == ClaimStatus.CONFLICTING
 
 
-def test_conflicting_competing_values(db_session: Session) -> None:
+def test_conflicting_same_moment_competing_values(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
     source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
     source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
     item_a = _item(
-        db_session, source_a.id, url="https://a.test/n", title="A", body="Se registraron 6 heridos.", content_hash="ha"
+        db_session,
+        source_a.id,
+        url="https://a.test/n",
+        title="A",
+        body="Se registraron 4 heridos.",
+        content_hash="ha",
+        published_at=when,
     )
     item_b = _item(
-        db_session, source_b.id, url="https://b.test/n", title="B", body="Se registraron 4 heridos.", content_hash="hb"
+        db_session,
+        source_b.id,
+        url="https://b.test/n",
+        title="B",
+        body="Se registraron 6 heridos.",
+        content_hash="hb",
+        published_at=when,
     )
     event = _event(db_session, item_a)
     _attach(db_session, event, item_b)
@@ -312,26 +337,28 @@ def test_conflicting_competing_values(db_session: Session) -> None:
         ClaimExtractionBatch(
             claims=[
                 _extracted(
-                    text="Se registraron 6 heridos",
-                    normalized_value="6",
-                    object_text="6 heridos",
-                    unit="personas",
-                    predicate="cantidad_heridos",
-                    evidence=[
-                        ExtractedEvidence(
-                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9
-                        )
-                    ],
-                ),
-                _extracted(
                     text="Se registraron 4 heridos",
                     normalized_value="4",
                     object_text="4 heridos",
                     unit="personas",
                     predicate="cantidad_heridos",
+                    occurred_at=when,
                     evidence=[
                         ExtractedEvidence(
-                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+                _extracted(
+                    text="Se registraron 6 heridos",
+                    normalized_value="6",
+                    object_text="6 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=when,
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9
                         )
                     ],
                 ),
@@ -347,9 +374,139 @@ def test_conflicting_competing_values(db_session: Session) -> None:
 
     _service(db_session, llm).resolve(event.id, trigger="admin")
 
-    statuses = {claim.status for claim in _event_claims(db_session, event.id)}
-    assert statuses == {ClaimStatus.CONFLICTING}
+    claims = _event_claims(db_session, event.id)
+    assert {claim.status for claim in claims} == {ClaimStatus.CONFLICTING}
     assert db_session.scalar(select(func.count()).select_from(Claim).where(Claim.event_id == event.id)) == 2
+
+
+def test_later_count_is_update_not_automatic_conflict(db_session: Session) -> None:
+    at_15 = datetime(2026, 8, 24, 15, 0, tzinfo=timezone.utc)
+    at_17 = datetime(2026, 8, 24, 17, 0, tzinfo=timezone.utc)
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/15",
+        title="A",
+        body="A las 15:00 se registraron 4 heridos.",
+        content_hash="ha",
+        published_at=at_15,
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/17",
+        title="B",
+        body="A las 17:00 se confirmaron 6 heridos.",
+        content_hash="hb",
+        published_at=at_17,
+    )
+    event = _event(db_session, item_a)
+    _attach(db_session, event, item_b)
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Se registraron 4 heridos",
+                    normalized_value="4",
+                    object_text="4 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=at_15,
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+                _extracted(
+                    text="Se confirmaron 6 heridos",
+                    normalized_value="6",
+                    object_text="6 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=at_17,
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="grupo"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="grupo"),
+            ]
+        ),
+    )
+
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+
+    by_value = {claim.normalized_value: claim.status for claim in _event_claims(db_session, event.id)}
+    assert by_value["4"] == ClaimStatus.OUTDATED
+    assert by_value["6"] == ClaimStatus.SINGLE_SOURCE
+    assert ClaimStatus.CONFLICTING not in by_value.values()
+    resolution_prompt = llm.user_prompts[llm.calls.index("ClaimResolutionBatch")]
+    assert "occurred_at=" in resolution_prompt
+    assert "published_at=" in resolution_prompt
+    assert "15:00" in resolution_prompt or "15:00:00" in resolution_prompt
+    assert "17:00" in resolution_prompt or "17:00:00" in resolution_prompt
+
+
+def test_competing_values_without_time_are_uncertain(db_session: Session) -> None:
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session, source_a.id, url="https://a.test/n", title="A", body="Se registraron 4 heridos.", content_hash="ha"
+    )
+    item_b = _item(
+        db_session, source_b.id, url="https://b.test/n", title="B", body="Se registraron 6 heridos.", content_hash="hb"
+    )
+    event = _event(db_session, item_a)
+    _attach(db_session, event, item_b)
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Se registraron 4 heridos",
+                    normalized_value="4",
+                    object_text="4 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+                _extracted(
+                    text="Se registraron 6 heridos",
+                    normalized_value="6",
+                    object_text="6 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.8, reason="a"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.SUPPORTED, confidence=0.8, reason="b"),
+            ]
+        ),
+    )
+
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+
+    assert {claim.status for claim in _event_claims(db_session, event.id)} == {ClaimStatus.UNCERTAIN}
 
 
 def test_invented_excerpt_is_discarded(db_session: Session) -> None:

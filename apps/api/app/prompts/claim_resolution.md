@@ -1,16 +1,21 @@
-Resolvé el estado de cada claim con el contexto mínimo: texto canónico, comparison_key, assertion_key y excerpts de fuentes. No asumas páginas completas ni busques información externa.
+Resolvé el estado de cada claim con el contexto mínimo: texto canónico, comparison_key, assertion_key, occurred_at, published_at de cada fuente y excerpts. No asumas páginas completas ni busques información externa.
 
-Los claims llegan agrupados por `comparison_key`. Si un grupo tiene valores competidores (varias `assertion_key`), el estado típico es CONFLICTING, salvo que la evidencia deje en claro DISPROVEN u OUTDATED para esa afirmación puntual.
+Los claims llegan agrupados por `comparison_key`. Varias `assertion_key` en el mismo grupo no son conflicto automático: pueden ser una actualización temporal (4 heridos a las 15:00, 6 confirmados a las 17:00).
 
-Reglas:
+Usá `occurred_at` (el momento al que se refiere la afirmación) y `published_at` (cuándo salió cada fuente):
+
+- Mismo dato, mismo contexto temporal y valores incompatibles → CONFLICTING.
+- Un dato anterior reemplazado por información posterior → el anterior OUTDATED; el nuevo se resuelve con las reglas normales (SUPPORTED / SINGLE_SOURCE / etc.).
+- Si no se puede determinar si es contradicción o actualización → UNCERTAIN.
+- DISPROVEN solo con base clara en los excerpts.
+
+Reglas por assertion:
 
 - SUPPORTED solo si hay SUPPORTS de al menos dos medios independientes (dominios distintos) y no hay CONTRADICTS sobre la misma assertion.
 - Varias notas del mismo medio cuentan como una sola confirmación → SINGLE_SOURCE, no SUPPORTED.
 - Una sola fuente independiente con SUPPORTS y sin CONTRADICTS → SINGLE_SOURCE.
 - SUPPORTS y CONTRADICTS sobre la misma assertion → CONFLICTING.
-- Cifras u objetos incompatibles en el mismo comparison_key → CONFLICTING.
-- UNCERTAIN si la evidencia no alcanza.
-- DISPROVEN / OUTDATED solo con base clara en los excerpts.
+- UNCERTAIN si la evidencia de esa assertion no alcanza.
 
 Devolvé JSON:
 

@@ -17,7 +17,7 @@ from app.repositories import (
 )
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.source_service import SourceService
-from app.workers.tasks import poll_source, research_event, resolve_event_claims
+from app.workers.tasks import poll_source, research_event, resolve_event_claims, verify_event_claims
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -262,4 +262,20 @@ def enqueue_claims(event_id: UUID, db: DbSession) -> dict:
     if running is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
     resolve_event_claims.delay(str(event_id), "admin")
+    return {"queued": True, "event_id": str(event_id)}
+
+
+@router.post(
+    "/events/{event_id}/verify",
+    dependencies=[Depends(require_admin)],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_verify(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    running = PipelineRunRepository(db).get_running(event_id, "verification")
+    if running is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    verify_event_claims.delay(str(event_id), "admin")
     return {"queued": True, "event_id": str(event_id)}

@@ -6,7 +6,7 @@ Cada claim debe tener evidencia rastreable a un `source_ref` de la lista. El `ex
 
 No uses HTML. No pidas ni completes páginas enteras.
 
-Si dos fuentes dan valores distintos para la misma dimensión (por ejemplo 6 heridos vs 4 heridos), emití claims separados con el mismo `subject`, `predicate` y `unit`, y distinto `normalized_value` / `object_text`.
+Si dos fuentes dan valores distintos para la misma dimensión (por ejemplo 6 heridos vs 4 heridos), emití claims separados con el mismo `subject`, `predicate` y `unit`, y distinto `normalized_value` / `object_text`. Si el recuento cambia en el tiempo, poné `occurred_at` distinto en cada claim (p. ej. 15:00 vs 17:00).
 
 Devolvé JSON con este esquema:
 

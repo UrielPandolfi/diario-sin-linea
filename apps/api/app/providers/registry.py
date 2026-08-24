@@ -15,6 +15,7 @@ class ModelRole(StrEnum):
     LIGHT_PROCESSING = "light_processing"
     AMBIGUOUS_DEDUP = "ambiguous_dedup"
     CLAIM_RESOLUTION = "claim_resolution"
+    VERIFICATION = "verification"
     EMBEDDING = "embedding"
 
 
@@ -40,6 +41,9 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
     elif role == ModelRole.CLAIM_RESOLUTION:
         provider_name = settings.claim_resolution_provider
         model = settings.claim_resolution_model
+    elif role == ModelRole.VERIFICATION:
+        provider_name = settings.verification_provider
+        model = settings.verification_model
     else:
         raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
 

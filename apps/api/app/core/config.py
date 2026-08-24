@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     max_research_queries_per_event: int = 4
     max_research_results_per_query: int = 5
     max_research_results_per_domain: int = 3
+    max_verification_claims_per_event: int = 5
+    max_verification_queries_per_claim: int = 2
+    max_verification_results_per_query: int = 3
     max_audit_rewrite_cycles: int = 2
     job_max_retries: int = 3
     event_match_high_threshold: float = 0.88

@@ -9,6 +9,7 @@ from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.ingestion_service import IngestionService
 from app.services.research_service import ResearchService
+from app.services.verification_service import VerificationService
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
@@ -19,6 +20,7 @@ celery_app.conf.task_routes = {
     "app.workers.tasks.detect_event": {"queue": "event_detection"},
     "app.workers.tasks.research_event": {"queue": "research"},
     "app.workers.tasks.resolve_event_claims": {"queue": "claim_resolution"},
+    "app.workers.tasks.verify_event_claims": {"queue": "verification"},
 }
 celery_app.conf.beat_schedule = {
     "poll-monitored-sources": {
@@ -136,6 +138,28 @@ def resolve_event_claims(self, event_id: str, trigger: str = "research") -> dict
     try:
         service = ClaimService(session)
         result = service.resolve(UUID(event_id), trigger=trigger)
+        session.commit()
+        if not result.get("skipped"):
+            verify_event_claims.delay(event_id, trigger)
+        return result
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.verify_event_claims",
+    max_retries=settings.job_max_retries,
+    retry_backoff=True,
+)
+def verify_event_claims(self, event_id: str, trigger: str = "claims") -> dict:
+    session = SessionLocal()
+    try:
+        service = VerificationService(session)
+        result = service.verify(UUID(event_id), trigger=trigger)
         session.commit()
         return result
     except Exception:

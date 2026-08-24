@@ -6,6 +6,7 @@ from app.services.ingestion_service import IngestionService
 from app.services.research_service import ResearchService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
+from app.services.verification_service import VerificationService
 
 __all__ = [
     "ArticleService",
@@ -16,4 +17,5 @@ __all__ = [
     "ResearchService",
     "SourceItemService",
     "SourceService",
+    "VerificationService",
 ]
