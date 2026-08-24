@@ -9,7 +9,9 @@ from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.ingestion_service import IngestionService
 from app.services.research_service import ResearchService
+from app.services.audit_service import AuditService
 from app.services.verification_service import VerificationService
+from app.services.writing_service import WritingService
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
@@ -21,6 +23,8 @@ celery_app.conf.task_routes = {
     "app.workers.tasks.research_event": {"queue": "research"},
     "app.workers.tasks.resolve_event_claims": {"queue": "claim_resolution"},
     "app.workers.tasks.verify_event_claims": {"queue": "verification"},
+    "app.workers.tasks.write_event_article": {"queue": "writing"},
+    "app.workers.tasks.audit_event_article": {"queue": "auditing"},
 }
 celery_app.conf.beat_schedule = {
     "poll-monitored-sources": {
@@ -160,6 +164,50 @@ def verify_event_claims(self, event_id: str, trigger: str = "claims") -> dict:
     try:
         service = VerificationService(session)
         result = service.verify(UUID(event_id), trigger=trigger)
+        session.commit()
+        if not result.get("skipped") and not result.get("error"):
+            write_event_article.delay(event_id, trigger)
+        return result
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.write_event_article",
+    max_retries=settings.job_max_retries,
+    retry_backoff=True,
+)
+def write_event_article(self, event_id: str, trigger: str = "verification") -> dict:
+    session = SessionLocal()
+    try:
+        service = WritingService(session)
+        result = service.write(UUID(event_id), trigger=trigger)
+        session.commit()
+        if result.get("written") is True:
+            audit_event_article.delay(event_id, trigger)
+        return result
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.audit_event_article",
+    max_retries=settings.job_max_retries,
+    retry_backoff=True,
+)
+def audit_event_article(self, event_id: str, trigger: str = "writing") -> dict:
+    session = SessionLocal()
+    try:
+        service = AuditService(session)
+        result = service.audit(UUID(event_id), trigger=trigger)
         session.commit()
         return result
     except Exception:

@@ -80,6 +80,32 @@ export type AdminEventDetail = AdminEvent & {
       source_item_id: string;
     }[];
   }[];
+  article: {
+    id: string;
+    headline: string;
+    summary: string;
+    body: string;
+    status: string;
+    current_version: number;
+    slug: string;
+  } | null;
+  audit: {
+    run_id: string;
+    status: string;
+    passed: boolean | null;
+    cap_exhausted: boolean;
+    rewrite_count: number | null;
+    audit_count: number | null;
+    issues: {
+      type: string;
+      severity: string;
+      text: string;
+      explanation: string;
+      suggested_fix: string | null;
+    }[];
+    reason: string | null;
+    error_message: string | null;
+  } | null;
 };
 
 export async function adminFetch(path: string, init: RequestInit = {}) {

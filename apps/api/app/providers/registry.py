@@ -16,6 +16,8 @@ class ModelRole(StrEnum):
     AMBIGUOUS_DEDUP = "ambiguous_dedup"
     CLAIM_RESOLUTION = "claim_resolution"
     VERIFICATION = "verification"
+    WRITING = "writing"
+    AUDITING = "auditing"
     EMBEDDING = "embedding"
 
 
@@ -44,6 +46,12 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
     elif role == ModelRole.VERIFICATION:
         provider_name = settings.verification_provider
         model = settings.verification_model
+    elif role == ModelRole.WRITING:
+        provider_name = settings.writing_provider
+        model = settings.writing_model
+    elif role == ModelRole.AUDITING:
+        provider_name = settings.auditing_provider
+        model = settings.auditing_model
     else:
         raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
 
@@ -51,6 +59,8 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
         raise ProviderNotConfiguredError(
             f"Falta {role.value} provider/model en el entorno"
         )
+    if role == ModelRole.AUDITING and provider_name.lower() == "anthropic":
+        raise ProviderNotConfiguredError("Anthropic no es un proveedor de auditoría")
     api_key = _api_key_for(provider_name)
     if not api_key:
         raise ProviderNotConfiguredError(
@@ -63,6 +73,17 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
             api_key=api_key,
             model=model,
             base_url="https://api.deepseek.com",
+        )
+    if provider_name.lower() == "anthropic":
+        from app.providers.anthropic_provider import AnthropicJsonProvider
+
+        max_tokens = (
+            settings.writing_max_output_tokens if role == ModelRole.WRITING else 4096
+        )
+        return AnthropicJsonProvider(
+            api_key=api_key,
+            model=model,
+            max_output_tokens=max_tokens,
         )
     raise ProviderNotConfiguredError(
         f"Proveedor LLM no soportado todavía: {provider_name}"

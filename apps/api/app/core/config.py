@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     max_verification_claims_per_event: int = 5
     max_verification_queries_per_claim: int = 2
     max_verification_results_per_query: int = 3
+    max_writing_claims_per_event: int = 40
+    max_writing_sources_per_event: int = 20
+    writing_excerpt_chars: int = 400
+    writing_max_output_tokens: int = 4096
     max_audit_rewrite_cycles: int = 2
     job_max_retries: int = 3
     event_match_high_threshold: float = 0.88

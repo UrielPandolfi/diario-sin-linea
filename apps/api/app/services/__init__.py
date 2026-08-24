@@ -1,4 +1,5 @@
 from app.services.article_service import ArticleService
+from app.services.audit_service import AuditService
 from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.event_service import EventService
@@ -7,9 +8,11 @@ from app.services.research_service import ResearchService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_service import VerificationService
+from app.services.writing_service import WritingService
 
 __all__ = [
     "ArticleService",
+    "AuditService",
     "ClaimService",
     "DetectionService",
     "EventService",
@@ -18,4 +21,5 @@ __all__ = [
     "SourceItemService",
     "SourceService",
     "VerificationService",
+    "WritingService",
 ]

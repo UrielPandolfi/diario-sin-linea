@@ -13,6 +13,8 @@ export default function AdminEventDetailPage() {
   const [researching, setResearching] = useState(false);
   const [resolvingClaims, setResolvingClaims] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const [auditing, setAuditing] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -97,6 +99,58 @@ export default function AdminEventDetailPage() {
     }
   }
 
+  async function onWrite() {
+    if (!params.id) return;
+    setWriting(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`/api/v1/admin/events/${params.id}/write`, {
+        method: "POST",
+      });
+      if (response.status === 409) {
+        setNotice("Ya hay una redacción o auditoría en curso.");
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Error ${response.status}`);
+      }
+      setNotice("Redacción encolada.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo redactar.");
+    } finally {
+      setWriting(false);
+    }
+  }
+
+  async function onAudit() {
+    if (!params.id) return;
+    setAuditing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`/api/v1/admin/events/${params.id}/audit`, {
+        method: "POST",
+      });
+      if (response.status === 409) {
+        setNotice("Ya hay una redacción o auditoría en curso.");
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Error ${response.status}`);
+      }
+      setNotice("Auditoría encolada.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo auditar.");
+    } finally {
+      setAuditing(false);
+    }
+  }
+
   useEffect(() => {
     if (!params.id) return;
     void load().catch((err: unknown) => {
@@ -148,6 +202,22 @@ export default function AdminEventDetailPage() {
               className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
             >
               {verifying ? "Verificando…" : "Verificar"}
+            </button>
+            <button
+              type="button"
+              disabled={writing}
+              onClick={() => void onWrite()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {writing ? "Redactando…" : "Redactar"}
+            </button>
+            <button
+              type="button"
+              disabled={auditing}
+              onClick={() => void onAudit()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {auditing ? "Auditando…" : "Auditar"}
             </button>
           </div>
         ) : null}
@@ -245,6 +315,51 @@ export default function AdminEventDetailPage() {
                   ))}
                 </tbody>
               </table>
+            )}
+          </section>
+
+          {event.audit?.cap_exhausted && event.audit.passed === false ? (
+            <section className="border border-border bg-surface">
+              <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-accent-ochre">
+                Auditoría: ciclo agotado
+              </h2>
+              <div className="space-y-3 px-4 py-4">
+                <p className="font-sans text-sm text-accent-ochre">
+                  Sol no aprobó el draft después de {event.audit.rewrite_count ?? 0} rewrites. El
+                  artículo quedó listo para revisión humana con issues pendientes.
+                </p>
+                {event.audit.issues.length > 0 ? (
+                  <ul className="space-y-2 font-sans text-sm text-primary">
+                    {event.audit.issues.map((issue, index) => (
+                      <li key={`${issue.type}-${index}`}>
+                        <p>
+                          {issue.severity} · {issue.type}: {issue.text}
+                        </p>
+                        <p className="text-xs text-secondary">{issue.explanation}</p>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
+            </section>
+          ) : null}
+
+          <section className="border border-border bg-surface">
+            <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
+              Borrador
+            </h2>
+            {event.article ? (
+              <div className="space-y-3 px-4 py-4">
+                <p className="font-heading text-xl text-primary">{event.article.headline}</p>
+                <p className="font-sans text-xs text-secondary">
+                  {event.article.status} · versión {event.article.current_version}
+                  {event.article.slug ? ` · ${event.article.slug}` : ""}
+                </p>
+                <p className="font-sans text-sm text-primary">{event.article.summary}</p>
+                <div className="whitespace-pre-wrap font-sans text-sm text-primary">{event.article.body}</div>
+              </div>
+            ) : (
+              <p className="px-4 py-6 font-sans text-sm text-secondary">Sin article draft.</p>
             )}
           </section>
 

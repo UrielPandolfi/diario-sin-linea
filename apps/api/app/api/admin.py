@@ -9,6 +9,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.domain.enums import IngestionMethod
 from app.repositories import (
+    ArticleRepository,
     EntityRepository,
     EventRepository,
     PipelineRunRepository,
@@ -17,7 +18,14 @@ from app.repositories import (
 )
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.source_service import SourceService
-from app.workers.tasks import poll_source, research_event, resolve_event_claims, verify_event_claims
+from app.workers.tasks import (
+    audit_event_article,
+    poll_source,
+    research_event,
+    resolve_event_claims,
+    verify_event_claims,
+    write_event_article,
+)
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -89,6 +97,44 @@ def _claim_out(claim) -> dict:
             for row in claim.evidence
         ],
     }
+
+
+def _article_out(article) -> dict:
+    return {
+        "id": str(article.id),
+        "headline": article.headline,
+        "summary": article.summary,
+        "body": article.body,
+        "status": article.status.value,
+        "current_version": article.current_version,
+        "slug": article.slug,
+    }
+
+
+def _audit_out(runs) -> dict | None:
+    for run in runs:
+        if run.stage != "auditing":
+            continue
+        meta = run.metadata_json or {}
+        return {
+            "run_id": str(run.id),
+            "status": run.status.value,
+            "passed": meta.get("passed"),
+            "cap_exhausted": bool(meta.get("cap_exhausted")),
+            "rewrite_count": meta.get("rewrite_count"),
+            "audit_count": meta.get("audit_count"),
+            "issues": meta.get("issues") or [],
+            "reason": meta.get("reason"),
+            "error_message": run.error_message,
+        }
+    return None
+
+
+def _writing_or_auditing_running(db, event_id: UUID):
+    repo = PipelineRunRepository(db)
+    if repo.get_running(event_id, "writing") is not None:
+        return True
+    return repo.get_running(event_id, "auditing") is not None
 
 
 def _event_out(event) -> dict:
@@ -193,6 +239,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
         raise HTTPException(status_code=404, detail="Suceso no encontrado")
     entities = {entity.id: entity for entity in EntityRepository(db).list_for_event(event_id)}
     runs = PipelineRunRepository(db).list_for_event(event_id)
+    article = ArticleRepository(db).get_by_event_id(event_id)
     return {
         **_event_out(event),
         "country_code": event.country_code,
@@ -218,6 +265,8 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             for link in event.event_entities
         ],
         "claims": [_claim_out(claim) for claim in event.claims],
+        "article": _article_out(article) if article is not None else None,
+        "audit": _audit_out(runs),
         "pipeline_runs": [
             {
                 "id": str(run.id),
@@ -278,4 +327,35 @@ def enqueue_verify(event_id: UUID, db: DbSession) -> dict:
     if running is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
     verify_event_claims.delay(str(event_id), "admin")
+    return {"queued": True, "event_id": str(event_id)}
+
+
+@router.post(
+    "/events/{event_id}/write",
+    dependencies=[Depends(require_admin)],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_write(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    running = _writing_or_auditing_running(db, event_id)
+    if running:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    write_event_article.delay(str(event_id), "admin")
+    return {"queued": True, "event_id": str(event_id)}
+
+
+@router.post(
+    "/events/{event_id}/audit",
+    dependencies=[Depends(require_admin)],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_audit(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    if _writing_or_auditing_running(db, event_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    audit_event_article.delay(str(event_id), "admin")
     return {"queued": True, "event_id": str(event_id)}
