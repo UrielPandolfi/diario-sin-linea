@@ -25,3 +25,10 @@ def canonicalize_url(url: str, *, base: str | None = None) -> str:
         if key.lower() not in TRACKING_PARAMS
     ]
     return urlunparse((scheme, netloc, path, "", urlencode(query), ""))
+
+
+def url_domain(url: str) -> str:
+    netloc = urlparse(canonicalize_url(url)).netloc.lower()
+    if netloc.startswith("www."):
+        netloc = netloc[4:]
+    return netloc

@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.core.db import SessionLocal
 from app.services.detection_service import DetectionService
 from app.services.ingestion_service import IngestionService
+from app.services.research_service import ResearchService
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
@@ -15,6 +16,7 @@ celery_app.conf.task_routes = {
     "app.workers.tasks.poll_source": {"queue": "ingestion"},
     "app.workers.tasks.poll_monitored_sources": {"queue": "ingestion"},
     "app.workers.tasks.detect_event": {"queue": "event_detection"},
+    "app.workers.tasks.research_event": {"queue": "research"},
 }
 celery_app.conf.beat_schedule = {
     "poll-monitored-sources": {
@@ -87,11 +89,33 @@ def detect_event(self, source_item_id: str) -> dict:
         service = DetectionService(session)
         result = service.detect(UUID(source_item_id), attempt=self.request.retries + 1)
         session.commit()
+        if result.get("created") and result.get("event_id"):
+            research_event.delay(result["event_id"], "new_event")
         return result
     except Exception as exc:
         session.rollback()
         if _is_transient(exc):
             raise self.retry(exc=exc)
+        raise
+    finally:
+        session.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.research_event",
+    max_retries=settings.job_max_retries,
+    retry_backoff=True,
+)
+def research_event(self, event_id: str, trigger: str = "new_event") -> dict:
+    session = SessionLocal()
+    try:
+        service = ResearchService(session)
+        result = service.research(UUID(event_id), trigger=trigger)
+        session.commit()
+        return result
+    except Exception:
+        session.rollback()
         raise
     finally:
         session.close()

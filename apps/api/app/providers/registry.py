@@ -1,7 +1,12 @@
 from enum import StrEnum
 
 from app.core.config import get_settings
-from app.providers.base import EmbeddingProvider, ProviderNotConfiguredError, StructuredLLMProvider
+from app.providers.base import (
+    EmbeddingProvider,
+    ProviderNotConfiguredError,
+    SearchProvider,
+    StructuredLLMProvider,
+)
 from app.providers.openai_provider import OpenAIEmbeddingProvider, OpenAIStructuredProvider
 from app.providers.voyage_provider import VoyageEmbeddingProvider
 
@@ -67,4 +72,20 @@ def get_embedding_provider() -> EmbeddingProvider:
         return OpenAIEmbeddingProvider(api_key=api_key, model=model)
     raise ProviderNotConfiguredError(
         f"Proveedor de embeddings no soportado todavía: {provider_name}"
+    )
+
+
+def get_search_provider() -> SearchProvider:
+    settings = get_settings()
+    provider_name = (settings.search_provider or "").strip().lower()
+    if not provider_name:
+        raise ProviderNotConfiguredError("Falta SEARCH_PROVIDER")
+    if provider_name == "brave":
+        if not settings.brave_api_key:
+            raise ProviderNotConfiguredError("Falta BRAVE_API_KEY")
+        from app.providers.brave import BraveSearchProvider
+
+        return BraveSearchProvider(api_key=settings.brave_api_key)
+    raise ProviderNotConfiguredError(
+        f"Proveedor de búsqueda no soportado todavía: {provider_name}"
     )

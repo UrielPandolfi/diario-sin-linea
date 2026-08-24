@@ -17,7 +17,7 @@ from app.repositories import (
 )
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.source_service import SourceService
-from app.workers.tasks import poll_source
+from app.workers.tasks import poll_source, research_event
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -212,3 +212,19 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             for run in runs
         ],
     }
+
+
+@router.post(
+    "/events/{event_id}/research",
+    dependencies=[Depends(require_admin)],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def enqueue_research(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    running = PipelineRunRepository(db).get_running(event_id, "research")
+    if running is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    research_event.delay(str(event_id), "admin")
+    return {"queued": True, "event_id": str(event_id)}

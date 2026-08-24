@@ -41,6 +41,10 @@ class SourceRepository:
         stmt = select(Source).where(Source.is_monitored.is_(True), Source.is_enabled.is_(True))
         return len(list(self.session.scalars(stmt)))
 
+    def get_by_domain(self, domain: str) -> Source | None:
+        stmt = select(Source).where(Source.domain == domain)
+        return self.session.scalars(stmt).first()
+
 
 class SourceItemRepository:
     def __init__(self, session: Session) -> None:
@@ -71,6 +75,12 @@ class SourceItemRepository:
         stmt = select(SourceItem).where(
             SourceItem.source_id == source_id,
             SourceItem.canonical_url == canonical_url,
+        )
+        return self.session.scalars(stmt).first()
+
+    def get_by_canonical_url(self, canonical_url: str) -> SourceItem | None:
+        stmt = select(SourceItem).where(
+            or_(SourceItem.canonical_url == canonical_url, SourceItem.url == canonical_url)
         )
         return self.session.scalars(stmt).first()
 
@@ -145,6 +155,20 @@ class EventRepository:
     def add_link(self, link: EventSource) -> EventSource:
         self.session.add(link)
         return link
+
+    def canonical_urls_for_event(self, event_id: UUID) -> set[str]:
+        stmt = (
+            select(SourceItem.canonical_url, SourceItem.url)
+            .join(EventSource, EventSource.source_item_id == SourceItem.id)
+            .where(EventSource.event_id == event_id)
+        )
+        urls: set[str] = set()
+        for canonical, url in self.session.execute(stmt):
+            if canonical:
+                urls.add(canonical)
+            if url:
+                urls.add(url)
+        return urls
 
     def find_by_url(self, url: str) -> Event | None:
         stmt = (
@@ -231,6 +255,14 @@ class PipelineRunRepository:
             PipelineRun.status == PipelineStatus.FAILED,
         )
         return len(list(self.session.scalars(stmt)))
+
+    def get_running(self, event_id: UUID, stage: str) -> PipelineRun | None:
+        stmt = select(PipelineRun).where(
+            PipelineRun.event_id == event_id,
+            PipelineRun.stage == stage,
+            PipelineRun.status == PipelineStatus.RUNNING,
+        )
+        return self.session.scalars(stmt).first()
 
 
 class ArticleRepository:

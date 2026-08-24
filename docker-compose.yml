@@ -1,3 +1,24 @@
+x-app-environment: &app-environment
+  DATABASE_URL: postgresql+psycopg://sin_linea:sin_linea@postgres:5432/sin_linea
+  REDIS_URL: redis://redis:6379/0
+  CORS_ORIGINS: http://localhost:3000
+  APP_SECRET: ${APP_SECRET:-dev-secret-change-me}
+  ADMIN_PASSWORD: ${ADMIN_PASSWORD:-dev-admin}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  VOYAGE_API_KEY: ${VOYAGE_API_KEY:-}
+  LIGHT_PROCESSING_PROVIDER: ${LIGHT_PROCESSING_PROVIDER:-}
+  LIGHT_PROCESSING_MODEL: ${LIGHT_PROCESSING_MODEL:-}
+  AMBIGUOUS_DEDUP_PROVIDER: ${AMBIGUOUS_DEDUP_PROVIDER:-}
+  AMBIGUOUS_DEDUP_MODEL: ${AMBIGUOUS_DEDUP_MODEL:-}
+  EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+  SEARCH_PROVIDER: ${SEARCH_PROVIDER:-brave}
+  BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+  MAX_RESEARCH_QUERIES_PER_EVENT: ${MAX_RESEARCH_QUERIES_PER_EVENT:-4}
+  MAX_RESEARCH_RESULTS_PER_QUERY: ${MAX_RESEARCH_RESULTS_PER_QUERY:-5}
+  MAX_RESEARCH_RESULTS_PER_DOMAIN: ${MAX_RESEARCH_RESULTS_PER_DOMAIN:-3}
+  INGESTION_POLL_INTERVAL_SECONDS: ${INGESTION_POLL_INTERVAL_SECONDS:-900}
+
 services:
   postgres:
     image: pgvector/pgvector:pg16
@@ -33,11 +54,7 @@ services:
       sh -c "alembic upgrade head &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
-      DATABASE_URL: postgresql+psycopg://sin_linea:sin_linea@postgres:5432/sin_linea
-      REDIS_URL: redis://redis:6379/0
-      CORS_ORIGINS: http://localhost:3000
-      APP_SECRET: ${APP_SECRET:-dev-secret-change-me}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-dev-admin}
+      <<: *app-environment
     ports:
       - "8000:8000"
     depends_on:
@@ -62,12 +79,22 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
-    command: celery -A app.workers.celery_app:celery_app worker --loglevel=info
+    command: celery -A app.workers.celery_app:celery_app worker --loglevel=info -Q ingestion,event_detection,research,celery
     environment:
-      DATABASE_URL: postgresql+psycopg://sin_linea:sin_linea@postgres:5432/sin_linea
-      REDIS_URL: redis://redis:6379/0
-      APP_SECRET: ${APP_SECRET:-dev-secret-change-me}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-dev-admin}
+      <<: *app-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: .
+      dockerfile: infra/docker/Dockerfile.api
+    command: celery -A app.workers.celery_app:celery_app beat --loglevel=info
+    environment:
+      <<: *app-environment
     depends_on:
       postgres:
         condition: service_healthy
@@ -78,6 +105,8 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.web
+      args:
+        API_URL: http://api:8000
     environment:
       API_URL: http://api:8000
     ports:

@@ -3,7 +3,7 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from app.providers.base import ProviderNotConfiguredError
+from app.providers.base import ProviderNotConfiguredError, SearchHit, SearchQuery
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -57,3 +57,28 @@ class FakeEmbeddingProvider:
                 vector[16 + (self._seen[text] % slots)] = 1.0
             vectors.append(vector)
         return vectors
+
+
+class FakeSearchProvider:
+    def __init__(self, hits: list[SearchHit] | dict[str, list[SearchHit]] | None = None) -> None:
+        self.hits = hits or []
+        self.queries: list[SearchQuery] = []
+
+    def search(self, query: SearchQuery) -> list[SearchHit]:
+        self.queries.append(query)
+        if isinstance(self.hits, dict):
+            return list(self.hits.get(query.text, []))
+        return list(self.hits)
+
+
+class RecordingFetcher:
+    def __init__(self, pages: dict[str, str] | None = None) -> None:
+        self.pages = pages or {}
+        self.fetched: list[str] = []
+
+    def fetch(self, url: str, *, timeout: float = 20.0):
+        from app.services.fetching import FetchResult
+
+        self.fetched.append(url)
+        body = self.pages.get(url, f"<article><p>Texto de {url}</p></article>")
+        return FetchResult(url=url, body=body, content_type="text/html")
