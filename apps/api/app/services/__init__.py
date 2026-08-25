@@ -3,8 +3,11 @@ from app.services.audit_service import AuditService
 from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.event_service import EventService
+from app.services.feed_ranking import FeedRankingService
 from app.services.ingestion_service import IngestionService
+from app.services.publish_service import PublishService
 from app.services.research_service import ResearchService
+from app.services.search_service import SearchService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_service import VerificationService
@@ -16,8 +19,11 @@ __all__ = [
     "ClaimService",
     "DetectionService",
     "EventService",
+    "FeedRankingService",
     "IngestionService",
+    "PublishService",
     "ResearchService",
+    "SearchService",
     "SourceItemService",
     "SourceService",
     "VerificationService",

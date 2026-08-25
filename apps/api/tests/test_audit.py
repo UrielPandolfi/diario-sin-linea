@@ -27,6 +27,7 @@ from app.schemas.writing import ArticleDraft
 from app.services.article_service import ArticleService
 from app.services.audit_service import AUDITING_STAGE, AuditService
 from app.services.event_service import EventService
+from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.writing_service import WRITING_STAGE, WritingService
@@ -205,7 +206,7 @@ def test_passed_audit_marks_ready_without_rewrite(db_session: Session) -> None:
     assert result["audit_count"] == 1
     assert result["cap_exhausted"] is False
     assert result["reason"] == "passed"
-    assert article.status == ArticleStatus.READY_FOR_REVIEW
+    assert article.status == ArticleStatus.DRAFT
     assert article.current_version == version
     assert event.status == event_status == EventStatus.DETECTED
     assert llm.calls == ["ArticleAuditResult"]
@@ -242,7 +243,7 @@ def test_fail_rewrite_respects_cap(db_session: Session) -> None:
     assert result["rewrite_count"] == 2
     assert result["audit_count"] == 3
     assert result["reason"] == "cap_exhausted"
-    assert article.status == ArticleStatus.READY_FOR_REVIEW
+    assert article.status == ArticleStatus.DRAFT
     assert article.current_version == 3
     assert article.headline == "Corrección dos"
     assert event.status == EventStatus.DETECTED
@@ -285,7 +286,7 @@ def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_s
     assert retry["passed"] is True
     assert retry["rewrite_count"] == 0
     assert article.id == article_id
-    assert article.status == ArticleStatus.READY_FOR_REVIEW
+    assert article.status == ArticleStatus.DRAFT
     assert count == 1
     assert retry_llm.calls == ["ArticleAuditResult"]
 
@@ -379,7 +380,7 @@ def test_admin_audit_accepted_and_get_compact(db_session: Session, monkeypatch) 
         response = client.post(f"/api/v1/admin/events/{event.id}/audit")
     assert detail.status_code == 200
     body = detail.json()
-    assert body["article"]["status"] == ArticleStatus.READY_FOR_REVIEW.value
+    assert body["article"]["status"] == ArticleStatus.DRAFT.value
     assert body["audit"]["passed"] is True
     assert body["audit"]["cap_exhausted"] is False
     assert body["status"] == EventStatus.DETECTED.value
@@ -479,6 +480,57 @@ def test_write_enqueues_audit_only_when_written(monkeypatch) -> None:
     assert queued == []
 
 
+def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
+    queued: list[tuple] = []
+
+    class Sess:
+        def commit(self) -> None:
+            pass
+
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", Sess)
+    monkeypatch.setattr("app.workers.tasks.publish_event_article.delay", lambda *args: queued.append(args))
+    from app.workers.tasks import audit_event_article
+
+    monkeypatch.setattr(
+        "app.workers.tasks.AuditService",
+        lambda session: SimpleNamespace(
+            audit=lambda *_a, **_k: {"skipped": False, "passed": True, "event_id": "eid"}
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
+    assert queued == [("00000000-0000-0000-0000-000000000001", "writing")]
+
+    queued.clear()
+    monkeypatch.setattr(
+        "app.workers.tasks.AuditService",
+        lambda session: SimpleNamespace(
+            audit=lambda *_a, **_k: {
+                "skipped": False,
+                "passed": False,
+                "reason": "cap_exhausted",
+                "event_id": "eid",
+            }
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
+    assert queued == []
+
+    monkeypatch.setattr(
+        "app.workers.tasks.AuditService",
+        lambda session: SimpleNamespace(
+            audit=lambda *_a, **_k: {"skipped": True, "passed": True, "reason": "already_running"}
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "admin")
+    assert queued == []
+
+
 def test_auditing_rejects_anthropic(monkeypatch) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "auditing_provider", "anthropic")
@@ -487,10 +539,12 @@ def test_auditing_rejects_anthropic(monkeypatch) -> None:
         get_structured_provider(ModelRole.AUDITING)
 
 
-def test_ready_for_review_second_audit_does_not_create_article(db_session: Session) -> None:
+def test_published_second_audit_does_not_create_article(db_session: Session) -> None:
     event, article = _seed_draft(db_session)
     llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
     _service(db_session, llm).audit(event.id, trigger="admin")
+    published = PublishService(db_session).publish(event.id, trigger="test")
+    assert published["published"] is True
     db_session.refresh(article)
     second = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
     result = _service(db_session, second).audit(event.id, trigger="admin")
@@ -498,4 +552,5 @@ def test_ready_for_review_second_audit_does_not_create_article(db_session: Sessi
     assert result["reason"] == "article_not_draft"
     assert second.calls == []
     assert count == 1
+    assert article.status == ArticleStatus.PUBLISHED
     assert article.id

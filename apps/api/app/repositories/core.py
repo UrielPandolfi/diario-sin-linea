@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
     Article,
+    ArticleVersion,
     Claim,
     Entity,
     Event,
@@ -106,6 +107,9 @@ class EventRepository:
 
     def get(self, event_id: UUID) -> Event | None:
         return self.session.get(Event, event_id)
+
+    def get_by_public_id(self, public_id: UUID) -> Event | None:
+        return self.session.scalars(select(Event).where(Event.public_id == public_id)).first()
 
     def get_with_details(self, event_id: UUID) -> Event | None:
         stmt = (
@@ -268,6 +272,19 @@ class PipelineRunRepository:
         )
         return self.session.scalars(stmt).first()
 
+    def latest_success(self, event_id: UUID, stage: str) -> PipelineRun | None:
+        stmt = (
+            select(PipelineRun)
+            .where(
+                PipelineRun.event_id == event_id,
+                PipelineRun.stage == stage,
+                PipelineRun.status == PipelineStatus.SUCCESS,
+            )
+            .order_by(PipelineRun.started_at.desc())
+            .limit(1)
+        )
+        return self.session.scalars(stmt).first()
+
 
 class ArticleRepository:
     def __init__(self, session: Session) -> None:
@@ -285,3 +302,10 @@ class ArticleRepository:
 
     def get_by_slug(self, slug: str) -> Article | None:
         return self.session.scalars(select(Article).where(Article.slug == slug)).first()
+
+    def get_version(self, article_id: UUID, version_number: int) -> ArticleVersion | None:
+        stmt = select(ArticleVersion).where(
+            ArticleVersion.article_id == article_id,
+            ArticleVersion.version_number == version_number,
+        )
+        return self.session.scalars(stmt).first()

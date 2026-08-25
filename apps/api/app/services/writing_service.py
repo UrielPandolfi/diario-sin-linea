@@ -20,8 +20,8 @@ from app.schemas.writing import ArticleDraft
 from app.services.article_context import build_article_context, last_success_run
 from app.services.article_service import ArticleService
 from app.services.material_change import detect_material_change, snapshot_claims
+from app.services.pipeline_lock import WRITING_STAGE, is_write_audit_publish_busy
 
-WRITING_STAGE = "writing"
 WRITING_ROLE = "writing"
 
 
@@ -46,10 +46,7 @@ class WritingService:
             raise ValueError("event_not_found")
         original_status = event.status
 
-        if (
-            self.pipeline.get_running(event_id, WRITING_STAGE) is not None
-            or self.pipeline.get_running(event_id, "auditing") is not None
-        ):
+        if is_write_audit_publish_busy(self.pipeline, event_id):
             return {
                 "skipped": True,
                 "reason": "already_running",
@@ -106,6 +103,7 @@ class WritingService:
     def _load_event(self, event_id: UUID) -> Event | None:
         stmt = (
             select(Event)
+            .execution_options(populate_existing=True)
             .options(
                 selectinload(Event.event_sources)
                 .selectinload(EventSource.source_item)
@@ -137,7 +135,7 @@ class WritingService:
             return base
 
         article = self.articles.get_by_event_id(event.id)
-        if article is not None and article.status != ArticleStatus.DRAFT:
+        if article is not None and not self._can_write(article):
             base["article_id"] = str(article.id)
             base["version"] = article.current_version
             base["reason"] = "article_not_draft"
@@ -195,6 +193,9 @@ class WritingService:
                     change_reason=change_reason,
                 ),
             )
+            if article.status == ArticleStatus.PUBLISHED:
+                article.status = ArticleStatus.DRAFT
+            self.session.flush()
         base.update(
             {
                 "article_id": str(article.id),
@@ -206,6 +207,11 @@ class WritingService:
             }
         )
         return base
+
+    def _can_write(self, article) -> bool:
+        if article.status == ArticleStatus.DRAFT:
+            return True
+        return article.status == ArticleStatus.PUBLISHED and article.published_version is not None
 
     def _user_prompt(self, article_context) -> str:
         return (

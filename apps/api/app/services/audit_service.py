@@ -21,9 +21,8 @@ from app.schemas.auditing import ArticleAuditResult, AuditIssue
 from app.schemas.writing import ArticleDraft
 from app.services.article_context import build_article_context
 from app.services.article_service import ArticleService
-from app.services.writing_service import WRITING_STAGE
+from app.services.pipeline_lock import AUDITING_STAGE, is_write_audit_publish_busy
 
-AUDITING_STAGE = "auditing"
 AUDITING_ROLE = "auditing"
 REWRITE_CHANGE_REASON = "audit_rewrite"
 
@@ -51,7 +50,7 @@ class AuditService:
             raise ValueError("event_not_found")
         original_status = event.status
 
-        if self._is_busy(event_id):
+        if is_write_audit_publish_busy(self.pipeline, event_id):
             return {
                 "skipped": True,
                 "reason": "already_running",
@@ -93,12 +92,6 @@ class AuditService:
         except Exception as exc:
             return self._fail(run, event, original_status, str(exc))
 
-    def _is_busy(self, event_id: UUID) -> bool:
-        return (
-            self.pipeline.get_running(event_id, AUDITING_STAGE) is not None
-            or self.pipeline.get_running(event_id, WRITING_STAGE) is not None
-        )
-
     def _fail(self, run: PipelineRun, event: Event, original_status: Any, message: str) -> dict:
         run.status = PipelineStatus.FAILED
         run.error_message = message
@@ -116,6 +109,7 @@ class AuditService:
     def _load_event(self, event_id: UUID) -> Event | None:
         stmt = (
             select(Event)
+            .execution_options(populate_existing=True)
             .options(
                 selectinload(Event.event_sources)
                 .selectinload(EventSource.source_item)
@@ -164,7 +158,7 @@ class AuditService:
         rewrites = 0
         audits = 0
         auditor = self.llm or get_structured_provider(ModelRole.AUDITING)
-        writer = self.writer or get_structured_provider(ModelRole.WRITING)
+        writer = self.writer
 
         while True:
             result = auditor.generate_structured(
@@ -188,18 +182,18 @@ class AuditService:
             self.session.flush()
 
             if result.passed:
-                article.status = ArticleStatus.READY_FOR_REVIEW
                 base["reason"] = "passed"
                 base["cap_exhausted"] = False
                 return base
 
             if rewrites >= cap:
-                article.status = ArticleStatus.READY_FOR_REVIEW
                 base["reason"] = "cap_exhausted"
                 base["cap_exhausted"] = True
                 base["passed"] = False
                 return base
 
+            if writer is None:
+                writer = get_structured_provider(ModelRole.WRITING)
             draft = writer.generate_structured(
                 system_prompt=load_prompt("article_writing.md"),
                 user_prompt=self._rewrite_user_prompt(article_context, article, result.issues),

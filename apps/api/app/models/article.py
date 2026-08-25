@@ -1,7 +1,9 @@
 from datetime import datetime
+from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utc_now
@@ -40,6 +42,7 @@ class Article(TimestampMixin, Base):
         nullable=False,
     )
     current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    published_version: Mapped[int | None] = mapped_column(Integer)
     hero_image_url: Mapped[str | None] = mapped_column(Text)
 
     event: Mapped[Event] = relationship(back_populates="articles")
@@ -51,6 +54,7 @@ class ArticleVersion(TimestampMixin, Base):
     __tablename__ = "article_versions"
     __table_args__ = (
         UniqueConstraint("article_id", "version_number", name="uq_article_versions_article_id_version_number"),
+        Index("ix_article_versions_search_tsv", "search_tsv", postgresql_using="gin"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -62,6 +66,14 @@ class ArticleVersion(TimestampMixin, Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     change_reason: Mapped[str | None] = mapped_column(Text)
+    search_tsv: Mapped[Any] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('spanish', coalesce(headline, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(body, ''))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
 
     article: Mapped[Article] = relationship(back_populates="versions")
 

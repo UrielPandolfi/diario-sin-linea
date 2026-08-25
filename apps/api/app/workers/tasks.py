@@ -12,6 +12,7 @@ from app.services.research_service import ResearchService
 from app.services.audit_service import AuditService
 from app.services.verification_service import VerificationService
 from app.services.writing_service import WritingService
+from app.services.publish_service import PublishService
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
@@ -25,6 +26,7 @@ celery_app.conf.task_routes = {
     "app.workers.tasks.verify_event_claims": {"queue": "verification"},
     "app.workers.tasks.write_event_article": {"queue": "writing"},
     "app.workers.tasks.audit_event_article": {"queue": "auditing"},
+    "app.workers.tasks.publish_event_article": {"queue": "publishing"},
 }
 celery_app.conf.beat_schedule = {
     "poll-monitored-sources": {
@@ -208,6 +210,28 @@ def audit_event_article(self, event_id: str, trigger: str = "writing") -> dict:
     try:
         service = AuditService(session)
         result = service.audit(UUID(event_id), trigger=trigger)
+        session.commit()
+        if result.get("skipped") is False and result.get("passed") is True:
+            publish_event_article.delay(event_id, trigger)
+        return result
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.publish_event_article",
+    max_retries=settings.job_max_retries,
+    retry_backoff=True,
+)
+def publish_event_article(self, event_id: str, trigger: str = "audit") -> dict:
+    session = SessionLocal()
+    try:
+        service = PublishService(session)
+        result = service.publish(UUID(event_id), trigger=trigger)
         session.commit()
         return result
     except Exception:

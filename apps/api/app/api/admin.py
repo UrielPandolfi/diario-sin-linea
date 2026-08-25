@@ -2,6 +2,7 @@ from datetime import timedelta
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.api.deps import DbSession, require_admin
@@ -17,10 +18,13 @@ from app.repositories import (
     SourceRepository,
 )
 from app.schemas import SourceCreate, SourceUpdate
+from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
+from app.services.pipeline_lock import is_write_audit_publish_busy
 from app.workers.tasks import (
     audit_event_article,
     poll_source,
+    publish_event_article,
     research_event,
     resolve_event_claims,
     verify_event_claims,
@@ -107,6 +111,8 @@ def _article_out(article) -> dict:
         "body": article.body,
         "status": article.status.value,
         "current_version": article.current_version,
+        "published_version": article.published_version,
+        "published_at": _iso(article.published_at),
         "slug": article.slug,
     }
 
@@ -130,11 +136,8 @@ def _audit_out(runs) -> dict | None:
     return None
 
 
-def _writing_or_auditing_running(db, event_id: UUID):
-    repo = PipelineRunRepository(db)
-    if repo.get_running(event_id, "writing") is not None:
-        return True
-    return repo.get_running(event_id, "auditing") is not None
+def _write_audit_publish_running(db, event_id: UUID) -> bool:
+    return is_write_audit_publish_busy(PipelineRunRepository(db), event_id)
 
 
 def _event_out(event) -> dict:
@@ -339,7 +342,7 @@ def enqueue_write(event_id: UUID, db: DbSession) -> dict:
     event = EventRepository(db).get(event_id)
     if event is None:
         raise HTTPException(status_code=404, detail="Suceso no encontrado")
-    running = _writing_or_auditing_running(db, event_id)
+    running = _write_audit_publish_running(db, event_id)
     if running:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
     write_event_article.delay(str(event_id), "admin")
@@ -355,7 +358,43 @@ def enqueue_audit(event_id: UUID, db: DbSession) -> dict:
     event = EventRepository(db).get(event_id)
     if event is None:
         raise HTTPException(status_code=404, detail="Suceso no encontrado")
-    if _writing_or_auditing_running(db, event_id):
+    if _write_audit_publish_running(db, event_id):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
     audit_event_article.delay(str(event_id), "admin")
     return {"queued": True, "event_id": str(event_id)}
+
+
+@router.post("/events/{event_id}/publish", dependencies=[Depends(require_admin)])
+def enqueue_publish(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    if _write_audit_publish_running(db, event_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    article = ArticleRepository(db).get_by_event_id(event_id)
+    if article is None:
+        raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    inspection = PublishService(db).inspect_publish(event_id)
+    if inspection["reason"] == "already_published":
+        return {"published": True, "reason": "already_published", "event_id": str(event_id)}
+    if inspection["reason"] != "ready":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=inspection["reason"])
+    publish_event_article.delay(str(event_id), "admin")
+    return JSONResponse(
+        {"queued": True, "event_id": str(event_id)},
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+
+
+@router.post("/events/{event_id}/archive", dependencies=[Depends(require_admin)])
+def archive_event(event_id: UUID, db: DbSession) -> dict:
+    event = EventRepository(db).get(event_id)
+    if event is None:
+        raise HTTPException(status_code=404, detail="Suceso no encontrado")
+    if _write_audit_publish_running(db, event_id):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    result = PublishService(db).archive(event_id)
+    if result.get("reason") == "already_running":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="already_running")
+    return result
+

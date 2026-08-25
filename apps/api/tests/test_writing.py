@@ -479,6 +479,49 @@ def test_published_article_is_not_rewritten(db_session: Session) -> None:
     assert article.status == ArticleStatus.PUBLISHED
 
 
+def test_published_live_article_rewrites_on_material_change(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(db_session, source.id, url="https://ejemplo.test/a", title="A", body="Choque", content_hash="h1")
+    event = _event(db_session, item)
+    _claim(
+        db_session,
+        event,
+        text="Un colectivo chocó",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    article, _created = ArticleService(db_session).create_draft(
+        ArticleCreate(
+            event_id=event.id,
+            headline="Titular publicado",
+            summary="Resumen",
+            body="Cuerpo",
+            status=ArticleStatus.DRAFT,
+        )
+    )
+    article.status = ArticleStatus.PUBLISHED
+    article.published_version = article.current_version
+    article.published_at = datetime.now(timezone.utc)
+    db_session.flush()
+    extra = _claim(
+        db_session,
+        event,
+        text="El choque dejó seis heridos",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    assert extra.id
+    llm = FakeStructuredLLM({"ArticleDraft": _draft(headline="Titular actualizado")})
+    result = _service(db_session, llm).write(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert result["written"] is True
+    assert article.status == ArticleStatus.DRAFT
+    assert article.published_version == 1
+    assert article.headline == "Titular actualizado"
+
+
 def test_no_claims_skips_llm(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(db_session, source.id, url="https://ejemplo.test/a", title="A", body="Choque", content_hash="h1")

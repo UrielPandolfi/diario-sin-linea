@@ -266,6 +266,7 @@ class ClaimService:
     def _load_event(self, event_id: UUID) -> Event | None:
         stmt = (
             select(Event)
+            .execution_options(populate_existing=True)
             .options(
                 selectinload(Event.event_sources)
                 .selectinload(EventSource.source_item)

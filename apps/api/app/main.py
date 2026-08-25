@@ -4,6 +4,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import router as admin_router
 from app.api.health import router as health_router
+from app.api.public import router as public_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     application.include_router(health_router)
+    application.include_router(public_router)
     application.include_router(admin_router)
     return application
 

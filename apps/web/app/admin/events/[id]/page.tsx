@@ -15,6 +15,8 @@ export default function AdminEventDetailPage() {
   const [verifying, setVerifying] = useState(false);
   const [writing, setWriting] = useState(false);
   const [auditing, setAuditing] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [archiving, setArchiving] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -109,7 +111,7 @@ export default function AdminEventDetailPage() {
         method: "POST",
       });
       if (response.status === 409) {
-        setNotice("Ya hay una redacción o auditoría en curso.");
+        setNotice("Ya hay una redacción, auditoría o publicación en curso.");
         return;
       }
       if (!response.ok) {
@@ -135,7 +137,7 @@ export default function AdminEventDetailPage() {
         method: "POST",
       });
       if (response.status === 409) {
-        setNotice("Ya hay una redacción o auditoría en curso.");
+        setNotice("Ya hay una redacción, auditoría o publicación en curso.");
         return;
       }
       if (!response.ok) {
@@ -148,6 +150,58 @@ export default function AdminEventDetailPage() {
       setError(err instanceof Error ? err.message : "No se pudo auditar.");
     } finally {
       setAuditing(false);
+    }
+  }
+
+  async function onPublish() {
+    if (!params.id) return;
+    setPublishing(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`/api/v1/admin/events/${params.id}/publish`, {
+        method: "POST",
+      });
+      if (response.status === 409) {
+        setNotice("No se puede publicar (audit no aprobado o hay un stage en curso).");
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Error ${response.status}`);
+      }
+      setNotice(response.status === 202 ? "Publicación encolada." : "Ya estaba publicado.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo publicar.");
+    } finally {
+      setPublishing(false);
+    }
+  }
+
+  async function onArchive() {
+    if (!params.id) return;
+    setArchiving(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(`/api/v1/admin/events/${params.id}/archive`, {
+        method: "POST",
+      });
+      if (response.status === 409) {
+        setNotice("Hay un stage en curso.");
+        return;
+      }
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || `Error ${response.status}`);
+      }
+      setNotice("Archivado.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo archivar.");
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -218,6 +272,22 @@ export default function AdminEventDetailPage() {
               className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
             >
               {auditing ? "Auditando…" : "Auditar"}
+            </button>
+            <button
+              type="button"
+              disabled={publishing}
+              onClick={() => void onPublish()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {publishing ? "Publicando…" : "Publicar (reintento)"}
+            </button>
+            <button
+              type="button"
+              disabled={archiving}
+              onClick={() => void onArchive()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {archiving ? "Archivando…" : "Archivar"}
             </button>
           </div>
         ) : null}
@@ -325,8 +395,9 @@ export default function AdminEventDetailPage() {
               </h2>
               <div className="space-y-3 px-4 py-4">
                 <p className="font-sans text-sm text-accent-ochre">
-                  Sol no aprobó el draft después de {event.audit.rewrite_count ?? 0} rewrites. El
-                  artículo quedó listo para revisión humana con issues pendientes.
+                  Sol no aprobó el draft después de {event.audit.rewrite_count ?? 0} rewrites. No
+                  se publicó: el borrador sigue en DRAFT y, si ya había una versión live, esa
+                  sigue visible.
                 </p>
                 {event.audit.issues.length > 0 ? (
                   <ul className="space-y-2 font-sans text-sm text-primary">
@@ -353,7 +424,11 @@ export default function AdminEventDetailPage() {
                 <p className="font-heading text-xl text-primary">{event.article.headline}</p>
                 <p className="font-sans text-xs text-secondary">
                   {event.article.status} · versión {event.article.current_version}
+                  {event.article.published_version != null
+                    ? ` · live v${event.article.published_version}`
+                    : ""}
                   {event.article.slug ? ` · ${event.article.slug}` : ""}
+                  {event.article.published_at ? ` · publicado ${formatWhen(event.article.published_at)}` : ""}
                 </p>
                 <p className="font-sans text-sm text-primary">{event.article.summary}</p>
                 <div className="whitespace-pre-wrap font-sans text-sm text-primary">{event.article.body}</div>

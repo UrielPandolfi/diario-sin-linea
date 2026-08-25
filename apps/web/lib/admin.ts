@@ -87,6 +87,8 @@ export type AdminEventDetail = AdminEvent & {
     body: string;
     status: string;
     current_version: number;
+    published_version: number | null;
+    published_at: string | null;
     slug: string;
   } | null;
   audit: {

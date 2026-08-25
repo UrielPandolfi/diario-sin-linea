@@ -36,6 +36,10 @@ x-app-environment: &app-environment
   WRITING_MAX_OUTPUT_TOKENS: ${WRITING_MAX_OUTPUT_TOKENS:-4096}
   MAX_AUDIT_REWRITE_CYCLES: ${MAX_AUDIT_REWRITE_CYCLES:-2}
   INGESTION_POLL_INTERVAL_SECONDS: ${INGESTION_POLL_INTERVAL_SECONDS:-900}
+  FEED_RELEVANCE_WEIGHT: ${FEED_RELEVANCE_WEIGHT:-1.0}
+  FEED_FRESHNESS_WEIGHT: ${FEED_FRESHNESS_WEIGHT:-1.0}
+  FEED_LOCALITY_WEIGHT: ${FEED_LOCALITY_WEIGHT:-1.0}
+  NEARBY_WINDOW_HOURS: ${NEARBY_WINDOW_HOURS:-12}
 
 services:
   postgres:
@@ -97,7 +101,7 @@ services:
     build:
       context: .
       dockerfile: infra/docker/Dockerfile.api
-    command: celery -A app.workers.celery_app:celery_app worker --loglevel=info -Q ingestion,event_detection,research,claim_resolution,verification,writing,auditing,celery
+    command: celery -A app.workers.celery_app:celery_app worker --loglevel=info -Q ingestion,event_detection,research,claim_resolution,verification,writing,auditing,publishing,celery
     environment:
       <<: *app-environment
     depends_on:
