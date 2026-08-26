@@ -71,7 +71,7 @@ M8 audita ese draft con Sol (`AUDITING_PROVIDER` OpenAI o DeepSeek; Anthropic no
 
 M9 publica solo si el último audit `SUCCESS` tiene `passed=true` sobre `current_version`. `AUTO_PUBLISH` en `.env.example` no es gate. `POST /api/v1/admin/events/{id}/publish` es retry ops (202 / 200 already_published / 409 `audit_not_passed`). No hay rechazo editorial. `scope=local` filtra en estricto por localidad.
 
-Caps: `MAX_RESEARCH_QUERIES_PER_EVENT` (4), `MAX_RESEARCH_RESULTS_PER_QUERY` (5), `MAX_RESEARCH_RESULTS_PER_DOMAIN` (3). M6: `MAX_VERIFICATION_CLAIMS_PER_EVENT` (5), `MAX_VERIFICATION_QUERIES_PER_CLAIM` (2), `MAX_VERIFICATION_RESULTS_PER_QUERY` (3). M7: `MAX_WRITING_CLAIMS_PER_EVENT` (40, solo el prompt a Claude; el detector de cambio material ve todos los claims), `MAX_WRITING_SOURCES_PER_EVENT` (20). M8: `MAX_AUDIT_REWRITE_CYCLES` (2). Requiere `SEARCH_PROVIDER=brave` y `BRAVE_API_KEY` en el worker. Sin clave, el run de verification queda `FAILED` y **no** encola writing.
+Caps: `MAX_RESEARCH_QUERIES_PER_EVENT` (4), `MAX_RESEARCH_RESULTS_PER_QUERY` (5), `MAX_RESEARCH_RESULTS_PER_DOMAIN` (3). M6: `MAX_VERIFICATION_CLAIMS_PER_EVENT` (5), `MAX_VERIFICATION_QUERIES_PER_CLAIM` (2), `MAX_VERIFICATION_RESULTS_PER_QUERY` (3). M7: `MAX_WRITING_CLAIMS_PER_EVENT` (40, solo el prompt a Claude; el detector de cambio material ve todos los claims), `MAX_WRITING_SOURCES_PER_EVENT` (20). M8: `MAX_AUDIT_REWRITE_CYCLES` (2). Búsqueda: `SEARCH_PROVIDER=exa` o `brave` más `EXA_API_KEY` / `BRAVE_API_KEY` en el worker. Sin clave del provider elegido, research/verification quedan `FAILED` y verification **no** encola writing.
 
 El poll manual del Admin es el criterio de aceptación de M2. Beat es el periódico: cada `INGESTION_POLL_INTERVAL_SECONDS` (default **900**).
 
@@ -79,7 +79,7 @@ El poll manual del Admin es el criterio de aceptación de M2. Beat es el periód
 
 Ver [`.env.example`](.env.example). Las claves y los IDs de modelo se configuran ahí; el dominio nunca hardcodea un vendor model ID.
 
-M3 en el worker: `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `LIGHT_PROCESSING_*`, `AMBIGUOUS_DEDUP_*`, `EMBEDDING_*`. M4 además: `BRAVE_API_KEY`, `SEARCH_PROVIDER`. M5: `DEEPSEEK_API_KEY`, `CLAIM_RESOLUTION_PROVIDER`, `CLAIM_RESOLUTION_MODEL`. M6: `VERIFICATION_PROVIDER`, `VERIFICATION_MODEL` (OpenAI o DeepSeek; no hardcodea model IDs). M7: `ANTHROPIC_API_KEY`, `WRITING_PROVIDER`, `WRITING_MODEL` (sin hardcodear model IDs). M8: `AUDITING_PROVIDER`, `AUDITING_MODEL` (OpenAI o DeepSeek; sin hardcodear model IDs). M9 no agrega providers. Compose pasa `FEED_*` y `NEARBY_WINDOW_HOURS`.
+M3 en el worker: `OPENAI_API_KEY`, `VOYAGE_API_KEY`, `LIGHT_PROCESSING_*`, `AMBIGUOUS_DEDUP_*`, `EMBEDDING_*`. M4/M6 búsqueda: `SEARCH_PROVIDER` (`exa` o `brave`), `EXA_API_KEY` y/o `BRAVE_API_KEY`. M5: `DEEPSEEK_API_KEY`, `CLAIM_RESOLUTION_PROVIDER`, `CLAIM_RESOLUTION_MODEL`. M6: `VERIFICATION_PROVIDER`, `VERIFICATION_MODEL` (OpenAI o DeepSeek; no hardcodea model IDs). M7: `ANTHROPIC_API_KEY`, `WRITING_PROVIDER`, `WRITING_MODEL` (sin hardcodear model IDs). M8: `AUDITING_PROVIDER`, `AUDITING_MODEL` (OpenAI o DeepSeek; sin hardcodear model IDs). M9 no agrega providers. Compose pasa `FEED_*` y `NEARBY_WINDOW_HOURS`.
 
 ## Migrations
 

@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     voyage_api_key: str | None = None
     brave_api_key: str | None = None
+    exa_api_key: str | None = None
 
     light_processing_provider: str | None = None
     light_processing_model: str | None = None

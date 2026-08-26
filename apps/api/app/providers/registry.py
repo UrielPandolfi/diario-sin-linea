@@ -121,6 +121,12 @@ def get_search_provider() -> SearchProvider:
         from app.providers.brave import BraveSearchProvider
 
         return BraveSearchProvider(api_key=settings.brave_api_key)
+    if provider_name == "exa":
+        if not settings.exa_api_key:
+            raise ProviderNotConfiguredError("Falta EXA_API_KEY")
+        from app.providers.exa import ExaSearchProvider
+
+        return ExaSearchProvider(api_key=settings.exa_api_key)
     raise ProviderNotConfiguredError(
         f"Proveedor de búsqueda no soportado todavía: {provider_name}"
     )
