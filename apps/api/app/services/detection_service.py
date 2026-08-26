@@ -4,6 +4,7 @@ from datetime import timedelta
 from math import sqrt
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -98,22 +99,43 @@ class DetectionService:
             self.session.flush()
             return {"event_id": str(event.id), "created": created, "reason": reason}
         except ProviderNotConfiguredError as exc:
-            return self._fail(item, run, str(exc))
+            return self._fail(item.id, attempt, str(exc))
         except Exception as exc:
             if _is_transient(exc):
-                run.status = PipelineStatus.RETRY
-                run.error_message = str(exc)
-                run.finished_at = utc_now()
-                item.processing_status = SourceItemStatus.PENDING
-                self.session.flush()
+                self.session.rollback()
+                item = self.items.get(source_item_id)
+                if item is not None:
+                    item.processing_status = SourceItemStatus.PENDING
+                    self.pipeline.add(
+                        PipelineRun(
+                            source_item_id=item.id,
+                            stage="event_detection",
+                            status=PipelineStatus.RETRY,
+                            attempt=attempt,
+                            error_message=str(exc),
+                            finished_at=utc_now(),
+                        )
+                    )
+                    self.session.flush()
                 raise
-            return self._fail(item, run, str(exc))
+            return self._fail(item.id, attempt, str(exc))
 
-    def _fail(self, item: SourceItem, run: PipelineRun, message: str) -> dict:
+    def _fail(self, source_item_id: UUID, attempt: int, message: str) -> dict:
+        self.session.rollback()
+        item = self.items.get(source_item_id)
+        if item is None:
+            return {"event_id": None, "created": False, "reason": "failed", "error": message}
         item.processing_status = SourceItemStatus.FAILED
-        run.status = PipelineStatus.FAILED
-        run.error_message = message
-        run.finished_at = utc_now()
+        self.pipeline.add(
+            PipelineRun(
+                source_item_id=item.id,
+                stage="event_detection",
+                status=PipelineStatus.FAILED,
+                attempt=attempt,
+                error_message=message,
+                finished_at=utc_now(),
+            )
+        )
         self.session.flush()
         return {"event_id": None, "created": False, "reason": "failed", "error": message}
 
@@ -311,6 +333,12 @@ class DetectionService:
             (entity.normalized_name, entity.entity_type): entity
             for entity in self.entities.list_for_event(event.id)
         }
+        existing_roles = {
+            (row.entity_id, row.role)
+            for row in self.session.scalars(
+                select(EventEntity).where(EventEntity.event_id == event.id)
+            ).all()
+        }
         for extracted in candidate.entities:
             normalized = normalize_name(extracted.name)
             if not normalized:
@@ -326,11 +354,16 @@ class DetectionService:
                 self.entities.add(entity)
                 self.session.flush()
                 linked[key] = entity
-            link = EventEntity(event_id=event.id, entity_id=entity.id, role=extracted.role[:64])
-            self.events.add_entity_link(link)
+            role = (extracted.role or "mencionado")[:64]
+            if (entity.id, role) in existing_roles:
+                continue
             try:
                 with self.session.begin_nested():
+                    self.events.add_entity_link(
+                        EventEntity(event_id=event.id, entity_id=entity.id, role=role)
+                    )
                     self.session.flush()
+                existing_roles.add((entity.id, role))
             except IntegrityError:
                 continue
 

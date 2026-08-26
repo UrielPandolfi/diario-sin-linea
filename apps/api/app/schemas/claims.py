@@ -1,8 +1,25 @@
 from datetime import datetime
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType
+
+
+def _coerce_optional_str(value: Any) -> str | None:
+    """Los LLM suelen devolver cifras como int/float; el schema y la DB usan str."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    if isinstance(value, (int, float)):
+        return str(value)
+    return str(value)
+
+
+OptionalStr = Annotated[str | None, BeforeValidator(_coerce_optional_str)]
 
 
 class ExtractedEvidence(BaseModel):
@@ -19,7 +36,7 @@ class ExtractedClaim(BaseModel):
     subject: str | None = None
     predicate: str | None = None
     object_text: str | None = None
-    normalized_value: str | None = None
+    normalized_value: OptionalStr = None
     unit: str | None = None
     occurred_at: datetime | None = None
     evidence: list[ExtractedEvidence] = Field(default_factory=list)

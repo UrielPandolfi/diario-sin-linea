@@ -16,6 +16,7 @@ export default function AdminDashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
+  const [requeuing, setRequeuing] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -58,6 +59,27 @@ export default function AdminDashboardPage() {
     }
   }
 
+  async function requeuePending() {
+    setRequeuing(true);
+    setNotice(null);
+    setError(null);
+    try {
+      const result = await adminJson<{ queued: number }>("/api/v1/admin/source-items/requeue-pending?limit=3", {
+        method: "POST",
+      });
+      setNotice(
+        result.queued
+          ? `Detección encolada para ${result.queued} ítem${result.queued === 1 ? "" : "s"} PENDING. El pipeline de IA arranca en el worker.`
+          : "No hay ítems PENDING para reprocesar.",
+      );
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo reencolar PENDING.");
+    } finally {
+      setRequeuing(false);
+    }
+  }
+
   return (
     <main className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -67,14 +89,24 @@ export default function AdminDashboardPage() {
           </p>
           <h1 className="mt-2 font-heading text-3xl font-medium text-primary">Redacción</h1>
         </div>
-        <button
-          type="button"
-          onClick={() => void pollMonitored()}
-          disabled={polling}
-          className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
-        >
-          {polling ? "Encolando…" : "Poll de vigiladas"}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void requeuePending()}
+            disabled={requeuing}
+            className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
+          >
+            {requeuing ? "Encolando…" : "Reprocesar PENDING (3)"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void pollMonitored()}
+            disabled={polling}
+            className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
+          >
+            {polling ? "Encolando…" : "Poll de vigiladas"}
+          </button>
+        </div>
       </div>
 
       {error ? <p className="font-sans text-sm text-accent-ochre">{error}</p> : null}

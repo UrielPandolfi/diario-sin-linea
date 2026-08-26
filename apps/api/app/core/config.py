@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     event_match_window_hours: int = 72
     embedding_dimensions: int = 1024
     ingestion_poll_interval_seconds: int = 900
+    max_new_events_per_poll: int = 0
     feed_relevance_weight: float = 1.0
     feed_freshness_weight: float = 1.0
     feed_locality_weight: float = 1.0

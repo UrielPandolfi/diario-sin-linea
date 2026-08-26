@@ -1,9 +1,20 @@
 from typing import TypeVar
 
-from openai import OpenAI
+from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
+
+
+def _model_allows_temperature_zero(model: str) -> bool:
+    """Algunos modelos OpenAI (gpt-5 base, o-series) solo admiten temperature default (1)."""
+    name = (model or "").casefold()
+    if any(token in name for token in ("o1", "o3", "o4-mini", "o4_mini")):
+        return False
+    # gpt-5 / gpt-5.6 "reasoning-style" aliases; chat-latest variants varían, mejor omitir 0.
+    if name.startswith("gpt-5") and "chat" not in name and "4o" not in name:
+        return False
+    return True
 
 
 class OpenAIStructuredProvider:
@@ -22,23 +33,33 @@ class OpenAIStructuredProvider:
         schema: type[T],
     ) -> T:
         last_error: Exception | None = None
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{system_prompt}\n\n"
+                    "Respondé únicamente JSON válido que respete el esquema."
+                ),
+            },
+            {"role": "user", "content": user_prompt},
+        ]
         for _ in range(2):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {
-                            "role": "system",
-                            "content": (
-                                f"{system_prompt}\n\n"
-                                "Respondé únicamente JSON válido que respete el esquema."
-                            ),
-                        },
-                        {"role": "user", "content": user_prompt},
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0,
-                )
+                create_kwargs: dict = {
+                    "model": self.model,
+                    "messages": messages,
+                    "response_format": {"type": "json_object"},
+                }
+                if _model_allows_temperature_zero(self.model):
+                    create_kwargs["temperature"] = 0
+                try:
+                    response = self.client.chat.completions.create(**create_kwargs)
+                except BadRequestError as exc:
+                    # Retry sin temperature si el modelo la rechaza (p.ej. gpt-5 / o-series).
+                    if "temperature" not in str(exc).casefold():
+                        raise
+                    create_kwargs.pop("temperature", None)
+                    response = self.client.chat.completions.create(**create_kwargs)
                 content = response.choices[0].message.content or "{}"
                 return schema.model_validate_json(content)
             except (ValidationError, ValueError, KeyError) as exc:

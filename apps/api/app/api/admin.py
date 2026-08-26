@@ -1,7 +1,7 @@
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
@@ -23,6 +23,7 @@ from app.services.source_service import SourceService
 from app.services.pipeline_lock import is_write_audit_publish_busy
 from app.workers.tasks import (
     audit_event_article,
+    detect_event,
     poll_source,
     publish_event_article,
     research_event,
@@ -227,6 +228,32 @@ def enqueue_poll(source_id: UUID, db: DbSession) -> dict:
 def list_items(db: DbSession, source_id: UUID | None = None, limit: int = 50) -> list[dict]:
     items = SourceItemRepository(db).list_recent(source_id=source_id, limit=min(limit, 100))
     return [_item_out(item) for item in items]
+
+
+@router.post(
+    "/source-items/requeue-pending",
+    dependencies=[Depends(require_admin)],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def requeue_pending_detection(
+    db: DbSession,
+    limit: int = Query(default=3, ge=1, le=50),
+) -> dict:
+    """Re-encola detección para SourceItems PENDING (p.ej. tras un poll fallido)."""
+    settings = get_settings()
+    cap = int(settings.max_new_events_per_poll or 0)
+    if cap > 0:
+        limit = min(limit, cap)
+    items = SourceItemRepository(db).list_pending(limit=limit)
+    poll_id = str(uuid4())
+    for item in items:
+        detect_event.delay(str(item.id), poll_id)
+    return {
+        "queued": len(items),
+        "poll_id": poll_id,
+        "item_ids": [str(item.id) for item in items],
+        "limit": limit,
+    }
 
 
 @router.get("/events", dependencies=[Depends(require_admin)])

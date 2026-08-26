@@ -184,3 +184,54 @@ def test_html_without_discovery_strategy_is_not_supported(db_session: Session) -
     assert fetcher.calls == []
     assert db_session.execute(text("SELECT count(*) FROM source_items")).scalar_one() == 0
     assert source.last_failure_at is not None
+
+
+def test_poll_source_task_enqueues_detection_after_commit(monkeypatch) -> None:
+    from uuid import uuid4
+
+    events: list[str] = []
+    item_a = uuid4()
+    item_b = uuid4()
+
+    class Sess:
+        def commit(self) -> None:
+            events.append("commit")
+
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakeIngestion:
+        def __init__(self, session, **_kwargs) -> None:
+            assert "enqueue_detection" not in _kwargs or _kwargs.get("enqueue_detection") is None
+
+        def poll_source(self, source_id):
+            events.append("poll")
+            return type(
+                "R",
+                (),
+                {
+                    "skipped": False,
+                    "created": 2,
+                    "updated": 0,
+                    "seen": 2,
+                    "reason": None,
+                    "item_ids": [item_a, item_b],
+                },
+            )()
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", Sess)
+    monkeypatch.setattr("app.workers.tasks.IngestionService", FakeIngestion)
+    monkeypatch.setattr(
+        "app.workers.tasks._enqueue_detection",
+        lambda item_id, poll_id: events.append(f"enqueue:{item_id}"),
+    )
+    from app.workers.tasks import poll_source
+
+    result = poll_source.run(str(uuid4()))
+    assert events[:2] == ["poll", "commit"]
+    assert events[2:] == [f"enqueue:{item_a}", f"enqueue:{item_b}"]
+    assert result["created"] == 2
+    assert result["poll_id"]

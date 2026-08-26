@@ -28,6 +28,33 @@ from app.schemas.claims import (
 )
 from app.services.claim_service import CLAIM_STAGE, ClaimService
 from app.services.event_service import EventService
+
+
+def test_extracted_claim_coerces_numeric_normalized_value() -> None:
+    batch = ClaimExtractionBatch.model_validate(
+        {
+            "claims": [
+                {
+                    "canonical_text": "Valuaron los pingüinos en 6 millones",
+                    "normalized_value": 6000000,
+                    "evidence": [],
+                },
+                {
+                    "canonical_text": "Elecciones en 2027",
+                    "normalized_value": 2027,
+                    "evidence": [],
+                },
+                {
+                    "canonical_text": "Sin cifra",
+                    "normalized_value": None,
+                    "evidence": [],
+                },
+            ]
+        }
+    )
+    assert batch.claims[0].normalized_value == "6000000"
+    assert batch.claims[1].normalized_value == "2027"
+    assert batch.claims[2].normalized_value is None
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 

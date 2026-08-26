@@ -60,10 +60,11 @@ class AnthropicJsonProvider:
         last_error: Exception | None = None
         for _ in range(2):
             try:
+                # No pasar temperature: algunos clientes/SDK de Messages lo rechazan
+                # (TypeError: unexpected keyword argument 'temperature').
                 response = self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_output_tokens,
-                    temperature=0,
                     system=(
                         f"{system_prompt}\n\n"
                         "Respondé únicamente JSON válido que respete el esquema."

@@ -73,6 +73,67 @@ def test_new_item_creates_event(db_session: Session) -> None:
     assert "DedupDecision" not in llm.calls
 
 
+def test_same_url_relink_skips_duplicate_entity_roles(db_session: Session) -> None:
+    """Segunda fuente del mismo hecho no debe explotar por uq_event_entities."""
+    source_a = _source(db_session, name="A")
+    source_b = _source(db_session, name="B")
+    person = ExtractedEntity(name="Donald Trump", entity_type=EntityType.PERSON, role="protagonista")
+    org = ExtractedEntity(
+        name="Departamento de Estado",
+        entity_type=EntityType.GOVERNMENT,
+        role="organismo",
+    )
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://www.ejemplo.test/visas",
+        title="EEUU suspende visas",
+        body="Suspenden citas de visas",
+        content_hash="va",
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://www.ejemplo.test/visas",
+        title="EEUU frena citas",
+        body="Capacitación consular",
+        content_hash="vb",
+    )
+    llm = FakeStructuredLLM(
+        {
+            "EventCandidate": [
+                _candidate(
+                    event_type="anuncio_oficial",
+                    what_happened="EEUU suspende citas de visas",
+                    short_summary="Pausa consular",
+                    entities=[person, org],
+                ),
+                _candidate(
+                    event_type="anuncio_oficial",
+                    what_happened="EEUU frena citas de visas inmigrante",
+                    short_summary="Misma pausa consular",
+                    entities=[person, org, person],
+                ),
+            ]
+        }
+    )
+    service = DetectionService(db_session, light_llm=llm, embeddings=FakeEmbeddingProvider())
+
+    first = service.detect(item_a.id)
+    second = service.detect(item_b.id)
+
+    assert first["created"] is True
+    assert second["created"] is False
+    assert first["event_id"] == second["event_id"]
+    link_count = db_session.execute(text("SELECT count(*) FROM event_entities")).scalar_one()
+    assert link_count == 2
+    from app.models import SourceItem
+
+    refreshed = db_session.get(SourceItem, item_b.id)
+    assert refreshed is not None
+    assert refreshed.processing_status.value == "PROCESSED"
+
+
 def test_same_url_links_without_creating_another_event(db_session: Session) -> None:
     source_a = _source(db_session, name="A")
     source_b = _source(db_session, name="B")

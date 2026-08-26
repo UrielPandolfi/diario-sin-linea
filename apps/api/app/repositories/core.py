@@ -17,7 +17,7 @@ from app.models import (
     Source,
     SourceItem,
 )
-from app.domain.enums import EntityType, PipelineStatus
+from app.domain.enums import EntityType, PipelineStatus, SourceItemStatus
 
 
 class SourceRepository:
@@ -90,6 +90,15 @@ class SourceItemRepository:
         stmt = select(SourceItem).order_by(SourceItem.detected_at.desc()).limit(limit)
         if source_id is not None:
             stmt = stmt.where(SourceItem.source_id == source_id)
+        return list(self.session.scalars(stmt))
+
+    def list_pending(self, *, limit: int = 50) -> list[SourceItem]:
+        stmt = (
+            select(SourceItem)
+            .where(SourceItem.processing_status == SourceItemStatus.PENDING)
+            .order_by(SourceItem.detected_at.desc())
+            .limit(limit)
+        )
         return list(self.session.scalars(stmt))
 
     def count_since(self, since: datetime) -> int:

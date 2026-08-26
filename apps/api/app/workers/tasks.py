@@ -1,5 +1,5 @@
 from datetime import timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -8,6 +8,7 @@ from app.core.db import SessionLocal
 from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.ingestion_service import IngestionService
+from app.services.pipeline_budget import allow_new_event_pipeline
 from app.services.research_service import ResearchService
 from app.services.audit_service import AuditService
 from app.services.verification_service import VerificationService
@@ -36,8 +37,8 @@ celery_app.conf.beat_schedule = {
 }
 
 
-def _enqueue_detection(source_item_id: UUID) -> None:
-    detect_event.delay(str(source_item_id))
+def _enqueue_detection(source_item_id: UUID, poll_id: str) -> None:
+    detect_event.delay(str(source_item_id), poll_id)
 
 
 @celery_app.task(name="app.workers.tasks.ping")
@@ -54,10 +55,15 @@ def ping() -> str:
 )
 def poll_source(self, source_id: str) -> dict:
     session = SessionLocal()
+    poll_id = str(uuid4())
     try:
-        service = IngestionService(session, enqueue_detection=_enqueue_detection)
+        # No encolar detección dentro del poll: el worker vería SourceItems
+        # aún no commiteados → source_item_not_found.
+        service = IngestionService(session)
         result = service.poll_source(UUID(source_id))
         session.commit()
+        for item_id in result.item_ids:
+            _enqueue_detection(item_id, poll_id)
         return {
             "skipped": result.skipped,
             "created": result.created,
@@ -65,6 +71,7 @@ def poll_source(self, source_id: str) -> dict:
             "seen": result.seen,
             "reason": result.reason,
             "item_ids": [str(item_id) for item_id in result.item_ids],
+            "poll_id": poll_id,
         }
     except Exception:
         session.rollback()
@@ -93,14 +100,21 @@ def poll_monitored_sources() -> dict:
     max_retries=settings.job_max_retries,
     retry_backoff=True,
 )
-def detect_event(self, source_item_id: str) -> dict:
+def detect_event(self, source_item_id: str, poll_id: str | None = None) -> dict:
     session = SessionLocal()
     try:
         service = DetectionService(session)
         result = service.detect(UUID(source_item_id), attempt=self.request.retries + 1)
         session.commit()
         if result.get("created") and result.get("event_id"):
-            research_event.delay(result["event_id"], "new_event")
+            if allow_new_event_pipeline(poll_id):
+                research_event.delay(result["event_id"], "new_event")
+            else:
+                result = {
+                    **result,
+                    "pipeline_skipped": True,
+                    "reason": "max_new_events_per_poll",
+                }
         return result
     except Exception as exc:
         session.rollback()
@@ -109,7 +123,6 @@ def detect_event(self, source_item_id: str) -> dict:
         raise
     finally:
         session.close()
-
 
 @celery_app.task(
     bind=True,
