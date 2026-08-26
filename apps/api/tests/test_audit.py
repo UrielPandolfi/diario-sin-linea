@@ -25,12 +25,44 @@ from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCrea
 from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSeverity, AuditIssueType
 from app.schemas.writing import ArticleDraft
 from app.services.article_service import ArticleService
-from app.services.audit_service import AUDITING_STAGE, AuditService
+from app.services.audit_service import AUDITING_STAGE, AuditService, normalize_audit_result
 from app.services.event_service import EventService
 from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.writing_service import WRITING_STAGE, WritingService
+
+
+def test_normalize_audit_result_low_issues_do_not_block() -> None:
+    low_only = ArticleAuditResult(
+        passed=False,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.FRAMING,
+                severity=AuditIssueSeverity.LOW,
+                text="tono",
+                explanation="nitpick",
+                suggested_fix=None,
+            )
+        ],
+    )
+    normalized = normalize_audit_result(low_only)
+    assert normalized.passed is True
+    assert len(normalized.issues) == 1
+
+    medium = ArticleAuditResult(
+        passed=True,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.ATTRIBUTION,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="dato",
+                explanation="falta atribución",
+                suggested_fix="atribuí",
+            )
+        ],
+    )
+    assert normalize_audit_result(medium).passed is False
 
 
 def _source(session: Session, **overrides):
@@ -172,6 +204,35 @@ def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str 
 
 def _service(session: Session, llm: FakeStructuredLLM) -> AuditService:
     return AuditService(session, llm=llm, writer=llm)
+
+
+def test_audit_low_only_passes_without_rewrite(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    version = article.current_version
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": ArticleAuditResult(
+                passed=False,
+                issues=[
+                    AuditIssue(
+                        type=AuditIssueType.ADJECTIVE,
+                        severity=AuditIssueSeverity.LOW,
+                        text="breve",
+                        explanation="estilo menor",
+                        suggested_fix=None,
+                    )
+                ],
+            ),
+            "ArticleDraft": _draft(),
+        }
+    )
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    assert result["passed"] is True
+    assert result["reason"] == "passed"
+    assert result["rewrite_count"] == 0
+    assert result["audit_count"] == 1
+    assert article.current_version == version
+    assert llm.calls == ["ArticleAuditResult"]
 
 
 def test_audit_prompt_has_context_and_draft_not_html(db_session: Session) -> None:

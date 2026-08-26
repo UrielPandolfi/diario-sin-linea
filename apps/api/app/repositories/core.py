@@ -1,7 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.models import (
@@ -13,6 +13,7 @@ from app.models import (
     EventEmbedding,
     EventEntity,
     EventSource,
+    LlmUsage,
     PipelineRun,
     Source,
     SourceItem,
@@ -104,6 +105,10 @@ class SourceItemRepository:
     def count_since(self, since: datetime) -> int:
         stmt = select(SourceItem).where(SourceItem.detected_at >= since)
         return len(list(self.session.scalars(stmt)))
+
+    def count_by_status(self) -> dict[str, int]:
+        stmt = select(SourceItem.processing_status, func.count()).group_by(SourceItem.processing_status)
+        return {status.value if hasattr(status, "value") else str(status): int(count) for status, count in self.session.execute(stmt)}
 
 
 class EventRepository:
@@ -293,6 +298,142 @@ class PipelineRunRepository:
             .limit(1)
         )
         return self.session.scalars(stmt).first()
+
+    def count_running_by_stage(self) -> dict[str, int]:
+        stmt = (
+            select(PipelineRun.stage, func.count())
+            .where(PipelineRun.status == PipelineStatus.RUNNING)
+            .group_by(PipelineRun.stage)
+        )
+        return {stage: int(count) for stage, count in self.session.execute(stmt)}
+
+    def count_by_stage_status_since(self, since: datetime) -> list[dict]:
+        stmt = (
+            select(PipelineRun.stage, PipelineRun.status, func.count())
+            .where(PipelineRun.started_at >= since)
+            .group_by(PipelineRun.stage, PipelineRun.status)
+        )
+        rows = []
+        for stage, status, count in self.session.execute(stmt):
+            rows.append(
+                {
+                    "stage": stage,
+                    "status": status.value if hasattr(status, "value") else str(status),
+                    "count": int(count),
+                }
+            )
+        return rows
+
+    def latest_for_events(self, event_ids: list[UUID]) -> dict[UUID, PipelineRun]:
+        if not event_ids:
+            return {}
+        # Postgres DISTINCT ON: latest started_at per event_id
+        stmt = (
+            select(PipelineRun)
+            .where(PipelineRun.event_id.in_(event_ids))
+            .order_by(PipelineRun.event_id, PipelineRun.started_at.desc())
+            .distinct(PipelineRun.event_id)
+        )
+        return {run.event_id: run for run in self.session.scalars(stmt).all() if run.event_id}
+
+
+class LlmUsageRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, row: LlmUsage) -> LlmUsage:
+        self.session.add(row)
+        return row
+
+    def totals_since(self, since: datetime) -> dict:
+        stmt = select(
+            func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+            func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+            func.coalesce(func.sum(LlmUsage.total_tokens), 0),
+            func.count(),
+        ).where(LlmUsage.created_at >= since)
+        prompt, completion, total, calls = self.session.execute(stmt).one()
+        return {
+            "prompt_tokens": int(prompt),
+            "completion_tokens": int(completion),
+            "total_tokens": int(total),
+            "calls": int(calls),
+        }
+
+    def totals_by_role_since(self, since: datetime) -> list[dict]:
+        stmt = (
+            select(
+                LlmUsage.model_role,
+                func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.total_tokens), 0),
+                func.count(),
+            )
+            .where(LlmUsage.created_at >= since)
+            .group_by(LlmUsage.model_role)
+            .order_by(func.sum(LlmUsage.total_tokens).desc())
+        )
+        return [
+            {
+                "model_role": role or "unknown",
+                "prompt_tokens": int(prompt),
+                "completion_tokens": int(completion),
+                "total_tokens": int(total),
+                "calls": int(calls),
+            }
+            for role, prompt, completion, total, calls in self.session.execute(stmt)
+        ]
+
+    def totals_for_event(self, event_id: UUID) -> dict:
+        stmt = select(
+            func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+            func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+            func.coalesce(func.sum(LlmUsage.total_tokens), 0),
+            func.count(),
+        ).where(LlmUsage.event_id == event_id)
+        prompt, completion, total, calls = self.session.execute(stmt).one()
+        return {
+            "prompt_tokens": int(prompt),
+            "completion_tokens": int(completion),
+            "total_tokens": int(total),
+            "calls": int(calls),
+        }
+
+    def totals_by_role_for_event(self, event_id: UUID) -> list[dict]:
+        stmt = (
+            select(
+                LlmUsage.model_role,
+                LlmUsage.stage,
+                func.coalesce(func.sum(LlmUsage.prompt_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.completion_tokens), 0),
+                func.coalesce(func.sum(LlmUsage.total_tokens), 0),
+                func.count(),
+            )
+            .where(LlmUsage.event_id == event_id)
+            .group_by(LlmUsage.model_role, LlmUsage.stage)
+            .order_by(func.sum(LlmUsage.total_tokens).desc())
+        )
+        return [
+            {
+                "model_role": role or "unknown",
+                "stage": stage or "unknown",
+                "prompt_tokens": int(prompt),
+                "completion_tokens": int(completion),
+                "total_tokens": int(total),
+                "calls": int(calls),
+            }
+            for role, stage, prompt, completion, total, calls in self.session.execute(stmt)
+        ]
+
+    def totals_for_events(self, event_ids: list[UUID]) -> dict[UUID, int]:
+        if not event_ids:
+            return {}
+        stmt = (
+            select(LlmUsage.event_id, func.coalesce(func.sum(LlmUsage.total_tokens), 0))
+            .where(LlmUsage.event_id.in_(event_ids))
+            .group_by(LlmUsage.event_id)
+        )
+        return {event_id: int(total) for event_id, total in self.session.execute(stmt) if event_id}
 
 
 class ArticleRepository:

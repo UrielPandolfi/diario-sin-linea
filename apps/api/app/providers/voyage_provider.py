@@ -1,5 +1,7 @@
 import httpx
 
+from app.services.usage_recorder import record_llm_usage
+
 
 class VoyageEmbeddingProvider:
     def __init__(self, *, api_key: str, model: str) -> None:
@@ -14,5 +16,15 @@ class VoyageEmbeddingProvider:
                 json={"model": self.model, "input": texts, "input_type": "document"},
             )
             response.raise_for_status()
-            rows = sorted(response.json()["data"], key=lambda row: row["index"])
+            payload = response.json()
+            usage = payload.get("usage") or {}
+            total = int(usage.get("total_tokens") or 0)
+            record_llm_usage(
+                provider="voyage",
+                model=self.model,
+                prompt_tokens=total,
+                completion_tokens=0,
+                total_tokens=total,
+            )
+            rows = sorted(payload["data"], key=lambda row: row["index"])
             return [row["embedding"] for row in rows]

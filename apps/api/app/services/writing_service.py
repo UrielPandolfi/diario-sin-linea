@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from app.core.usage_context import usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
 from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
@@ -75,7 +76,12 @@ class WritingService:
             }
 
         try:
-            result = self._run(event, trigger=trigger)
+            with usage_scope(
+                stage=WRITING_STAGE,
+                event_id=event.id,
+                pipeline_run_id=run.id,
+            ):
+                result = self._run(event, trigger=trigger)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}

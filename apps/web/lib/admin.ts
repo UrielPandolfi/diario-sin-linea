@@ -1,8 +1,24 @@
+export type AdminTokenTotals = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  calls: number;
+};
+
+export type AdminTokenByRole = AdminTokenTotals & {
+  model_role: string;
+};
+
 export type AdminStats = {
   monitored_sources: number;
   source_items_24h: number;
   events_24h: number;
   failed_runs_24h: number;
+  running_by_stage?: Record<string, number>;
+  runs_by_stage_status_24h?: { stage: string; status: string; count: number }[];
+  items_by_status?: Record<string, number>;
+  tokens_24h?: AdminTokenTotals;
+  tokens_by_role_24h?: AdminTokenByRole[];
 };
 
 export type AdminSource = {
@@ -42,6 +58,9 @@ export type AdminEvent = {
   short_summary: string | null;
   detected_at: string | null;
   started_at: string | null;
+  pipeline_stage?: string | null;
+  pipeline_run_status?: string | null;
+  tokens_total?: number;
 };
 
 export type AdminEventDetail = AdminEvent & {
@@ -67,7 +86,11 @@ export type AdminEventDetail = AdminEvent & {
     error_message: string | null;
     started_at: string | null;
     finished_at: string | null;
+    metadata_json?: Record<string, unknown>;
   }[];
+  token_usage?: AdminTokenTotals & {
+    by_role_stage: (AdminTokenTotals & { model_role: string; stage: string })[];
+  };
   claims: {
     id: string;
     canonical_text: string;
@@ -141,4 +164,21 @@ export function formatWhen(value: string | null | undefined): string {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return date.toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" });
+}
+
+export function formatDuration(startedAt: string | null | undefined, finishedAt: string | null | undefined): string {
+  if (!startedAt || !finishedAt) return "—";
+  const start = new Date(startedAt).getTime();
+  const end = new Date(finishedAt).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end) || end < start) return "—";
+  const ms = end - start;
+  if (ms < 1000) return `${ms} ms`;
+  const sec = ms / 1000;
+  if (sec < 60) return `${sec.toFixed(1)} s`;
+  return `${(sec / 60).toFixed(1)} min`;
+}
+
+export function formatTokens(value: number | null | undefined): string {
+  if (value == null) return "—";
+  return value.toLocaleString("es-AR");
 }

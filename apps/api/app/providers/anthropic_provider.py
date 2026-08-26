@@ -71,6 +71,16 @@ class AnthropicJsonProvider:
                     ),
                     messages=[{"role": "user", "content": user_prompt}],
                 )
+                from app.services.usage_recorder import extract_anthropic_usage, record_llm_usage
+
+                prompt, completion, total = extract_anthropic_usage(response)
+                record_llm_usage(
+                    provider="anthropic",
+                    model=self.model,
+                    prompt_tokens=prompt,
+                    completion_tokens=completion,
+                    total_tokens=total,
+                )
                 content = "".join(
                     getattr(block, "text", "") or ""
                     for block in (response.content or [])

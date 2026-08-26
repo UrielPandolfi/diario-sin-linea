@@ -12,6 +12,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.text import normalize_name
+from app.core.usage_context import update_usage_context, usage_scope
 from app.domain.enums import EventSourceRelation, PipelineStatus, SourceItemStatus
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
 from app.models.event import EMBEDDING_DIMENSIONS
@@ -87,17 +88,23 @@ class DetectionService:
         item.processing_status = SourceItemStatus.PROCESSING
 
         try:
-            candidate = self._extract_candidate(item)
-            event, created, reason = self._resolve_event(item, candidate)
-            self._persist_entities(event, candidate)
-            self._store_embedding(event, candidate)
-            item.processing_status = SourceItemStatus.PROCESSED
-            run.status = PipelineStatus.SUCCESS
-            run.event_id = event.id
-            run.finished_at = utc_now()
-            run.metadata_json = {"reason": reason, "created": created}
-            self.session.flush()
-            return {"event_id": str(event.id), "created": created, "reason": reason}
+            with usage_scope(
+                stage="event_detection",
+                source_item_id=item.id,
+                pipeline_run_id=run.id,
+            ):
+                candidate = self._extract_candidate(item)
+                event, created, reason = self._resolve_event(item, candidate)
+                update_usage_context(event_id=event.id)
+                self._persist_entities(event, candidate)
+                self._store_embedding(event, candidate)
+                item.processing_status = SourceItemStatus.PROCESSED
+                run.status = PipelineStatus.SUCCESS
+                run.event_id = event.id
+                run.finished_at = utc_now()
+                run.metadata_json = {"reason": reason, "created": created}
+                self.session.flush()
+                return {"event_id": str(event.id), "created": created, "reason": reason}
         except ProviderNotConfiguredError as exc:
             return self._fail(item.id, attempt, str(exc))
         except Exception as exc:

@@ -13,6 +13,7 @@ from app.repositories import (
     ArticleRepository,
     EntityRepository,
     EventRepository,
+    LlmUsageRepository,
     PipelineRunRepository,
     SourceItemRepository,
     SourceRepository,
@@ -141,7 +142,7 @@ def _write_audit_publish_running(db, event_id: UUID) -> bool:
     return is_write_audit_publish_busy(PipelineRunRepository(db), event_id)
 
 
-def _event_out(event) -> dict:
+def _event_out(event, *, pipeline_stage: str | None = None, pipeline_run_status: str | None = None, tokens_total: int = 0) -> dict:
     return {
         "id": str(event.id),
         "title_internal": event.title_internal,
@@ -152,6 +153,9 @@ def _event_out(event) -> dict:
         "short_summary": event.short_summary,
         "detected_at": _iso(event.detected_at),
         "started_at": _iso(event.started_at),
+        "pipeline_stage": pipeline_stage,
+        "pipeline_run_status": pipeline_run_status,
+        "tokens_total": tokens_total,
     }
 
 
@@ -178,11 +182,19 @@ def me() -> dict:
 @router.get("/stats", dependencies=[Depends(require_admin)])
 def stats(db: DbSession) -> dict:
     since = utc_now() - timedelta(hours=24)
+    pipeline = PipelineRunRepository(db)
+    usage = LlmUsageRepository(db)
+    token_totals = usage.totals_since(since)
     return {
         "monitored_sources": SourceRepository(db).count_monitored(),
         "source_items_24h": SourceItemRepository(db).count_since(since),
         "events_24h": EventRepository(db).count_since(since),
-        "failed_runs_24h": PipelineRunRepository(db).count_failed_since(since),
+        "failed_runs_24h": pipeline.count_failed_since(since),
+        "running_by_stage": pipeline.count_running_by_stage(),
+        "runs_by_stage_status_24h": pipeline.count_by_stage_status_since(since),
+        "items_by_status": SourceItemRepository(db).count_by_status(),
+        "tokens_24h": token_totals,
+        "tokens_by_role_24h": usage.totals_by_role_since(since),
     }
 
 
@@ -259,7 +271,20 @@ def requeue_pending_detection(
 @router.get("/events", dependencies=[Depends(require_admin)])
 def list_events(db: DbSession, limit: int = 50) -> list[dict]:
     events = EventRepository(db).list_recent(limit=min(limit, 100))
-    return [_event_out(event) for event in events]
+    event_ids = [event.id for event in events]
+    latest_runs = PipelineRunRepository(db).latest_for_events(event_ids)
+    token_totals = LlmUsageRepository(db).totals_for_events(event_ids)
+    return [
+        _event_out(
+            event,
+            pipeline_stage=latest_runs[event.id].stage if event.id in latest_runs else None,
+            pipeline_run_status=(
+                latest_runs[event.id].status.value if event.id in latest_runs else None
+            ),
+            tokens_total=token_totals.get(event.id, 0),
+        )
+        for event in events
+    ]
 
 
 @router.get("/events/{event_id}", dependencies=[Depends(require_admin)])
@@ -268,10 +293,18 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
     if event is None:
         raise HTTPException(status_code=404, detail="Suceso no encontrado")
     entities = {entity.id: entity for entity in EntityRepository(db).list_for_event(event_id)}
-    runs = PipelineRunRepository(db).list_for_event(event_id)
+    runs = PipelineRunRepository(db).list_for_event(event_id, limit=50)
     article = ArticleRepository(db).get_by_event_id(event_id)
+    usage = LlmUsageRepository(db)
+    latest = runs[0] if runs else None
+    token_totals = usage.totals_for_event(event_id)
     return {
-        **_event_out(event),
+        **_event_out(
+            event,
+            pipeline_stage=latest.stage if latest else None,
+            pipeline_run_status=latest.status.value if latest else None,
+            tokens_total=token_totals["total_tokens"],
+        ),
         "country_code": event.country_code,
         "neighborhood": event.neighborhood,
         "address_text": event.address_text,
@@ -297,6 +330,10 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
         "claims": [_claim_out(claim) for claim in event.claims],
         "article": _article_out(article) if article is not None else None,
         "audit": _audit_out(runs),
+        "token_usage": {
+            **token_totals,
+            "by_role_stage": usage.totals_by_role_for_event(event_id),
+        },
         "pipeline_runs": [
             {
                 "id": str(run.id),
@@ -306,6 +343,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
                 "error_message": run.error_message,
                 "started_at": _iso(run.started_at),
                 "finished_at": _iso(run.finished_at),
+                "metadata_json": run.metadata_json or {},
             }
             for run in runs
         ],

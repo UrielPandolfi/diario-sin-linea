@@ -3,6 +3,8 @@ from typing import TypeVar
 from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, ValidationError
 
+from app.services.usage_recorder import extract_openai_usage, record_llm_usage
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -18,8 +20,16 @@ def _model_allows_temperature_zero(model: str) -> bool:
 
 
 class OpenAIStructuredProvider:
-    def __init__(self, *, api_key: str, model: str, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        base_url: str | None = None,
+        provider_name: str = "openai",
+    ) -> None:
         self.model = model
+        self.provider_name = provider_name
         kwargs: dict = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
@@ -60,6 +70,14 @@ class OpenAIStructuredProvider:
                         raise
                     create_kwargs.pop("temperature", None)
                     response = self.client.chat.completions.create(**create_kwargs)
+                prompt, completion, total = extract_openai_usage(response)
+                record_llm_usage(
+                    provider=self.provider_name,
+                    model=self.model,
+                    prompt_tokens=prompt,
+                    completion_tokens=completion,
+                    total_tokens=total,
+                )
                 content = response.choices[0].message.content or "{}"
                 return schema.model_validate_json(content)
             except (ValidationError, ValueError, KeyError) as exc:
@@ -68,10 +86,19 @@ class OpenAIStructuredProvider:
 
 
 class OpenAIEmbeddingProvider:
-    def __init__(self, *, api_key: str, model: str) -> None:
+    def __init__(self, *, api_key: str, model: str, provider_name: str = "openai") -> None:
         self.model = model
+        self.provider_name = provider_name
         self.client = OpenAI(api_key=api_key)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         response = self.client.embeddings.create(model=self.model, input=texts)
+        prompt, completion, total = extract_openai_usage(response)
+        record_llm_usage(
+            provider=self.provider_name,
+            model=self.model,
+            prompt_tokens=prompt,
+            completion_tokens=completion,
+            total_tokens=total,
+        )
         return [item.embedding for item in response.data]

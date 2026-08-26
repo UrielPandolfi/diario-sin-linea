@@ -14,6 +14,7 @@ from app.core.clock import utc_now
 from app.core.prompts import load_prompt
 from app.core.text import excerpt_in_source, normalize_name
 from app.core.urls import url_domain
+from app.core.usage_context import usage_scope
 from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType, PipelineStatus
 from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, Source, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
@@ -238,7 +239,12 @@ class ClaimService:
             }
 
         try:
-            result = self._run(event)
+            with usage_scope(
+                stage=CLAIM_STAGE,
+                event_id=event.id,
+                pipeline_run_id=run.id,
+            ):
+                result = self._run(event)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}

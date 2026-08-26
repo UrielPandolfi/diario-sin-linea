@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { adminJson, formatWhen, type AdminEvent } from "@/lib/admin";
+import { adminJson, formatTokens, formatWhen, type AdminEvent } from "@/lib/admin";
 
 export default function AdminEventsPage() {
   const [events, setEvents] = useState<AdminEvent[]>([]);
@@ -41,6 +41,12 @@ export default function AdminEventsPage() {
                   <p className="font-sans text-primary">{event.title_internal}</p>
                   <p className="mt-1 font-sans text-xs text-secondary">
                     {event.event_type} · {event.status}
+                    {event.pipeline_stage
+                      ? ` · ${event.pipeline_stage}${event.pipeline_run_status ? ` · ${event.pipeline_run_status}` : ""}`
+                      : ""}
+                    {typeof event.tokens_total === "number" && event.tokens_total > 0
+                      ? ` · ${formatTokens(event.tokens_total)} tok`
+                      : ""}
                     {event.locality ? ` · ${event.locality}` : ""}
                     {event.province ? `, ${event.province}` : ""} · {formatWhen(event.detected_at)}
                   </p>

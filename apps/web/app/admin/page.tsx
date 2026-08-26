@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   adminJson,
+  formatTokens,
   formatWhen,
   type AdminSource,
   type AdminSourceItem,
@@ -80,6 +81,13 @@ export default function AdminDashboardPage() {
     }
   }
 
+  const runningEntries = Object.entries(stats?.running_by_stage ?? {}).sort(
+    (a, b) => b[1] - a[1],
+  );
+  const itemStatusEntries = Object.entries(stats?.items_by_status ?? {}).sort(
+    (a, b) => b[1] - a[1],
+  );
+
   return (
     <main className="space-y-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -118,6 +126,89 @@ export default function AdminDashboardPage() {
         <StatCard label="Sucesos (24 h)" value={stats?.events_24h} />
         <StatCard label="Corridas fallidas (24 h)" value={stats?.failed_runs_24h} />
       </section>
+
+      <section className="grid gap-3 lg:grid-cols-3">
+        <div className="border border-border bg-surface p-4">
+          <p className="font-sans text-xs uppercase tracking-[0.12em] text-secondary">
+            En curso (RUNNING)
+          </p>
+          {runningEntries.length === 0 ? (
+            <p className="mt-2 font-sans text-sm text-secondary">Ninguna corrida activa.</p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {runningEntries.map(([stage, count]) => (
+                <li key={stage} className="flex justify-between font-sans text-sm text-primary">
+                  <span>{stage}</span>
+                  <span>{count}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="border border-border bg-surface p-4">
+          <p className="font-sans text-xs uppercase tracking-[0.12em] text-secondary">
+            Ítems por estado
+          </p>
+          {itemStatusEntries.length === 0 ? (
+            <p className="mt-2 font-sans text-sm text-secondary">Sin datos.</p>
+          ) : (
+            <ul className="mt-2 space-y-1">
+              {itemStatusEntries.map(([status, count]) => (
+                <li key={status} className="flex justify-between font-sans text-sm text-primary">
+                  <span>{status}</span>
+                  <span>{count}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div className="border border-border bg-surface p-4">
+          <p className="font-sans text-xs uppercase tracking-[0.12em] text-secondary">
+            Tokens 24 h
+          </p>
+          <p className="mt-2 font-heading text-2xl text-primary">
+            {formatTokens(stats?.tokens_24h?.total_tokens)}
+          </p>
+          <p className="mt-1 font-sans text-xs text-secondary">
+            {stats?.tokens_24h?.calls ?? 0} llamadas · prompt{" "}
+            {formatTokens(stats?.tokens_24h?.prompt_tokens)} · completion{" "}
+            {formatTokens(stats?.tokens_24h?.completion_tokens)}
+          </p>
+          {(stats?.tokens_by_role_24h?.length ?? 0) > 0 ? (
+            <ul className="mt-3 space-y-1 border-t border-border pt-3">
+              {stats?.tokens_by_role_24h?.map((row) => (
+                <li key={row.model_role} className="flex justify-between font-sans text-sm text-primary">
+                  <span>{row.model_role}</span>
+                  <span>
+                    {formatTokens(row.total_tokens)} · {row.calls}×
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      </section>
+
+      {(stats?.runs_by_stage_status_24h?.length ?? 0) > 0 ? (
+        <section className="border border-border bg-surface">
+          <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
+            Corridas por etapa (24 h)
+          </h2>
+          <ul className="divide-y divide-border">
+            {stats?.runs_by_stage_status_24h?.map((row) => (
+              <li
+                key={`${row.stage}-${row.status}`}
+                className="flex justify-between px-4 py-2 font-sans text-sm text-primary"
+              >
+                <span>
+                  {row.stage} · {row.status}
+                </span>
+                <span>{row.count}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="border border-border bg-surface">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">

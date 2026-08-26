@@ -14,6 +14,7 @@ from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.text import content_fingerprint, excerpt_in_source
 from app.core.urls import canonicalize_url, url_domain
+from app.core.usage_context import usage_scope
 from app.domain.enums import (
     ClaimStatus,
     EventSourceRelation,
@@ -117,7 +118,12 @@ class VerificationService:
             }
 
         try:
-            result = self._run(event)
+            with usage_scope(
+                stage=VERIFICATION_STAGE,
+                event_id=event.id,
+                pipeline_run_id=run.id,
+            ):
+                result = self._run(event)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}

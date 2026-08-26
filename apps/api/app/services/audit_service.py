@@ -11,13 +11,14 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from app.core.usage_context import usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
 from app.models import Article, Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
 from app.providers.registry import ModelRole, get_structured_provider
 from app.repositories import ArticleRepository, EntityRepository, PipelineRunRepository
 from app.schemas import ArticleContentUpdate
-from app.schemas.auditing import ArticleAuditResult, AuditIssue
+from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSeverity
 from app.schemas.writing import ArticleDraft
 from app.services.article_context import build_article_context
 from app.services.article_service import ArticleService
@@ -25,6 +26,16 @@ from app.services.pipeline_lock import AUDITING_STAGE, is_write_audit_publish_bu
 
 AUDITING_ROLE = "auditing"
 REWRITE_CHANGE_REASON = "audit_rewrite"
+
+
+def normalize_audit_result(result: ArticleAuditResult) -> ArticleAuditResult:
+    """LOW nunca bloquea: passed=false solo con issues HIGH o MEDIUM."""
+    blocking = [
+        issue
+        for issue in result.issues
+        if issue.severity in (AuditIssueSeverity.HIGH, AuditIssueSeverity.MEDIUM)
+    ]
+    return ArticleAuditResult(passed=not blocking, issues=list(result.issues))
 
 
 class AuditService:
@@ -79,7 +90,12 @@ class AuditService:
             }
 
         try:
-            result = self._run(event, run, trigger=trigger)
+            with usage_scope(
+                stage=AUDITING_STAGE,
+                event_id=event.id,
+                pipeline_run_id=run.id,
+            ):
+                result = self._run(event, run, trigger=trigger)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}
@@ -161,12 +177,20 @@ class AuditService:
         writer = self.writer
 
         while True:
-            result = auditor.generate_structured(
-                system_prompt=load_prompt("article_audit.md"),
-                user_prompt=self._audit_user_prompt(article_context, article),
-                schema=ArticleAuditResult,
+            result = normalize_audit_result(
+                auditor.generate_structured(
+                    system_prompt=load_prompt("article_audit.md"),
+                    user_prompt=self._audit_user_prompt(article_context, article),
+                    schema=ArticleAuditResult,
+                )
             )
             audits += 1
+            # Solo issues bloqueantes alimentan el rewrite; LOW no dispara otro ciclo.
+            rewrite_issues = [
+                issue
+                for issue in result.issues
+                if issue.severity in (AuditIssueSeverity.HIGH, AuditIssueSeverity.MEDIUM)
+            ]
             issues = [issue.model_dump(mode="json") for issue in result.issues]
             base.update(
                 {
@@ -196,7 +220,7 @@ class AuditService:
                 writer = get_structured_provider(ModelRole.WRITING)
             draft = writer.generate_structured(
                 system_prompt=load_prompt("article_writing.md"),
-                user_prompt=self._rewrite_user_prompt(article_context, article, result.issues),
+                user_prompt=self._rewrite_user_prompt(article_context, article, rewrite_issues),
                 schema=ArticleDraft,
             )
             article = self.article_service.update_content(

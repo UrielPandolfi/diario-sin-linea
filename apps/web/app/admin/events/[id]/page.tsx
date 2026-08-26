@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { adminFetch, adminJson, formatWhen, type AdminEventDetail } from "@/lib/admin";
+import { adminFetch, adminJson, formatDuration, formatTokens, formatWhen, type AdminEventDetail } from "@/lib/admin";
 
 export default function AdminEventDetailPage() {
   const params = useParams<{ id: string }>();
@@ -227,6 +227,12 @@ export default function AdminEventDetailPage() {
         {event ? (
           <p className="mt-2 font-sans text-secondary">
             {event.event_type} · {event.status}
+            {event.pipeline_stage
+              ? ` · pipeline ${event.pipeline_stage}${event.pipeline_run_status ? ` · ${event.pipeline_run_status}` : ""}`
+              : ""}
+            {typeof event.tokens_total === "number"
+              ? ` · ${formatTokens(event.tokens_total)} tok`
+              : ""}
             {event.locality ? ` · ${event.locality}` : ""}
             {event.neighborhood ? ` · ${event.neighborhood}` : ""}
           </p>
@@ -440,6 +446,41 @@ export default function AdminEventDetailPage() {
 
           <section className="border border-border bg-surface">
             <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
+              Tokens
+            </h2>
+            {event.token_usage && event.token_usage.calls > 0 ? (
+              <div className="space-y-3 px-4 py-4">
+                <p className="font-sans text-sm text-primary">
+                  Total {formatTokens(event.token_usage.total_tokens)} · prompt{" "}
+                  {formatTokens(event.token_usage.prompt_tokens)} · completion{" "}
+                  {formatTokens(event.token_usage.completion_tokens)} ·{" "}
+                  {event.token_usage.calls} llamadas
+                </p>
+                <ul className="divide-y divide-border border border-border">
+                  {event.token_usage.by_role_stage.map((row) => (
+                    <li
+                      key={`${row.model_role}-${row.stage}`}
+                      className="flex justify-between px-3 py-2 font-sans text-sm text-primary"
+                    >
+                      <span>
+                        {row.model_role} · {row.stage}
+                      </span>
+                      <span>
+                        {formatTokens(row.total_tokens)} · {row.calls}×
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="px-4 py-6 font-sans text-sm text-secondary">
+                Sin usage registrado (solo corridas posteriores al deploy de telemetría).
+              </p>
+            )}
+          </section>
+
+          <section className="border border-border bg-surface">
+            <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
               pipeline_runs
             </h2>
             {event.pipeline_runs.length === 0 ? (
@@ -453,8 +494,15 @@ export default function AdminEventDetailPage() {
                     </p>
                     <p className="mt-1 font-sans text-xs text-secondary">
                       intento {run.attempt} · {formatWhen(run.started_at)}
+                      {run.finished_at ? ` → ${formatWhen(run.finished_at)}` : ""}
+                      {` · ${formatDuration(run.started_at, run.finished_at)}`}
                       {run.error_message ? ` · ${run.error_message}` : ""}
                     </p>
+                    {run.metadata_json && Object.keys(run.metadata_json).length > 0 ? (
+                      <pre className="mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono text-[11px] text-secondary">
+                        {JSON.stringify(run.metadata_json, null, 2)}
+                      </pre>
+                    ) : null}
                   </li>
                 ))}
               </ul>

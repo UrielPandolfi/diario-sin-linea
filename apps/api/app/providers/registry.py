@@ -1,6 +1,7 @@
 from enum import StrEnum
 
 from app.core.config import get_settings
+from app.core.usage_context import bind_model_role
 from app.providers.base import (
     EmbeddingProvider,
     ProviderNotConfiguredError,
@@ -66,13 +67,17 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
         raise ProviderNotConfiguredError(
             f"Falta API key para el proveedor {provider_name} (rol {role.value})"
         )
+    bind_model_role(role.value, provider=provider_name.lower())
     if provider_name.lower() == "openai":
-        return OpenAIStructuredProvider(api_key=api_key, model=model)
+        return OpenAIStructuredProvider(
+            api_key=api_key, model=model, provider_name="openai"
+        )
     if provider_name.lower() == "deepseek":
         return OpenAIStructuredProvider(
             api_key=api_key,
             model=model,
             base_url="https://api.deepseek.com",
+            provider_name="deepseek",
         )
     if provider_name.lower() == "anthropic":
         from app.providers.anthropic_provider import AnthropicJsonProvider
@@ -101,10 +106,13 @@ def get_embedding_provider() -> EmbeddingProvider:
         raise ProviderNotConfiguredError(
             f"Falta API key para embeddings ({provider_name})"
         )
+    bind_model_role(ModelRole.EMBEDDING.value, provider=provider_name.lower())
     if provider_name.lower() == "voyage":
         return VoyageEmbeddingProvider(api_key=api_key, model=model)
     if provider_name.lower() == "openai":
-        return OpenAIEmbeddingProvider(api_key=api_key, model=model)
+        return OpenAIEmbeddingProvider(
+            api_key=api_key, model=model, provider_name="openai"
+        )
     raise ProviderNotConfiguredError(
         f"Proveedor de embeddings no soportado todavía: {provider_name}"
     )
