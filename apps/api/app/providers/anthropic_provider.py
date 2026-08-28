@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
@@ -62,6 +63,7 @@ class AnthropicJsonProvider:
             try:
                 # No pasar temperature: algunos clientes/SDK de Messages lo rechazan
                 # (TypeError: unexpected keyword argument 'temperature').
+                started = time.perf_counter()
                 response = self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_output_tokens,
@@ -73,6 +75,7 @@ class AnthropicJsonProvider:
                 )
                 from app.services.usage_recorder import extract_anthropic_usage, record_llm_usage
 
+                duration_ms = int((time.perf_counter() - started) * 1000)
                 prompt, completion, total = extract_anthropic_usage(response)
                 record_llm_usage(
                     provider="anthropic",
@@ -80,6 +83,7 @@ class AnthropicJsonProvider:
                     prompt_tokens=prompt,
                     completion_tokens=completion,
                     total_tokens=total,
+                    duration_ms=duration_ms,
                 )
                 content = "".join(
                     getattr(block, "text", "") or ""

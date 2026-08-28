@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.usage_context import usage_scope
+from app.core.usage_context import bind_model_role, usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
 from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
@@ -172,6 +172,7 @@ class WritingService:
             excerpt_chars=self.settings.writing_excerpt_chars,
         )
         llm = self.llm or get_structured_provider(ModelRole.WRITING)
+        bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
         draft = llm.generate_structured(
             system_prompt=load_prompt("article_writing.md"),
             user_prompt=self._user_prompt(article_context),

@@ -70,8 +70,8 @@ export default function AdminDashboardPage() {
       });
       setNotice(
         result.queued
-          ? `Detección encolada para ${result.queued} ítem${result.queued === 1 ? "" : "s"} PENDING. El pipeline de IA arranca en el worker.`
-          : "No hay ítems PENDING para reprocesar.",
+          ? `Detección encolada para ${result.queued} ítem${result.queued === 1 ? "" : "s"} PENDING o FAILED. El pipeline de IA arranca en el worker.`
+          : "No hay ítems PENDING o FAILED para reprocesar.",
       );
       await load();
     } catch (err: unknown) {
@@ -104,7 +104,7 @@ export default function AdminDashboardPage() {
             disabled={requeuing}
             className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
           >
-            {requeuing ? "Encolando…" : "Reprocesar PENDING (3)"}
+            {requeuing ? "Encolando…" : "Reprocesar fallidos (3)"}
           </button>
           <button
             type="button"
@@ -126,6 +126,11 @@ export default function AdminDashboardPage() {
         <StatCard label="Sucesos (24 h)" value={stats?.events_24h} />
         <StatCard label="Corridas fallidas (24 h)" value={stats?.failed_runs_24h} />
       </section>
+      {stats?.last_failed_error ? (
+        <p className="font-sans text-sm text-accent-ochre">
+          Último error de pipeline: {stats.last_failed_error}
+        </p>
+      ) : null}
 
       <section className="grid gap-3 lg:grid-cols-3">
         <div className="border border-border bg-surface p-4">

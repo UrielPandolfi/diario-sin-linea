@@ -1,13 +1,16 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.domain.enums import EntityType, IngestionMethod
+from app.domain.enums import EntityType, IngestionMethod, PipelineStatus
+from app.models import PipelineRun, SourceItem
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
+from app.providers.registry import ModelRole
 from app.schemas import SourceCreate, SourceItemCreate
-from app.schemas.detection import EventCandidate, ExtractedEntity
+from app.schemas.detection import EditorialScope, EventCandidate, ExtractedEntity
 from app.services.detection_service import DetectionService
+from app.services.editorial_gate import EditorialFilterReason
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 
@@ -289,3 +292,234 @@ def test_content_update_of_same_item_does_not_create_another_event(db_session: S
     assert created["event_id"] == again["event_id"]
     count = db_session.execute(text("SELECT count(*) FROM events")).scalar_one()
     assert count == 1
+
+
+class _CountingEmbed(FakeEmbeddingProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.calls += 1
+        return super().embed(texts)
+
+
+def _detect(session: Session, item, candidate: EventCandidate, embeddings=None):
+    llm = FakeStructuredLLM({"EventCandidate": candidate})
+    embedder = embeddings or FakeEmbeddingProvider()
+    service = DetectionService(session, light_llm=llm, embeddings=embedder)
+    return service.detect(item.id), embedder, llm
+
+
+def test_sports_only_is_skipped_without_event(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/colapinto",
+        title="Colapinto 12° en Monza",
+        body="Franco Colapinto terminó 12° en el GP de Italia.",
+        content_hash="colapinto",
+    )
+    embeddings = _CountingEmbed()
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            event_type="otro",
+            what_happened="Colapinto terminó 12° en Monza",
+            locality="Monza",
+            province=None,
+            country_code="IT",
+            short_summary="Resultado de F1",
+            editorial_scope=EditorialScope.SPORTS_ONLY,
+        ),
+        embeddings=embeddings,
+    )
+    refreshed = db_session.get(SourceItem, item.id)
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.source_item_id == item.id)
+    ).one()
+    assert result["created"] is False
+    assert result["filtered"] is True
+    assert result["reason"] == EditorialFilterReason.SPORTS_ONLY
+    assert refreshed is not None
+    assert refreshed.processing_status.value == "SKIPPED"
+    assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
+    assert embeddings.calls == 0
+    assert run.status == PipelineStatus.SUCCESS
+    assert run.metadata_json["filter_reason"] == EditorialFilterReason.SPORTS_ONLY
+
+
+def test_newells_match_is_skipped(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/newells",
+        title="Newell's ganó",
+        body="Newell's le ganó 2-1 a Unión.",
+        content_hash="nob",
+    )
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            editorial_scope=EditorialScope.SPORTS_ONLY,
+            what_happened="Newell's ganó 2-1",
+            short_summary="Resultado de fútbol",
+        ),
+    )
+    assert result["reason"] == EditorialFilterReason.SPORTS_ONLY
+    assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
+
+
+def test_stadium_disturbances_in_rosario_create_event(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/disturbios",
+        title="Disturbios con heridos",
+        body="Hubo disturbios y heridos en el Gigante de Arroyito.",
+        content_hash="dist",
+    )
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            event_type="disturbios",
+            what_happened="Disturbios con heridos en un estadio de Rosario",
+            short_summary="Incidentes con heridos",
+            editorial_scope=EditorialScope.SPORTS_PUBLIC_IMPACT,
+        ),
+    )
+    assert result["created"] is True
+    assert result.get("filtered") is not True
+
+
+def test_pellegrini_crash_creates_event(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/pellegrini",
+        title="Choque en Pellegrini",
+        body="Un colectivo chocó en Pellegrini y Corrientes.",
+        content_hash="pel",
+    )
+    result, _, _ = _detect(db_session, item, _candidate())
+    assert result["created"] is True
+
+
+def test_cordoba_item_is_skipped(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/cordoba",
+        title="Choque en Córdoba",
+        body="Un colectivo chocó en el centro de Córdoba.",
+        content_hash="cba",
+    )
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(locality="Córdoba", province="Córdoba"),
+    )
+    assert result["reason"] == EditorialFilterReason.OUTSIDE_TARGET_LOCALITY
+    assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
+
+
+def test_missing_locality_is_skipped(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/sin-lugar",
+        title="Choque",
+        body="Un colectivo chocó.",
+        content_hash="noloc",
+    )
+    result, _, _ = _detect(db_session, item, _candidate(locality=None, province=None))
+    assert result["reason"] == EditorialFilterReason.LOCATION_UNKNOWN
+    assert db_session.get(SourceItem, item.id) is not None
+
+
+def test_ultra_fallback_on_invalid_schema(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/fallback-schema",
+        title="Choque",
+        body="Un colectivo chocó en Pellegrini",
+        content_hash="fb1",
+    )
+    ultra = FakeStructuredLLM({"EventCandidate": ValueError("json inválido")})
+    light = FakeStructuredLLM({"EventCandidate": _candidate()})
+    result = DetectionService(
+        db_session, ultra_llm=ultra, light_llm=light, embeddings=FakeEmbeddingProvider()
+    ).detect(item.id)
+    assert result["created"] is True
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.source_item_id == item.id)
+    ).one()
+    assert run.metadata_json["fallback_reason"] == "invalid_schema"
+    assert ultra.calls == ["EventCandidate"]
+    assert light.calls == ["EventCandidate"]
+
+
+def test_ultra_fallback_on_low_location_confidence(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/fallback-loc",
+        title="Choque",
+        body="Un colectivo chocó en Pellegrini, Rosario",
+        content_hash="fb2",
+    )
+    ultra = FakeStructuredLLM(
+        {
+            "EventCandidate": _candidate(
+                locality=None, province=None, location_confidence=0.1
+            )
+        }
+    )
+    light = FakeStructuredLLM({"EventCandidate": _candidate()})
+    result = DetectionService(
+        db_session, ultra_llm=ultra, light_llm=light, embeddings=FakeEmbeddingProvider()
+    ).detect(item.id)
+    assert result["created"] is True
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.source_item_id == item.id)
+    ).one()
+    assert run.metadata_json["fallback_reason"] == "low_location_confidence"
+
+
+def test_missing_ultra_config_uses_light_processing(db_session: Session, monkeypatch) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/sin-ultra",
+        title="Choque",
+        body="Un colectivo chocó en Pellegrini",
+        content_hash="nu1",
+    )
+    light = FakeStructuredLLM({"EventCandidate": _candidate()})
+
+    def provider(role: ModelRole):
+        if role == ModelRole.LIGHT_PROCESSING:
+            return light
+        raise AssertionError(f"rol inesperado {role}")
+
+    monkeypatch.setattr(
+        "app.services.detection_service.get_structured_provider_optional",
+        lambda role: None,
+    )
+    monkeypatch.setattr("app.services.detection_service.get_structured_provider", provider)
+    result = DetectionService(db_session, embeddings=FakeEmbeddingProvider()).detect(item.id)
+    assert result["created"] is True
+    assert light.calls == ["EventCandidate"]

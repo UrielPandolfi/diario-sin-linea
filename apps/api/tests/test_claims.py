@@ -756,3 +756,114 @@ def test_admin_claims_conflict_when_running(db_session: Session, monkeypatch) ->
         response = client.post(f"/api/v1/admin/events/{event.id}/claims")
     assert response.status_code == 409
     assert queued == []
+
+
+def test_low_confidence_resolution_is_escalated(db_session: Session) -> None:
+    source = _source(db_session)
+    body = "El choque dejó seis heridos en Rosario."
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/choque", title="Choque", body=body, content_hash="esc1"
+    )
+    event = _event(db_session, item)
+    extraction = ClaimExtractionBatch(
+        claims=[
+            _extracted(
+                text="El choque dejó seis heridos",
+                normalized_value="6",
+                unit="personas",
+                predicate="cantidad_heridos",
+                evidence=[
+                    ExtractedEvidence(
+                        source_ref=1,
+                        evidence_type=EvidenceType.SUPPORTS,
+                        excerpt="seis heridos",
+                        confidence=0.9,
+                    )
+                ],
+            )
+        ]
+    )
+    extractor = FakeStructuredLLM({"ClaimExtractionBatch": extraction})
+    flash = FakeStructuredLLM(
+        {
+            "ClaimResolutionBatch": ClaimResolutionBatch(
+                items=[
+                    ClaimResolutionItem(
+                        claim_ref=1,
+                        status=ClaimStatus.UNCERTAIN,
+                        confidence=0.2,
+                        conflicts=["cifras distintas"],
+                        needs_external_verification=True,
+                    )
+                ]
+            )
+        }
+    )
+    escalated = FakeStructuredLLM(
+        {
+            "ClaimResolutionBatch": ClaimResolutionBatch(
+                items=[
+                    ClaimResolutionItem(
+                        claim_ref=1,
+                        status=ClaimStatus.SUPPORTED,
+                        confidence=0.9,
+                        reason="escalado",
+                    )
+                ]
+            )
+        }
+    )
+    result = ClaimService(
+        db_session,
+        extractor_llm=extractor,
+        resolver_llm=flash,
+        escalated_resolver_llm=escalated,
+    ).resolve(event.id, trigger="admin")
+    assert result["escalated_claim_refs"] == [1]
+    assert flash.calls.count("ClaimResolutionBatch") == 1
+    assert escalated.calls.count("ClaimResolutionBatch") == 1
+
+
+def test_high_confidence_resolution_is_not_escalated(db_session: Session) -> None:
+    source = _source(db_session)
+    body = "El choque dejó seis heridos en Rosario."
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/choque2", title="Choque", body=body, content_hash="esc2"
+    )
+    event = _event(db_session, item)
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="El choque dejó seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1,
+                            evidence_type=EvidenceType.SUPPORTS,
+                            excerpt="seis heridos",
+                            confidence=0.9,
+                        )
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(
+                    claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="claro"
+                )
+            ]
+        ),
+    )
+    escalated = FakeStructuredLLM({"ClaimResolutionBatch": ClaimResolutionBatch(items=[])})
+    result = ClaimService(
+        db_session,
+        extractor_llm=llm,
+        resolver_llm=llm,
+        escalated_resolver_llm=escalated,
+    ).resolve(event.id, trigger="admin")
+    assert result["escalated_claim_refs"] == []
+    assert escalated.calls == []

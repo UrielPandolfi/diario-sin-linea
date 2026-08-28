@@ -195,6 +195,7 @@ def stats(db: DbSession) -> dict:
         "items_by_status": SourceItemRepository(db).count_by_status(),
         "tokens_24h": token_totals,
         "tokens_by_role_24h": usage.totals_by_role_since(since),
+        "last_failed_error": pipeline.latest_failed_error(),
     }
 
 
@@ -251,12 +252,12 @@ def requeue_pending_detection(
     db: DbSession,
     limit: int = Query(default=3, ge=1, le=50),
 ) -> dict:
-    """Re-encola detección para SourceItems PENDING (p.ej. tras un poll fallido)."""
+    """Re-encola detección para SourceItems PENDING o FAILED (p.ej. tras un poll o un fallo de config)."""
     settings = get_settings()
     cap = int(settings.max_new_events_per_poll or 0)
     if cap > 0:
         limit = min(limit, cap)
-    items = SourceItemRepository(db).list_pending(limit=limit)
+    items = SourceItemRepository(db).list_retryable(limit=limit)
     poll_id = str(uuid4())
     for item in items:
         detect_event.delay(str(item.id), poll_id)

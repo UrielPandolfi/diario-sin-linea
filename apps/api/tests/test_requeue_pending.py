@@ -57,3 +57,36 @@ def test_requeue_pending_empty(db_session: Session, monkeypatch) -> None:
     assert response.status_code == 202
     assert response.json()["queued"] == 0
     assert queued == []
+
+
+def test_requeue_includes_failed_items(db_session: Session, monkeypatch) -> None:
+    queued: list[tuple] = []
+    monkeypatch.setattr("app.api.admin.detect_event.delay", lambda *args: queued.append(args))
+    source = SourceService(db_session).create(
+        SourceCreate(
+            name="Fuente",
+            preferred_ingestion_method=IngestionMethod.RSS,
+            feed_url="https://ejemplo.test/rss.xml",
+            is_monitored=True,
+            is_enabled=True,
+        )
+    )
+    SourceItemService(db_session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url="https://ejemplo.test/failed",
+            canonical_url="https://ejemplo.test/failed",
+            content_hash="hf",
+            title="Nota fallida",
+            clean_text="texto",
+            processing_status=SourceItemStatus.FAILED,
+        )
+    )
+    db_session.commit()
+    settings = get_settings()
+    with TestClient(app) as client:
+        client.post("/api/v1/admin/login", json={"password": settings.admin_password})
+        response = client.post("/api/v1/admin/source-items/requeue-pending?limit=3")
+    assert response.status_code == 202
+    assert response.json()["queued"] == 1
+    assert len(queued) == 1

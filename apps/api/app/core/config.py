@@ -28,10 +28,15 @@ class Settings(BaseSettings):
 
     light_processing_provider: str | None = None
     light_processing_model: str | None = None
+    ultra_light_processing_provider: str | None = None
+    ultra_light_processing_model: str | None = None
     ambiguous_dedup_provider: str | None = None
     ambiguous_dedup_model: str | None = None
     claim_resolution_provider: str | None = None
     claim_resolution_model: str | None = None
+    claim_resolution_escalated_provider: str | None = None
+    claim_resolution_escalated_model: str | None = None
+    claim_resolution_escalate_confidence: float = 0.55
     verification_provider: str | None = None
     verification_model: str | None = None
     writing_provider: str | None = None
@@ -43,9 +48,12 @@ class Settings(BaseSettings):
     search_provider: str | None = None
 
     auto_publish: bool = False
+    initial_research_queries: int = 2
     max_research_queries_per_event: int = 4
     max_research_results_per_query: int = 5
     max_research_results_per_domain: int = 3
+    max_standard_event_sources: int = 4
+    max_escalated_event_sources: int = 8
     max_verification_claims_per_event: int = 5
     max_verification_queries_per_claim: int = 2
     max_verification_results_per_query: int = 3

@@ -57,6 +57,7 @@ def record_llm_usage(
     pipeline_run_id: UUID | None = None,
     stage: str | None = None,
     model_role: str | None = None,
+    duration_ms: int | None = None,
 ) -> None:
     """Best-effort persist; never raise into the LLM call path."""
     try:
@@ -64,12 +65,13 @@ def record_llm_usage(
         prompt = max(0, int(prompt_tokens or 0))
         completion = max(0, int(completion_tokens or 0))
         total = max(0, int(total_tokens if total_tokens is not None else prompt + completion))
-        if prompt == 0 and completion == 0 and total == 0:
+        elapsed = None if duration_ms is None else max(0, int(duration_ms))
+        if prompt == 0 and completion == 0 and total == 0 and elapsed is None:
             return
 
         from app.core.db import SessionLocal
 
-        row = LlmUsage(
+        payload = dict(
             event_id=event_id if event_id is not None else ctx.event_id,
             source_item_id=source_item_id if source_item_id is not None else ctx.source_item_id,
             pipeline_run_id=pipeline_run_id if pipeline_run_id is not None else ctx.pipeline_run_id,
@@ -80,12 +82,24 @@ def record_llm_usage(
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=total,
+            duration_ms=elapsed,
         )
-        session = SessionLocal()
-        try:
-            session.add(row)
-            session.commit()
-        finally:
-            session.close()
+        # Otra sesión no ve event/pipeline_run todavía no commiteados: reintentar sin esos FK.
+        for drop_uncommitted_fks in (False, True):
+            row_kwargs = dict(payload)
+            if drop_uncommitted_fks:
+                row_kwargs["event_id"] = None
+                row_kwargs["pipeline_run_id"] = None
+            session = SessionLocal()
+            try:
+                session.add(LlmUsage(**row_kwargs))
+                session.commit()
+                return
+            except Exception:
+                session.rollback()
+                if drop_uncommitted_fks:
+                    raise
+            finally:
+                session.close()
     except Exception:
         logger.exception("llm usage record failed")

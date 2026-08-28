@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.usage_context import usage_scope
+from app.core.usage_context import bind_model_role, usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
 from app.models import Article, Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
@@ -177,6 +177,7 @@ class AuditService:
         writer = self.writer
 
         while True:
+            bind_model_role(ModelRole.AUDITING.value, provider=self.settings.auditing_provider)
             result = normalize_audit_result(
                 auditor.generate_structured(
                     system_prompt=load_prompt("article_audit.md"),
@@ -218,6 +219,7 @@ class AuditService:
 
             if writer is None:
                 writer = get_structured_provider(ModelRole.WRITING)
+            bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
             draft = writer.generate_structured(
                 system_prompt=load_prompt("article_writing.md"),
                 user_prompt=self._rewrite_user_prompt(article_context, article, rewrite_issues),

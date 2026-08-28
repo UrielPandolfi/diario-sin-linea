@@ -1,10 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import timedelta
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -15,7 +17,7 @@ from app.core.text import content_fingerprint
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import EventSourceRelation, IngestionMethod, PipelineStatus
-from app.models import Event, PipelineRun, Source, SourceItem
+from app.models import Entity, Event, EventEntity, EventSource, PipelineRun, Source, SourceItem
 from app.providers.base import (
     ProviderNotConfiguredError,
     SearchHit,
@@ -23,7 +25,12 @@ from app.providers.base import (
     SearchQuery,
     StructuredLLMProvider,
 )
-from app.providers.registry import ModelRole, get_search_provider, get_structured_provider
+from app.providers.registry import (
+    ModelRole,
+    get_search_provider,
+    get_structured_provider,
+    get_structured_provider_optional,
+)
 from app.repositories import (
     EventRepository,
     PipelineRunRepository,
@@ -31,13 +38,18 @@ from app.repositories import (
     SourceRepository,
 )
 from app.schemas import SourceCreate, SourceItemCreate
-from app.schemas.research import RelevanceBatch, ResearchQueries
+from app.schemas.research import RelevanceBatch, ResearchQueries, ResearchRelevance
 from app.services.event_service import EventService
 from app.services.fetching import HttpFetcher, extract_text
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 
 RESEARCH_STAGE = "research"
+_ATTACH_RELATIONS = (EventSourceRelation.INITIAL, EventSourceRelation.ADDITIONAL)
+_LLM_FALLBACK_ERRORS = (ValidationError, ValueError, KeyError, RuntimeError)
+_AMBIGUOUS_RELEVANCE_MIN = 0.4
+_AMBIGUOUS_RELEVANCE_MAX = 0.6
+_ESCALATE_TRIGGERS = {"contradiction", "conflict", "conflict_found", "claims_uncertain"}
 
 
 def freshness_for_event(event: Event) -> str:
@@ -58,12 +70,67 @@ def freshness_for_event(event: Event) -> str:
     return "py"
 
 
+def build_code_research_queries(
+    event: Event,
+    *,
+    entity_names: Sequence[str] = (),
+    limit: int = 2,
+) -> list[str]:
+    """1–2 consultas desde tipo, entidades, localidad y fecha. Sin LLM."""
+    when = event.started_at or event.detected_at
+    date_part = when.strftime("%Y-%m-%d") if when is not None else ""
+    locality = (event.locality or "").strip()
+    event_type = (event.event_type or "").strip()
+    if event_type.casefold() in {"unknown", "otro", ""}:
+        event_type = ""
+    names = [name.strip() for name in entity_names if name and name.strip()]
+    headline = (event.title_internal or "").strip()
+    queries: list[str] = []
+
+    def add(text: str) -> None:
+        compact = " ".join(text.split())
+        if not compact:
+            return
+        folded = compact.casefold()
+        if any(folded == existing.casefold() for existing in queries):
+            return
+        queries.append(compact)
+
+    def join_unique(*parts: str) -> str:
+        seen: list[str] = []
+        for part in parts:
+            token = " ".join(part.split())
+            if not token:
+                continue
+            folded = token.casefold()
+            if any(folded == item.casefold() or folded in item.casefold() for item in seen):
+                continue
+            seen.append(token)
+        return " ".join(seen)
+
+    add(join_unique(event_type, locality, date_part))
+    entity = names[0] if names else ""
+    add(join_unique(entity or headline, locality))
+    return queries[:limit]
+
+
+def relevance_needs_fallback(batch: RelevanceBatch) -> bool:
+    for hit in batch.hits:
+        if hit.confidence is None:
+            continue
+        if _AMBIGUOUS_RELEVANCE_MIN <= hit.confidence <= _AMBIGUOUS_RELEVANCE_MAX:
+            return True
+    return False
+
+
 class ResearchService:
     def __init__(
         self,
         session: Session,
         *,
         llm: StructuredLLMProvider | None = None,
+        ultra_llm: StructuredLLMProvider | None = None,
+        light_llm: StructuredLLMProvider | None = None,
         search: SearchProvider | None = None,
         fetcher: HttpFetcher | None = None,
         extract: Callable[[str, str], str | None] = extract_text,
@@ -78,6 +145,8 @@ class ResearchService:
         self.source_service = SourceService(session)
         self.item_service = SourceItemService(session)
         self.llm = llm
+        self.ultra_llm = ultra_llm
+        self.light_llm = light_llm
         self.search = search
         self.fetcher = fetcher or HttpFetcher()
         self.extract = extract
@@ -126,7 +195,7 @@ class ResearchService:
                 event_id=event.id,
                 pipeline_run_id=run.id,
             ):
-                result = self._run(event, freshness)
+                result = self._run(event, freshness, trigger=trigger)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}
@@ -151,20 +220,54 @@ class ResearchService:
             "error": message,
         }
 
-    def _run(self, event: Event, freshness: str) -> dict:
-        llm = self.llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+    def _ultra(self) -> StructuredLLMProvider:
+        return (
+            self.ultra_llm
+            or self.llm
+            or get_structured_provider_optional(ModelRole.ULTRA_LIGHT_PROCESSING)
+            or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+        )
+
+    def _light(self) -> StructuredLLMProvider:
+        return self.light_llm or self.llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+
+    def _run(self, event: Event, freshness: str, *, trigger: str) -> dict:
         search = self.search or get_search_provider()
-        max_queries = self.settings.max_research_queries_per_event
         max_per_query = self.settings.max_research_results_per_query
         max_per_domain = self.settings.max_research_results_per_domain
+        links = self._event_source_rows(event.id)
+        escalate = self._should_escalate_research(trigger, links)
+        query_target = (
+            self.settings.max_research_queries_per_event
+            if escalate
+            else self.settings.initial_research_queries
+        )
+        source_cap = (
+            self.settings.max_escalated_event_sources
+            if escalate
+            else self.settings.max_standard_event_sources
+        )
 
-        queries = llm.generate_structured(
-            system_prompt=load_prompt("research_queries.md"),
-            user_prompt=self._event_prompt(event, max_queries),
-            schema=ResearchQueries,
-        ).queries[:max_queries]
+        entity_names = self._entity_names(event.id)
+        queries = build_code_research_queries(
+            event, entity_names=entity_names, limit=query_target
+        )
+        query_source = "code"
+        if len(queries) < query_target:
+            extra = self._complete_queries(event, queries, query_target)
+            queries = extra
+            query_source = "code+ultra"
+        queries = queries[:query_target]
         if not queries:
-            return {"queries": [], "attached": 0, "fetched": 0, "reused": 0}
+            return {
+                "queries": [],
+                "attached": 0,
+                "fetched": 0,
+                "reused": 0,
+                "query_source": query_source,
+                "escalated": escalate,
+                "source_cap": source_cap,
+            }
 
         hits: list[SearchHit] = []
         for text in queries:
@@ -181,16 +284,24 @@ class ResearchService:
                 "fetched": 0,
                 "reused": 0,
                 "candidates": 0,
+                "query_source": query_source,
+                "escalated": escalate,
+                "source_cap": source_cap,
             }
 
-        relevant_urls = self._relevant_urls(llm, event, candidates)
+        same_event_urls, relevance_counts, relevance_fallback = self._same_event_urls(
+            event, candidates
+        )
         attached = 0
         fetched = 0
         reused = 0
         fetch_log: list[str] = []
+        counted = self._counted_source_count(event.id)
         for hit in candidates:
+            if counted >= source_cap:
+                break
             canonical = canonicalize_url(hit.url)
-            if canonical not in relevant_urls and hit.url not in relevant_urls:
+            if canonical not in same_event_urls and hit.url not in same_event_urls:
                 continue
             if canonical in linked or hit.url in linked:
                 continue
@@ -207,6 +318,7 @@ class ResearchService:
                 if created_link:
                     attached += 1
                     reused += 1
+                    counted += 1
                     linked.add(canonical)
                 continue
             item = self._ingest_new(hit, canonical, fetch_log)
@@ -221,6 +333,7 @@ class ResearchService:
             )
             if created_link:
                 attached += 1
+                counted += 1
                 linked.add(canonical)
 
         return {
@@ -230,7 +343,117 @@ class ResearchService:
             "reused": reused,
             "candidates": len(candidates),
             "fetched_urls": fetch_log,
+            "query_source": query_source,
+            "escalated": escalate,
+            "source_cap": source_cap,
+            "relevance": relevance_counts,
+            "relevance_fallback": relevance_fallback,
         }
+
+    def _complete_queries(
+        self,
+        event: Event,
+        current: list[str],
+        target: int,
+    ) -> list[str]:
+        needed = max(0, target - len(current))
+        if needed == 0:
+            return current
+        prompt = self._event_prompt(event, needed)
+        if current:
+            prompt += "\nYa tenemos:\n" + "\n".join(f"- {query}" for query in current)
+        batch = self._generate_structured(
+            system_prompt=load_prompt("research_queries.md"),
+            user_prompt=prompt,
+            schema=ResearchQueries,
+        )
+        queries = list(current)
+        seen = {query.casefold() for query in queries}
+        for raw in batch.queries:
+            text = " ".join((raw or "").split())
+            if not text or text.casefold() in seen:
+                continue
+            queries.append(text)
+            seen.add(text.casefold())
+            if len(queries) >= target:
+                break
+        return queries
+
+    def _same_event_urls(
+        self,
+        event: Event,
+        candidates: list[SearchHit],
+    ) -> tuple[set[str], dict[str, int], bool]:
+        batch, used_fallback = self._classify_relevance(event, candidates)
+        counts = {item.value: 0 for item in ResearchRelevance}
+        chosen: set[str] = set()
+        for hit in batch.hits:
+            counts[hit.classification.value] = counts.get(hit.classification.value, 0) + 1
+            if hit.classification == ResearchRelevance.SAME_EVENT:
+                chosen.add(canonicalize_url(hit.url))
+                chosen.add(hit.url)
+        return chosen, counts, used_fallback
+
+    def _classify_relevance(
+        self,
+        event: Event,
+        candidates: list[SearchHit],
+    ) -> tuple[RelevanceBatch, bool]:
+        ultra = self._ultra()
+        light = self._light()
+        user_prompt = self._relevance_prompt(event, candidates)
+        system_prompt = load_prompt("research_relevance.md")
+        try:
+            batch = ultra.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=RelevanceBatch,
+            )
+        except ProviderNotConfiguredError:
+            raise
+        except _LLM_FALLBACK_ERRORS:
+            if light is ultra:
+                raise
+            batch = light.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=RelevanceBatch,
+            )
+            return batch, True
+        if relevance_needs_fallback(batch) and light is not ultra:
+            batch = light.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=RelevanceBatch,
+            )
+            return batch, True
+        return batch, False
+
+    def _generate_structured(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        schema: type,
+    ):
+        ultra = self._ultra()
+        light = self._light()
+        try:
+            return ultra.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=schema,
+            )
+        except ProviderNotConfiguredError:
+            raise
+        except _LLM_FALLBACK_ERRORS:
+            if light is ultra:
+                raise
+            return light.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=schema,
+            )
 
     def _event_prompt(self, event: Event, max_queries: int) -> str:
         when = event.started_at or event.detected_at
@@ -242,6 +465,12 @@ class ResearchService:
             f"Lugar: {event.locality or ''} {event.province or ''}\n"
             f"Fecha: {when}\n"
         )
+
+    def _relevance_prompt(self, event: Event, candidates: list[SearchHit]) -> str:
+        lines = [self._event_prompt(event, 0), "Resultados:"]
+        for hit in candidates:
+            lines.append(f"- url={hit.url} title={hit.title} snippet={hit.snippet or ''}")
+        return "\n".join(lines)
 
     def _prefilter(
         self,
@@ -269,24 +498,6 @@ class ResearchService:
             seen_urls.add(canonical)
             selected.append(hit)
         return selected
-
-    def _relevant_urls(
-        self,
-        llm: StructuredLLMProvider,
-        event: Event,
-        candidates: list[SearchHit],
-    ) -> set[str]:
-        lines = [self._event_prompt(event, 0), "Resultados:"]
-        for hit in candidates:
-            lines.append(f"- url={hit.url} title={hit.title} snippet={hit.snippet or ''}")
-        batch = llm.generate_structured(
-            system_prompt=load_prompt("research_relevance.md"),
-            user_prompt="\n".join(lines),
-            schema=RelevanceBatch,
-        )
-        chosen = {canonicalize_url(item.url) for item in batch.hits if item.relevant}
-        chosen.update(item.url for item in batch.hits if item.relevant)
-        return chosen
 
     def _ingest_new(self, hit: SearchHit, canonical: str, fetch_log: list[str]) -> SourceItem | None:
         try:
@@ -330,3 +541,43 @@ class ResearchService:
                 is_enabled=True,
             )
         )
+
+    def _event_source_rows(self, event_id: UUID) -> list[EventSource]:
+        return list(
+            self.session.scalars(select(EventSource).where(EventSource.event_id == event_id))
+        )
+
+    def _counted_source_count(self, event_id: UUID) -> int:
+        value = self.session.scalar(
+            select(func.count())
+            .select_from(EventSource)
+            .where(
+                EventSource.event_id == event_id,
+                EventSource.relation_type.in_(_ATTACH_RELATIONS),
+            )
+        )
+        return int(value or 0)
+
+    def _entity_names(self, event_id: UUID) -> list[str]:
+        stmt = (
+            select(Entity.name)
+            .join(EventEntity, EventEntity.entity_id == Entity.id)
+            .where(EventEntity.event_id == event_id)
+        )
+        names: list[str] = []
+        seen: set[str] = set()
+        for name in self.session.scalars(stmt):
+            if not name or name.casefold() in seen:
+                continue
+            seen.add(name.casefold())
+            names.append(name)
+        return names
+
+    def _should_escalate_research(self, trigger: str, links: list[EventSource]) -> bool:
+        if trigger in _ESCALATE_TRIGGERS:
+            return True
+        if any(link.relation_type == EventSourceRelation.CONTRADICTING for link in links):
+            return True
+        if links and not any(link.is_primary for link in links):
+            return True
+        return False

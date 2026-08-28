@@ -4,6 +4,7 @@ from datetime import timedelta
 from math import sqrt
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -17,11 +18,20 @@ from app.domain.enums import EventSourceRelation, PipelineStatus, SourceItemStat
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
 from app.models.event import EMBEDDING_DIMENSIONS
 from app.providers.base import EmbeddingProvider, ProviderNotConfiguredError, StructuredLLMProvider
-from app.providers.registry import ModelRole, get_embedding_provider, get_structured_provider
+from app.providers.registry import (
+    ModelRole,
+    get_embedding_provider,
+    get_structured_provider,
+    get_structured_provider_optional,
+)
 from app.repositories import EntityRepository, EventRepository, PipelineRunRepository, SourceItemRepository
 from app.schemas import EventCreate
 from app.schemas.detection import DedupDecision, EventCandidate
+from app.services.editorial_gate import evaluate_editorial_gate, needs_location_fallback
 from app.services.event_service import EventService
+
+# Reextraer con Luna solo si ultra falla el schema o la ubicación es poco confiable/contradictoria.
+_EXTRACT_FALLBACK_ERRORS = (ValidationError, ValueError, KeyError, RuntimeError)
 
 
 def cosine_similarity(left: list[float], right: list[float]) -> float:
@@ -52,6 +62,7 @@ class DetectionService:
         self,
         session: Session,
         *,
+        ultra_llm: StructuredLLMProvider | None = None,
         light_llm: StructuredLLMProvider | None = None,
         dedup_llm: StructuredLLMProvider | None = None,
         embeddings: EmbeddingProvider | None = None,
@@ -63,6 +74,7 @@ class DetectionService:
         self.entities = EntityRepository(session)
         self.pipeline = PipelineRunRepository(session)
         self.event_service = EventService(session)
+        self.ultra_llm = ultra_llm
         self.light_llm = light_llm
         self.dedup_llm = dedup_llm
         self.embeddings = embeddings
@@ -93,7 +105,31 @@ class DetectionService:
                 source_item_id=item.id,
                 pipeline_run_id=run.id,
             ):
-                candidate = self._extract_candidate(item)
+                candidate, extract_meta = self._extract_candidate(item)
+                gate = evaluate_editorial_gate(candidate)
+                if not gate.allowed:
+                    item.processing_status = SourceItemStatus.SKIPPED
+                    run.status = PipelineStatus.SUCCESS
+                    run.finished_at = utc_now()
+                    run.metadata_json = {
+                        **extract_meta,
+                        "filtered": True,
+                        "filter_reason": gate.reason,
+                        "editorial_scope": gate.editorial_scope.value,
+                        "editorial_reason": candidate.editorial_reason,
+                        "locality": candidate.locality,
+                        "province": candidate.province,
+                        "country_code": candidate.country_code,
+                        "location_confidence": candidate.location_confidence,
+                        "what_happened": candidate.what_happened,
+                    }
+                    self.session.flush()
+                    return {
+                        "event_id": None,
+                        "created": False,
+                        "filtered": True,
+                        "reason": gate.reason,
+                    }
                 event, created, reason = self._resolve_event(item, candidate)
                 update_usage_context(event_id=event.id)
                 self._persist_entities(event, candidate)
@@ -102,7 +138,7 @@ class DetectionService:
                 run.status = PipelineStatus.SUCCESS
                 run.event_id = event.id
                 run.finished_at = utc_now()
-                run.metadata_json = {"reason": reason, "created": created}
+                run.metadata_json = {**extract_meta, "reason": reason, "created": created}
                 self.session.flush()
                 return {"event_id": str(event.id), "created": created, "reason": reason}
         except ProviderNotConfiguredError as exc:
@@ -146,8 +182,7 @@ class DetectionService:
         self.session.flush()
         return {"event_id": None, "created": False, "reason": "failed", "error": message}
 
-    def _extract_candidate(self, item: SourceItem) -> EventCandidate:
-        llm = self.light_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+    def _extract_candidate(self, item: SourceItem) -> tuple[EventCandidate, dict]:
         body = item.clean_text or item.raw_text or item.title or item.url
         user_prompt = (
             f"Título: {item.title or ''}\n"
@@ -155,11 +190,54 @@ class DetectionService:
             f"Publicado: {item.published_at or ''}\n\n"
             f"{body[:8000]}"
         )
-        return llm.generate_structured(
-            system_prompt=load_prompt("event_extraction.md"),
-            user_prompt=user_prompt,
-            schema=EventCandidate,
-        )
+        system_prompt = load_prompt("event_extraction.md")
+        ultra = self.ultra_llm
+        light = self.light_llm
+        if ultra is None and light is None:
+            ultra = get_structured_provider_optional(ModelRole.ULTRA_LIGHT_PROCESSING)
+
+        def _light() -> StructuredLLMProvider:
+            nonlocal light
+            if light is None:
+                light = get_structured_provider(ModelRole.LIGHT_PROCESSING)
+            return light
+
+        def _call(llm: StructuredLLMProvider) -> EventCandidate:
+            return llm.generate_structured(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                schema=EventCandidate,
+            )
+
+        if ultra is None:
+            return _call(_light()), {}
+
+        try:
+            candidate = _call(ultra)
+        except ProviderNotConfiguredError:
+            raise
+        except Exception as exc:
+            candidate = _call(_light())
+            reason = (
+                "invalid_schema"
+                if isinstance(exc, _EXTRACT_FALLBACK_ERRORS)
+                else "ultra_error"
+            )
+            return candidate, {
+                "fallback_from": ModelRole.ULTRA_LIGHT_PROCESSING.value,
+                "fallback_to": ModelRole.LIGHT_PROCESSING.value,
+                "fallback_reason": reason,
+                "ultra_error": str(exc)[:300],
+            }
+
+        if needs_location_fallback(candidate):
+            candidate = _call(_light())
+            return candidate, {
+                "fallback_from": ModelRole.ULTRA_LIGHT_PROCESSING.value,
+                "fallback_to": ModelRole.LIGHT_PROCESSING.value,
+                "fallback_reason": "low_location_confidence",
+            }
+        return candidate, {}
 
     def _resolve_event(
         self,

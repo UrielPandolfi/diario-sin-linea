@@ -13,7 +13,7 @@ from app.models import EventSource, PipelineRun
 from app.providers.base import ProviderNotConfiguredError, SearchHit
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM, RecordingFetcher
 from app.schemas import EventCreate, SourceCreate, SourceItemCreate
-from app.schemas.research import RelevanceHit, RelevanceBatch, ResearchQueries
+from app.schemas.research import RelevanceHit, RelevanceBatch, ResearchQueries, ResearchRelevance
 from app.services.event_service import EventService
 from app.services.research_service import ResearchService
 from app.services.source_item_service import SourceItemService
@@ -64,7 +64,10 @@ def _llm(queries: list[str], relevant_urls: list[str]) -> FakeStructuredLLM:
         {
             "ResearchQueries": ResearchQueries(queries=queries),
             "RelevanceBatch": RelevanceBatch(
-                hits=[RelevanceHit(url=url, relevant=True) for url in relevant_urls]
+                hits=[
+                    RelevanceHit(url=url, classification=ResearchRelevance.SAME_EVENT)
+                    for url in relevant_urls
+                ]
             ),
         }
     )
@@ -175,8 +178,8 @@ def test_relevance_happens_before_fetch(db_session: Session) -> None:
             "ResearchQueries": ResearchQueries(queries=["q1"]),
             "RelevanceBatch": RelevanceBatch(
                 hits=[
-                    RelevanceHit(url=keep, relevant=True),
-                    RelevanceHit(url=drop, relevant=False),
+                    RelevanceHit(url=keep, classification=ResearchRelevance.SAME_EVENT),
+                    RelevanceHit(url=drop, classification=ResearchRelevance.IRRELEVANT),
                 ]
             ),
         }
@@ -208,7 +211,7 @@ def test_query_and_domain_caps(db_session: Session) -> None:
 
     result = service.research(event.id, trigger="admin")
 
-    assert len(search.queries) == 4
+    assert len(search.queries) == 2
     assert all(query.count == 5 for query in search.queries)
     assert result["candidates"] == 3
     assert len(fetcher.fetched) == 3
@@ -494,3 +497,140 @@ def test_brave_always_sends_freshness(monkeypatch) -> None:
     hits = BraveSearchProvider(api_key="k").search(SearchQuery(text="q", count=3))
     assert captured["params"]["freshness"] == "pw"
     assert hits[0].url == "https://a.test/n"
+
+
+def test_code_queries_use_type_locality_and_date(db_session: Session) -> None:
+    from app.services.research_service import build_code_research_queries
+
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Hecho", content_hash="h1"
+    )
+    event = _event(
+        db_session,
+        item,
+        started_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
+    )
+    queries = build_code_research_queries(event, entity_names=["colectivo"], limit=2)
+    assert len(queries) == 2
+    assert "Rosario" in queries[0]
+    assert "accidente" in queries[0]
+    assert "2026-08-23" in queries[0]
+
+
+def test_different_event_is_not_attached(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Hecho", content_hash="h1"
+    )
+    event = _event(db_session, item)
+    url = "https://sanluis.test/otro-choque"
+    llm = FakeStructuredLLM(
+        {
+            "ResearchQueries": ResearchQueries(queries=["q"]),
+            "RelevanceBatch": RelevanceBatch(
+                hits=[
+                    RelevanceHit(
+                        url=url,
+                        classification=ResearchRelevance.DIFFERENT_EVENT,
+                        confidence=0.9,
+                    )
+                ]
+            ),
+        }
+    )
+    search = FakeSearchProvider(
+        [SearchHit(title="Choque en San Luis", url=url, snippet="Otro choque en San Luis")]
+    )
+    fetcher = RecordingFetcher()
+    result = ResearchService(db_session, llm=llm, search=search, fetcher=fetcher).research(
+        event.id, trigger="new_event"
+    )
+    assert result["attached"] == 0
+    assert fetcher.fetched == []
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(EventSource).where(EventSource.event_id == event.id)
+        )
+        == 1
+    )
+
+
+def test_standard_source_cap_stops_at_four(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Hecho", content_hash="h1"
+    )
+    event = _event(db_session, item)
+    urls = [f"https://medio{index}.test/nota" for index in range(5)]
+    llm = _llm(["q"], urls)
+    search = FakeSearchProvider(
+        [SearchHit(title=f"Nota {index}", url=url, snippet="mismo choque") for index, url in enumerate(urls)]
+    )
+    result = ResearchService(
+        db_session, llm=llm, search=search, fetcher=RecordingFetcher()
+    ).research(event.id, trigger="new_event")
+    assert result["attached"] == 3
+    assert result["source_cap"] == 4
+    assert result["escalated"] is False
+    counted = db_session.scalar(
+        select(func.count()).select_from(EventSource).where(
+            EventSource.event_id == event.id,
+            EventSource.relation_type.in_(
+                [EventSourceRelation.INITIAL, EventSourceRelation.ADDITIONAL]
+            ),
+        )
+    )
+    assert counted == 4
+
+
+def test_contradiction_allows_escalated_source_cap(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Hecho", content_hash="h1"
+    )
+    contra = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/contra",
+        title="Versión opuesta",
+        body="Desmienten el choque",
+        content_hash="hc",
+    )
+    event = _event(db_session, item)
+    EventService(db_session).attach_source(
+        event,
+        contra.id,
+        relation_type=EventSourceRelation.CONTRADICTING,
+        is_primary=False,
+    )
+    urls = [f"https://medio{index}.test/nota" for index in range(10)]
+    llm = FakeStructuredLLM(
+        {
+            "ResearchQueries": ResearchQueries(queries=["extra 3", "extra 4"]),
+            "RelevanceBatch": RelevanceBatch(
+                hits=[
+                    RelevanceHit(url=url, classification=ResearchRelevance.SAME_EVENT)
+                    for url in urls
+                ]
+            ),
+        }
+    )
+    search = FakeSearchProvider(
+        [SearchHit(title=f"Nota {index}", url=url, snippet="cobertura") for index, url in enumerate(urls)]
+    )
+    result = ResearchService(
+        db_session, llm=llm, search=search, fetcher=RecordingFetcher()
+    ).research(event.id, trigger="new_event")
+    assert result["escalated"] is True
+    assert result["source_cap"] == 8
+    counted = db_session.scalar(
+        select(func.count()).select_from(EventSource).where(
+            EventSource.event_id == event.id,
+            EventSource.relation_type.in_(
+                [EventSourceRelation.INITIAL, EventSourceRelation.ADDITIONAL]
+            ),
+        )
+    )
+    assert counted == 8
+    assert result["attached"] == 7

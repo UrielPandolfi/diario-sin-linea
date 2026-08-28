@@ -70,6 +70,7 @@ def test_record_llm_usage_persists_with_context(db_session: Session) -> None:
             prompt_tokens=100,
             completion_tokens=40,
             total_tokens=140,
+            duration_ms=25,
         )
 
     check = SessionLocal()
@@ -79,8 +80,30 @@ def test_record_llm_usage_persists_with_context(db_session: Session) -> None:
         assert rows[0].prompt_tokens == 100
         assert rows[0].completion_tokens == 40
         assert rows[0].total_tokens == 140
+        assert rows[0].duration_ms == 25
         assert rows[0].model_role == "writing"
         assert rows[0].stage == "writing"
+    finally:
+        check.close()
+
+
+def test_record_llm_usage_keeps_zero_tokens_if_duration(db_session: Session) -> None:
+    record_llm_usage(
+        provider="openai",
+        model="gpt-5-nano",
+        prompt_tokens=0,
+        completion_tokens=0,
+        total_tokens=0,
+        duration_ms=12,
+        stage="event_detection",
+        model_role="ultra_light_processing",
+    )
+    check = SessionLocal()
+    try:
+        rows = list(check.scalars(select(LlmUsage).where(LlmUsage.model == "gpt-5-nano")))
+        assert len(rows) == 1
+        assert rows[0].total_tokens == 0
+        assert rows[0].duration_ms == 12
     finally:
         check.close()
 

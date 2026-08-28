@@ -19,6 +19,7 @@ export type AdminStats = {
   items_by_status?: Record<string, number>;
   tokens_24h?: AdminTokenTotals;
   tokens_by_role_24h?: AdminTokenByRole[];
+  last_failed_error?: string | null;
 };
 
 export type AdminSource = {

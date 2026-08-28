@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.clock import utc_now
+from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.text import excerpt_in_source, normalize_name
 from app.core.urls import url_domain
@@ -18,11 +19,12 @@ from app.core.usage_context import usage_scope
 from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType, PipelineStatus
 from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, Source, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
-from app.providers.registry import ModelRole, get_structured_provider
+from app.providers.registry import ModelRole, get_claim_resolution_provider, get_structured_provider
 from app.repositories import PipelineRunRepository
 from app.schemas.claims import (
     ClaimExtractionBatch,
     ClaimResolutionBatch,
+    ClaimResolutionItem,
     ExtractedClaim,
     ExtractedEvidence,
 )
@@ -199,11 +201,14 @@ class ClaimService:
         *,
         extractor_llm: StructuredLLMProvider | None = None,
         resolver_llm: StructuredLLMProvider | None = None,
+        escalated_resolver_llm: StructuredLLMProvider | None = None,
     ) -> None:
         self.session = session
+        self.settings = get_settings()
         self.pipeline = PipelineRunRepository(session)
         self.extractor_llm = extractor_llm
         self.resolver_llm = resolver_llm
+        self.escalated_resolver_llm = escalated_resolver_llm
 
     def resolve(self, event_id: UUID, *, trigger: str, context: dict | None = None) -> dict:
         event = self._load_event(event_id)
@@ -300,15 +305,35 @@ class ClaimService:
                 "persisted": 0,
                 "resolved": 0,
                 "needs_external_verification": [],
+                "escalated_claim_refs": [],
             }
 
         claims = self._reload_claims(event.id)
-        resolver = self.resolver_llm or get_structured_provider(ModelRole.CLAIM_RESOLUTION)
+        resolver = self.resolver_llm or get_claim_resolution_provider(escalated=False)
         resolution = resolver.generate_structured(
             system_prompt=load_prompt("claim_resolution.md"),
             user_prompt=self._resolution_prompt(event, claims),
             schema=ClaimResolutionBatch,
         )
+        threshold = self.settings.claim_resolution_escalate_confidence
+        escalate_refs = [
+            item.claim_ref
+            for item in resolution.items
+            if _needs_resolution_escalation(item, threshold)
+        ]
+        escalated_done: list[int] = []
+        if escalate_refs:
+            escalated_llm = self.escalated_resolver_llm
+            if escalated_llm is None and self.resolver_llm is None:
+                escalated_llm = get_claim_resolution_provider(escalated=True)
+            if escalated_llm is not None:
+                override = escalated_llm.generate_structured(
+                    system_prompt=load_prompt("claim_resolution.md"),
+                    user_prompt=self._resolution_prompt(event, claims, refs=set(escalate_refs)),
+                    schema=ClaimResolutionBatch,
+                )
+                resolution = _merge_resolution(resolution, override)
+                escalated_done = escalate_refs
         needs = self._apply_resolution(claims, resolution)
         self.session.flush()
         return {
@@ -316,6 +341,7 @@ class ClaimService:
             "persisted": len(claims),
             "resolved": len(claims),
             "needs_external_verification": needs,
+            "escalated_claim_refs": escalated_done,
         }
 
     def _numbered_sources(self, event: Event) -> list[SourceItem]:
@@ -498,10 +524,17 @@ class ClaimService:
         claims.sort(key=lambda claim: (assertion_key_for(claim), str(claim.id)))
         return claims
 
-    def _resolution_prompt(self, event: Event, claims: list[Claim]) -> str:
+    def _resolution_prompt(
+        self,
+        event: Event,
+        claims: list[Claim],
+        refs: set[int] | None = None,
+    ) -> str:
         groups: dict[str, list[tuple[int, Claim]]] = defaultdict(list)
         numbered = list(enumerate(claims, start=1))
         for index, claim in numbered:
+            if refs is not None and index not in refs:
+                continue
             groups[comparison_key_for(claim)].append((index, claim))
         lines = [
             f"Suceso: {event.title_internal}",
@@ -606,3 +639,23 @@ def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
     if len(tokens) == 1:
         return ClaimStatus.SINGLE_SOURCE
     return ClaimStatus.UNCERTAIN
+
+
+def _needs_resolution_escalation(item: ClaimResolutionItem, threshold: float) -> bool:
+    if item.confidence is not None and item.confidence < threshold:
+        return True
+    return (
+        item.status == ClaimStatus.UNCERTAIN
+        and item.needs_external_verification
+        and bool(item.conflicts)
+    )
+
+
+def _merge_resolution(
+    base: ClaimResolutionBatch,
+    override: ClaimResolutionBatch,
+) -> ClaimResolutionBatch:
+    by_ref = {item.claim_ref: item for item in base.items}
+    for item in override.items:
+        by_ref[item.claim_ref] = item
+    return ClaimResolutionBatch(items=list(by_ref.values()))

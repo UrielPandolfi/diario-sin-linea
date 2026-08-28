@@ -102,6 +102,19 @@ class SourceItemRepository:
         )
         return list(self.session.scalars(stmt))
 
+    def list_retryable(self, *, limit: int = 50) -> list[SourceItem]:
+        stmt = (
+            select(SourceItem)
+            .where(
+                SourceItem.processing_status.in_(
+                    (SourceItemStatus.PENDING, SourceItemStatus.FAILED)
+                )
+            )
+            .order_by(SourceItem.detected_at.desc())
+            .limit(limit)
+        )
+        return list(self.session.scalars(stmt))
+
     def count_since(self, since: datetime) -> int:
         stmt = select(SourceItem).where(SourceItem.detected_at >= since)
         return len(list(self.session.scalars(stmt)))
@@ -277,6 +290,14 @@ class PipelineRunRepository:
             PipelineRun.status == PipelineStatus.FAILED,
         )
         return len(list(self.session.scalars(stmt)))
+
+    def latest_failed_error(self) -> str | None:
+        latest = self.session.scalars(
+            select(PipelineRun).order_by(PipelineRun.started_at.desc()).limit(1)
+        ).first()
+        if latest is None or latest.status != PipelineStatus.FAILED:
+            return None
+        return latest.error_message
 
     def get_running(self, event_id: UUID, stage: str) -> PipelineRun | None:
         stmt = select(PipelineRun).where(

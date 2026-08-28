@@ -1,9 +1,8 @@
-from typing import TypeVar
+import time
+from typing import Any, TypeVar
 
 from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, ValidationError
-
-from app.services.usage_recorder import extract_openai_usage, record_llm_usage
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -19,6 +18,14 @@ def _model_allows_temperature_zero(model: str) -> bool:
     return True
 
 
+def _reasoning_effort_for_model(model: str) -> str | None:
+    """Effort mínimo si el id sugiere nano o gpt-5 reasoning. No hardcodear el id en services."""
+    name = (model or "").casefold()
+    if "nano" in name or name.startswith("gpt-5"):
+        return "minimal"
+    return None
+
+
 class OpenAIStructuredProvider:
     def __init__(
         self,
@@ -27,13 +34,17 @@ class OpenAIStructuredProvider:
         model: str,
         base_url: str | None = None,
         provider_name: str = "openai",
+        client: Any | None = None,
     ) -> None:
         self.model = model
         self.provider_name = provider_name
-        kwargs: dict = {"api_key": api_key}
-        if base_url:
-            kwargs["base_url"] = base_url
-        self.client = OpenAI(**kwargs)
+        if client is not None:
+            self.client = client
+        else:
+            kwargs: dict = {"api_key": api_key}
+            if base_url:
+                kwargs["base_url"] = base_url
+            self.client = OpenAI(**kwargs)
 
     def generate_structured(
         self,
@@ -62,14 +73,12 @@ class OpenAIStructuredProvider:
                 }
                 if _model_allows_temperature_zero(self.model):
                     create_kwargs["temperature"] = 0
-                try:
-                    response = self.client.chat.completions.create(**create_kwargs)
-                except BadRequestError as exc:
-                    # Retry sin temperature si el modelo la rechaza (p.ej. gpt-5 / o-series).
-                    if "temperature" not in str(exc).casefold():
-                        raise
-                    create_kwargs.pop("temperature", None)
-                    response = self.client.chat.completions.create(**create_kwargs)
+                effort = _reasoning_effort_for_model(self.model)
+                if effort:
+                    create_kwargs["reasoning_effort"] = effort
+                response, duration_ms = self._create_completion(create_kwargs)
+                from app.services.usage_recorder import extract_openai_usage, record_llm_usage
+
                 prompt, completion, total = extract_openai_usage(response)
                 record_llm_usage(
                     provider=self.provider_name,
@@ -77,12 +86,31 @@ class OpenAIStructuredProvider:
                     prompt_tokens=prompt,
                     completion_tokens=completion,
                     total_tokens=total,
+                    duration_ms=duration_ms,
                 )
                 content = response.choices[0].message.content or "{}"
                 return schema.model_validate_json(content)
             except (ValidationError, ValueError, KeyError) as exc:
                 last_error = exc
         raise last_error or RuntimeError("structured output failed")
+
+    def _create_completion(self, create_kwargs: dict) -> tuple[Any, int]:
+        started = time.perf_counter()
+        try:
+            response = self.client.chat.completions.create(**create_kwargs)
+        except BadRequestError as exc:
+            message = str(exc).casefold()
+            stripped = False
+            for key in ("reasoning_effort", "temperature"):
+                if key in create_kwargs and key in message:
+                    create_kwargs.pop(key, None)
+                    stripped = True
+            if not stripped:
+                raise
+            started = time.perf_counter()
+            response = self.client.chat.completions.create(**create_kwargs)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        return response, duration_ms
 
 
 class OpenAIEmbeddingProvider:
@@ -92,7 +120,11 @@ class OpenAIEmbeddingProvider:
         self.client = OpenAI(api_key=api_key)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
+        started = time.perf_counter()
         response = self.client.embeddings.create(model=self.model, input=texts)
+        duration_ms = int((time.perf_counter() - started) * 1000)
+        from app.services.usage_recorder import extract_openai_usage, record_llm_usage
+
         prompt, completion, total = extract_openai_usage(response)
         record_llm_usage(
             provider=self.provider_name,
@@ -100,5 +132,6 @@ class OpenAIEmbeddingProvider:
             prompt_tokens=prompt,
             completion_tokens=completion,
             total_tokens=total,
+            duration_ms=duration_ms,
         )
         return [item.embedding for item in response.data]

@@ -13,9 +13,11 @@ from app.providers.voyage_provider import VoyageEmbeddingProvider
 
 
 class ModelRole(StrEnum):
+    ULTRA_LIGHT_PROCESSING = "ultra_light_processing"
     LIGHT_PROCESSING = "light_processing"
     AMBIGUOUS_DEDUP = "ambiguous_dedup"
     CLAIM_RESOLUTION = "claim_resolution"
+    CLAIM_RESOLUTION_ESCALATED = "claim_resolution_escalated"
     VERIFICATION = "verification"
     WRITING = "writing"
     AUDITING = "auditing"
@@ -33,28 +35,44 @@ def _api_key_for(provider: str) -> str | None:
     return mapping.get(provider.lower())
 
 
+def _structured_role_config(role: ModelRole) -> tuple[str | None, str | None]:
+    settings = get_settings()
+    mapping = {
+        ModelRole.ULTRA_LIGHT_PROCESSING: (
+            settings.ultra_light_processing_provider,
+            settings.ultra_light_processing_model,
+        ),
+        ModelRole.LIGHT_PROCESSING: (
+            settings.light_processing_provider,
+            settings.light_processing_model,
+        ),
+        ModelRole.AMBIGUOUS_DEDUP: (
+            settings.ambiguous_dedup_provider,
+            settings.ambiguous_dedup_model,
+        ),
+        ModelRole.CLAIM_RESOLUTION: (
+            settings.claim_resolution_provider,
+            settings.claim_resolution_model,
+        ),
+        ModelRole.CLAIM_RESOLUTION_ESCALATED: (
+            settings.claim_resolution_escalated_provider,
+            settings.claim_resolution_escalated_model,
+        ),
+        ModelRole.VERIFICATION: (
+            settings.verification_provider,
+            settings.verification_model,
+        ),
+        ModelRole.WRITING: (settings.writing_provider, settings.writing_model),
+        ModelRole.AUDITING: (settings.auditing_provider, settings.auditing_model),
+    }
+    if role not in mapping:
+        raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
+    return mapping[role]
+
+
 def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
     settings = get_settings()
-    if role == ModelRole.LIGHT_PROCESSING:
-        provider_name = settings.light_processing_provider
-        model = settings.light_processing_model
-    elif role == ModelRole.AMBIGUOUS_DEDUP:
-        provider_name = settings.ambiguous_dedup_provider
-        model = settings.ambiguous_dedup_model
-    elif role == ModelRole.CLAIM_RESOLUTION:
-        provider_name = settings.claim_resolution_provider
-        model = settings.claim_resolution_model
-    elif role == ModelRole.VERIFICATION:
-        provider_name = settings.verification_provider
-        model = settings.verification_model
-    elif role == ModelRole.WRITING:
-        provider_name = settings.writing_provider
-        model = settings.writing_model
-    elif role == ModelRole.AUDITING:
-        provider_name = settings.auditing_provider
-        model = settings.auditing_model
-    else:
-        raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
+    provider_name, model = _structured_role_config(role)
 
     if not provider_name or not model:
         raise ProviderNotConfiguredError(
@@ -93,6 +111,21 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
     raise ProviderNotConfiguredError(
         f"Proveedor LLM no soportado todavía: {provider_name}"
     )
+
+
+def get_structured_provider_optional(role: ModelRole) -> StructuredLLMProvider | None:
+    """None si el rol no está configurado; no tapa otros errores."""
+    try:
+        return get_structured_provider(role)
+    except ProviderNotConfiguredError:
+        return None
+
+
+def get_claim_resolution_provider(*, escalated: bool = False) -> StructuredLLMProvider:
+    role = (
+        ModelRole.CLAIM_RESOLUTION_ESCALATED if escalated else ModelRole.CLAIM_RESOLUTION
+    )
+    return get_structured_provider(role)
 
 
 def get_embedding_provider() -> EmbeddingProvider:
