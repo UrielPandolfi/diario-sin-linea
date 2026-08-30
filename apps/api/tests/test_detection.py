@@ -4,7 +4,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.domain.enums import EntityType, IngestionMethod, PipelineStatus
-from app.models import PipelineRun, SourceItem
+from app.models import Event, PipelineRun, SourceItem
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
 from app.providers.registry import ModelRole
 from app.schemas import SourceCreate, SourceItemCreate
@@ -398,6 +398,33 @@ def test_stadium_disturbances_in_rosario_create_event(db_session: Session) -> No
     assert result.get("filtered") is not True
 
 
+def test_formative_leagues_are_prefiltered_without_llm(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/ligas-formativas",
+        title="Un fin de semana de tremendos desafíos para los rosarinos en Ligas Formativas: Náutico y Gimnasia son locales",
+        body=(
+            "Rosario será sede de varios torneos de ligas formativas y Copa Santa Fe "
+            "entre Náutico y Gimnasia, con fechas para U15, U17 y femeninas U13."
+        ),
+        content_hash="ligas",
+    )
+    llm = FakeStructuredLLM({"EventCandidate": _candidate()})
+    result = DetectionService(
+        db_session, light_llm=llm, embeddings=FakeEmbeddingProvider()
+    ).detect(item.id)
+    refreshed = db_session.get(SourceItem, item.id)
+    assert result["created"] is False
+    assert result["filtered"] is True
+    assert result["reason"] == EditorialFilterReason.SPORTS_ONLY
+    assert llm.calls == []
+    assert refreshed is not None
+    assert refreshed.processing_status.value == "SKIPPED"
+    assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
+
+
 def test_pellegrini_crash_creates_event(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(
@@ -410,6 +437,32 @@ def test_pellegrini_crash_creates_event(db_session: Session) -> None:
     )
     result, _, _ = _detect(db_session, item, _candidate())
     assert result["created"] is True
+
+
+def test_null_what_happened_uses_summary_as_title(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/el-cruce",
+        title="El Festival El Cruce celebra 25 años",
+        body="Se celebra la 25ª edición del Festival El Cruce en Rosario.",
+        content_hash="cruce",
+    )
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            event_type="festival",
+            what_happened="null",
+            short_summary="Se celebra la 25ª edición del Festival El Cruce en Rosario",
+        ),
+    )
+    assert result["created"] is True
+    event = db_session.get(Event, result["event_id"])
+    assert event is not None
+    assert event.title_internal != "null"
+    assert "Cruce" in event.title_internal or "Festival" in event.title_internal
 
 
 def test_cordoba_item_is_skipped(db_session: Session) -> None:

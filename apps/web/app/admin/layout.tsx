@@ -9,7 +9,13 @@ const NAV = [
   { href: "/admin", label: "Tablero" },
   { href: "/admin/sources", label: "Fuentes" },
   { href: "/admin/events", label: "Sucesos" },
+  { href: "/admin/published", label: "Publicadas" },
 ];
+
+function navIsActive(href: string, pathname: string): boolean {
+  if (href === "/admin") return pathname === "/admin";
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -35,7 +41,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               <Link
                 key={item.href}
                 href={item.href}
-                className={pathname === item.href ? "text-primary" : "text-secondary"}
+                className={navIsActive(item.href, pathname) ? "text-primary" : "text-secondary"}
               >
                 {item.label}
               </Link>

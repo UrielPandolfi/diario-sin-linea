@@ -183,3 +183,56 @@ export function formatTokens(value: number | null | undefined): string {
   if (value == null) return "—";
   return value.toLocaleString("es-AR");
 }
+
+export const EVENT_STATUS_LABELS: Record<string, string> = {
+  DETECTED: "Detectado",
+  PROCESSING: "En proceso",
+  READY_FOR_REVIEW: "Listo para revisión",
+  PUBLISHED: "Publicado",
+  UPDATING: "Actualizando",
+  CLOSED: "Cerrado",
+  ARCHIVED: "Archivado",
+  FAILED: "Fallido",
+};
+
+export const PIPELINE_STATUS_LABELS: Record<string, string> = {
+  PENDING: "Pendiente",
+  RUNNING: "En curso",
+  SUCCESS: "Éxito",
+  RETRY: "Reintento",
+  FAILED: "Falló",
+};
+
+export const PIPELINE_STAGE_LABELS: Record<string, string> = {
+  event_detection: "Detección",
+  research: "Investigación",
+  claim_resolution: "Claims",
+  verification: "Verificación",
+  writing: "Redacción",
+  auditing: "Auditoría",
+  publishing: "Publicación",
+};
+
+export const EVENT_STATUS_OPTIONS = Object.keys(EVENT_STATUS_LABELS);
+export const PIPELINE_STATUS_OPTIONS = Object.keys(PIPELINE_STATUS_LABELS);
+export const PIPELINE_STAGE_OPTIONS = Object.keys(PIPELINE_STAGE_LABELS);
+
+export function labelLookup(map: Record<string, string>, value: string | null | undefined): string {
+  if (!value) return "—";
+  return map[value] ?? value;
+}
+
+export function isPublishedEvent(event: Pick<AdminEvent, "status">): boolean {
+  return event.status === "PUBLISHED";
+}
+
+export function uniqueEventValues(events: AdminEvent[], key: keyof AdminEvent): string[] {
+  const values = new Set<string>();
+  for (const event of events) {
+    const value = event[key];
+    if (typeof value === "string" && value.trim()) {
+      values.add(value);
+    }
+  }
+  return [...values].sort((a, b) => a.localeCompare(b, "es"));
+}

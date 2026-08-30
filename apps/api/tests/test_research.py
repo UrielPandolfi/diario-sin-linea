@@ -499,7 +499,7 @@ def test_brave_always_sends_freshness(monkeypatch) -> None:
     assert hits[0].url == "https://a.test/n"
 
 
-def test_code_queries_use_type_locality_and_date(db_session: Session) -> None:
+def test_code_queries_use_headline_locality_and_date(db_session: Session) -> None:
     from app.services.research_service import build_code_research_queries
 
     source = _source(db_session)
@@ -514,8 +514,180 @@ def test_code_queries_use_type_locality_and_date(db_session: Session) -> None:
     queries = build_code_research_queries(event, entity_names=["colectivo"], limit=2)
     assert len(queries) == 2
     assert "Rosario" in queries[0]
-    assert "accidente" in queries[0]
-    assert "2026-08-23" in queries[0]
+    assert "Choque" in queries[0]
+    assert "accidente" not in queries[0].casefold()
+    assert "colectivo" in queries[1]
+    assert "2026-08-23" in queries[1]
+
+
+def test_code_queries_skip_locality_entity(db_session: Session) -> None:
+    from app.services.research_service import build_code_research_queries
+
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Hecho", content_hash="h2"
+    )
+    event = _event(
+        db_session,
+        item,
+        started_at=datetime(2026, 8, 23, tzinfo=timezone.utc),
+    )
+    queries = build_code_research_queries(event, entity_names=["Rosario"], limit=2)
+    assert queries
+    assert all(query.casefold().strip() != "rosario" for query in queries)
+    assert all("choque" in query.casefold() for query in queries)
+
+
+def test_code_queries_drop_null_title_and_use_summary(db_session: Session) -> None:
+    from app.services.research_service import build_code_research_queries
+
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/festival", title="Festival", body="El Cruce", content_hash="n1"
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="null",
+        event_type="protesta",
+        short_summary="Se celebra la 25ª edición del Festival El Cruce en Rosario",
+        started_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+    )
+    queries = build_code_research_queries(
+        event,
+        entity_names=["Festival Internacional de Artes Escénicas Contemporáneas El Cruce", "Rosario"],
+        limit=2,
+    )
+    assert queries
+    assert all("null" not in query.casefold() for query in queries)
+    assert any("festival" in query.casefold() or "cruce" in query.casefold() for query in queries)
+
+
+def test_null_title_without_facts_defers_to_llm(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/vacio", title="x", body="Hecho", content_hash="n2"
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="null",
+        event_type="otro",
+        short_summary="null",
+        started_at=datetime(2026, 8, 28, tzinfo=timezone.utc),
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ResearchQueries": ResearchQueries(queries=["Festival El Cruce Rosario septiembre"]),
+            "RelevanceBatch": RelevanceBatch(hits=[]),
+        }
+    )
+    result = ResearchService(
+        db_session, llm=llm, search=FakeSearchProvider([]), fetcher=RecordingFetcher()
+    ).research(event.id, trigger="new_event")
+    assert result["query_source"] == "ultra"
+    assert result["queries"] == ["Festival El Cruce Rosario septiembre"]
+    assert "ResearchQueries" in llm.calls
+    assert all("null" not in query for query in result["queries"])
+
+
+def test_fluvial_is_not_same_event_as_pyme_forum(db_session: Session) -> None:
+    from app.services.research_service import hit_conflicts_with_event
+
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/foro",
+        title="Foro PyME",
+        body="El Concejo convocó el Foro PyME",
+        content_hash="foro",
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="Se llevó a cabo el Foro PyME de Rosario en el Concejo Municipal",
+        event_type="anuncio_oficial",
+        short_summary="Foro de micro, pequeñas y medianas empresas en el Recinto de Sesiones",
+    )
+    url = "https://rosario3.test/fluvial"
+    hit = SearchHit(
+        title="Pullaro inauguró el nuevo muelle de La Fluvial",
+        url=url,
+        snippet="La obra demandó una inversión provincial de $2.690 millones",
+    )
+    assert hit_conflicts_with_event(event, hit) is True
+    llm = FakeStructuredLLM(
+        {
+            "ResearchQueries": ResearchQueries(queries=["foro pyme rosario"]),
+            "RelevanceBatch": RelevanceBatch(
+                hits=[
+                    RelevanceHit(url=url, classification=ResearchRelevance.SAME_EVENT, confidence=0.95)
+                ]
+            ),
+        }
+    )
+    fetcher = RecordingFetcher()
+    result = ResearchService(
+        db_session,
+        llm=llm,
+        search=FakeSearchProvider([hit]),
+        fetcher=fetcher,
+    ).research(event.id, trigger="new_event")
+    assert result["attached"] == 0
+    assert result["relevance_demoted"] >= 1
+    assert fetcher.fetched == []
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(EventSource).where(EventSource.event_id == event.id)
+        )
+        == 1
+    )
+
+
+def test_murder_is_not_attached_to_festival(db_session: Session) -> None:
+    from app.services.research_service import hit_conflicts_with_event
+
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/festival",
+        title="El Cruce",
+        body="Festival de artes escénicas",
+        content_hash="fest",
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="null",
+        event_type="protesta",
+        short_summary="Se celebra la 25ª edición del Festival Internacional El Cruce en Rosario",
+    )
+    url = "https://tn.com.ar/asesinato-barra"
+    hit = SearchHit(
+        title="Asesinaron a balazos a un exintegrante de la barra de Rosario Central",
+        url=url,
+        snippet="fue asesinado a balazos tras salir de prisión",
+    )
+    assert hit_conflicts_with_event(event, hit) is True
+    llm = FakeStructuredLLM(
+        {
+            "ResearchQueries": ResearchQueries(queries=["festival el cruce rosario"]),
+            "RelevanceBatch": RelevanceBatch(
+                hits=[
+                    RelevanceHit(url=url, classification=ResearchRelevance.SAME_EVENT, confidence=0.8)
+                ]
+            ),
+        }
+    )
+    fetcher = RecordingFetcher()
+    result = ResearchService(
+        db_session, llm=llm, search=FakeSearchProvider([hit]), fetcher=fetcher
+    ).research(event.id, trigger="new_event")
+    assert result["attached"] == 0
+    assert result["relevance_demoted"] >= 1
+    assert fetcher.fetched == []
 
 
 def test_different_event_is_not_attached(db_session: Session) -> None:

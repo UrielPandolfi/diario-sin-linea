@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.text import normalize_name
+from app.core.text import normalize_name, usable_text
 from app.core.usage_context import update_usage_context, usage_scope
 from app.domain.enums import EventSourceRelation, PipelineStatus, SourceItemStatus
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
@@ -26,8 +26,15 @@ from app.providers.registry import (
 )
 from app.repositories import EntityRepository, EventRepository, PipelineRunRepository, SourceItemRepository
 from app.schemas import EventCreate
-from app.schemas.detection import DedupDecision, EventCandidate
-from app.services.editorial_gate import evaluate_editorial_gate, needs_location_fallback
+from app.schemas.detection import DedupDecision, EditorialScope, EventCandidate
+from app.services.editorial_gate import (
+    EditorialFilterReason,
+    evaluate_editorial_gate,
+    fold_place,
+    item_editorial_text,
+    needs_location_fallback,
+    should_filter_sports,
+)
 from app.services.event_service import EventService
 
 # Reextraer con Luna solo si ultra falla el schema o la ubicación es poco confiable/contradictoria.
@@ -105,31 +112,36 @@ class DetectionService:
                 source_item_id=item.id,
                 pipeline_run_id=run.id,
             ):
+                source_blob = item_editorial_text(item)
+                if should_filter_sports(source_blob):
+                    return self._mark_filtered(
+                        item,
+                        run,
+                        reason=EditorialFilterReason.SPORTS_ONLY,
+                        extra={
+                            "prefilter": True,
+                            "editorial_scope": EditorialScope.SPORTS_ONLY.value,
+                            "what_happened": (item.title or "")[:500],
+                        },
+                    )
                 candidate, extract_meta = self._extract_candidate(item)
-                gate = evaluate_editorial_gate(candidate)
+                gate = evaluate_editorial_gate(candidate, source_text=source_blob)
                 if not gate.allowed:
-                    item.processing_status = SourceItemStatus.SKIPPED
-                    run.status = PipelineStatus.SUCCESS
-                    run.finished_at = utc_now()
-                    run.metadata_json = {
-                        **extract_meta,
-                        "filtered": True,
-                        "filter_reason": gate.reason,
-                        "editorial_scope": gate.editorial_scope.value,
-                        "editorial_reason": candidate.editorial_reason,
-                        "locality": candidate.locality,
-                        "province": candidate.province,
-                        "country_code": candidate.country_code,
-                        "location_confidence": candidate.location_confidence,
-                        "what_happened": candidate.what_happened,
-                    }
-                    self.session.flush()
-                    return {
-                        "event_id": None,
-                        "created": False,
-                        "filtered": True,
-                        "reason": gate.reason,
-                    }
+                    return self._mark_filtered(
+                        item,
+                        run,
+                        reason=gate.reason or EditorialFilterReason.IRRELEVANT,
+                        extra={
+                            **extract_meta,
+                            "editorial_scope": gate.editorial_scope.value,
+                            "editorial_reason": candidate.editorial_reason,
+                            "locality": candidate.locality,
+                            "province": candidate.province,
+                            "country_code": candidate.country_code,
+                            "location_confidence": candidate.location_confidence,
+                            "what_happened": candidate.what_happened,
+                        },
+                    )
                 event, created, reason = self._resolve_event(item, candidate)
                 update_usage_context(event_id=event.id)
                 self._persist_entities(event, candidate)
@@ -162,6 +174,26 @@ class DetectionService:
                     self.session.flush()
                 raise
             return self._fail(item.id, attempt, str(exc))
+
+    def _mark_filtered(
+        self,
+        item: SourceItem,
+        run: PipelineRun,
+        *,
+        reason: str,
+        extra: dict | None = None,
+    ) -> dict:
+        item.processing_status = SourceItemStatus.SKIPPED
+        run.status = PipelineStatus.SUCCESS
+        run.finished_at = utc_now()
+        run.metadata_json = {"filtered": True, "filter_reason": reason, **(extra or {})}
+        self.session.flush()
+        return {
+            "event_id": None,
+            "created": False,
+            "filtered": True,
+            "reason": reason,
+        }
 
     def _fail(self, source_item_id: UUID, attempt: int, message: str) -> dict:
         self.session.rollback()
@@ -335,7 +367,7 @@ class DetectionService:
                 continue
             if candidate.event_type != event.event_type:
                 continue
-            if candidate.locality.lower() != event.locality.lower():
+            if fold_place(candidate.locality) != fold_place(event.locality):
                 continue
 
             event_names = {entity.normalized_name for entity in self.entities.list_for_event(event.id)}
@@ -380,8 +412,21 @@ class DetectionService:
 
     def _ask_terra(self, candidate: EventCandidate, scored: list[tuple[Event, float]]) -> DedupDecision:
         llm = self.dedup_llm or get_structured_provider(ModelRole.AMBIGUOUS_DEDUP)
+        slim = candidate.model_dump_json(
+            include={
+                "event_type",
+                "what_happened",
+                "occurred_at",
+                "province",
+                "locality",
+                "neighborhood",
+                "address_text",
+                "entities",
+                "short_summary",
+            }
+        )
         lines = [
-            f"Candidato: {candidate.model_dump_json()}",
+            f"Candidato: {slim}",
             "Eventos existentes:",
         ]
         for event, score in scored:
@@ -396,9 +441,10 @@ class DetectionService:
         )
 
     def _create_event(self, item: SourceItem, candidate: EventCandidate) -> Event:
+        title = usable_text(candidate.what_happened, candidate.short_summary, item.title, item.excerpt)
         return self.event_service.create(
             EventCreate(
-                title_internal=candidate.what_happened[:500],
+                title_internal=(title or item.url or "Suceso")[:500],
                 event_type=candidate.event_type or "unknown",
                 source_item_id=item.id,
                 started_at=candidate.occurred_at,

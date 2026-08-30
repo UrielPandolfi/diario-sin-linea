@@ -52,3 +52,24 @@ def content_fingerprint(*, title: str | None, body: str | None) -> str:
 
 def token_set(value: str) -> set[str]:
     return {token for token in re.findall(r"[a-z0-9áéíóúüñ]{3,}", value.lower())}
+
+
+_PLACEHOLDER_VALUES = {"null", "none", "undefined", "nil", "n/a", "na", "unknown", "desconocido"}
+
+
+def is_placeholder_text(value: str | None) -> bool:
+    folded = normalize_name(value or "")
+    if not folded:
+        return True
+    if folded in _PLACEHOLDER_VALUES:
+        return True
+    tokens = token_set(folded)
+    return bool(tokens) and tokens <= _PLACEHOLDER_VALUES
+
+
+def usable_text(*candidates: str | None) -> str:
+    for raw in candidates:
+        text = (raw or "").strip()
+        if text and not is_placeholder_text(text):
+            return text
+    return ""

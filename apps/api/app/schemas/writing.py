@@ -12,9 +12,20 @@ class ArticleDraft(BaseModel):
 
 
 class ContextEvidence(BaseModel):
+    source_ref: int
     evidence_type: EvidenceType
     excerpt: str | None = None
-    source_url: str | None = None
+
+
+class ContextSource(BaseModel):
+    ref: int
+    name: str
+    domain: str | None = None
+    url: str
+    title: str | None = None
+    relation_type: EventSourceRelation
+    is_primary: bool = False
+    is_monitored: bool = False
 
 
 class ContextClaim(BaseModel):
@@ -36,15 +47,6 @@ class ContextEntity(BaseModel):
     name: str
     entity_type: EntityType | str
     role: str
-
-
-class ContextSource(BaseModel):
-    url: str
-    title: str | None = None
-    domain: str | None = None
-    relation_type: EventSourceRelation
-    is_primary: bool = False
-    is_monitored: bool = False
 
 
 class ContextEventStub(BaseModel):

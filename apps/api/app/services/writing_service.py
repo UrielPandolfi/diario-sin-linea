@@ -223,6 +223,7 @@ class WritingService:
     def _user_prompt(self, article_context) -> str:
         return (
             "Redactá a partir de este ArticleContext JSON. "
+            "El suceso a cubrir es event.working_title; no conviertas otro hecho del mismo día en el titular. "
             "No uses fuentes ni claims que no estén listados.\n\n"
             + article_context.model_dump_json()
         )

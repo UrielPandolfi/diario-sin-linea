@@ -15,6 +15,8 @@ class AuditIssueType(StrEnum):
     FRAMING = "FRAMING"
     ADJECTIVE = "ADJECTIVE"
     MATERIAL_OMISSION = "MATERIAL_OMISSION"
+    REDUNDANCY = "REDUNDANCY"
+    CLARITY = "CLARITY"
 
 
 class AuditIssueSeverity(StrEnum):

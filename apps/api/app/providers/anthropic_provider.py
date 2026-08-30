@@ -6,6 +6,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel, ValidationError
 
+from app.providers.structured_format import format_schema_retry_feedback
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -59,6 +61,7 @@ class AnthropicJsonProvider:
         schema: type[T],
     ) -> T:
         last_error: Exception | None = None
+        user_content = user_prompt
         for _ in range(2):
             try:
                 # No pasar temperature: algunos clientes/SDK de Messages lo rechazan
@@ -71,7 +74,7 @@ class AnthropicJsonProvider:
                         f"{system_prompt}\n\n"
                         "Respondé únicamente JSON válido que respete el esquema."
                     ),
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[{"role": "user", "content": user_content}],
                 )
                 from app.services.usage_recorder import extract_anthropic_usage, record_llm_usage
 
@@ -92,4 +95,5 @@ class AnthropicJsonProvider:
                 return parse_structured(content, schema)
             except (json.JSONDecodeError, ValidationError, ValueError, TypeError, KeyError) as exc:
                 last_error = exc
+                user_content = f"{user_prompt}\n\n{format_schema_retry_feedback(exc)}"
         raise last_error or RuntimeError("structured output failed")

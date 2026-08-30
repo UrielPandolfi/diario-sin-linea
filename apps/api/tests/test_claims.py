@@ -562,15 +562,45 @@ def test_invented_excerpt_is_discarded(db_session: Session) -> None:
                     ],
                 )
             ]
-        )
+        ),
+        ClaimResolutionBatch(items=[]),
     )
 
     result = _service(db_session, llm).resolve(event.id, trigger="admin")
 
-    assert result["persisted"] == 0
-    assert db_session.scalar(select(func.count()).select_from(Claim)) == 0
-    assert db_session.scalar(select(func.count()).select_from(ClaimEvidence)) == 0
-    assert "ClaimResolutionBatch" not in llm.calls
+    claims = _event_claims(db_session, event.id)
+    assert result["persisted"] >= 1
+    assert result["fallback_used"] is True
+    assert all("doce" not in claim.canonical_text.lower() for claim in claims)
+    assert any("colectivo" in claim.canonical_text.lower() for claim in claims)
+    assert db_session.scalar(select(func.count()).select_from(ClaimEvidence)) >= 1
+    assert "ClaimResolutionBatch" in llm.calls
+
+
+def test_empty_extraction_falls_back_to_source_sentences(db_session: Session) -> None:
+    source = _source(db_session)
+    body = "Un colectivo chocó contra un automóvil en avenida Pellegrini y hubo cuatro heridos."
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/choque",
+        title="Choque en Pellegrini",
+        body=body,
+        content_hash="fb",
+    )
+    event = _event(db_session, item)
+    llm = _llm(
+        ClaimExtractionBatch(claims=[]),
+        ClaimResolutionBatch(items=[]),
+    )
+
+    result = _service(db_session, llm).resolve(event.id, trigger="admin")
+
+    claims = _event_claims(db_session, event.id)
+    assert result["extracted"] == 0
+    assert result["fallback_used"] is True
+    assert result["persisted"] >= 1
+    assert any("colectivo" in claim.canonical_text.lower() for claim in claims)
 
 
 def test_second_run_does_not_duplicate(db_session: Session) -> None:

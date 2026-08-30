@@ -122,10 +122,12 @@ def get_structured_provider_optional(role: ModelRole) -> StructuredLLMProvider |
 
 
 def get_claim_resolution_provider(*, escalated: bool = False) -> StructuredLLMProvider:
-    role = (
-        ModelRole.CLAIM_RESOLUTION_ESCALATED if escalated else ModelRole.CLAIM_RESOLUTION
-    )
-    return get_structured_provider(role)
+    if not escalated:
+        return get_structured_provider(ModelRole.CLAIM_RESOLUTION)
+    try:
+        return get_structured_provider(ModelRole.CLAIM_RESOLUTION_ESCALATED)
+    except ProviderNotConfiguredError:
+        return get_structured_provider(ModelRole.CLAIM_RESOLUTION)
 
 
 def get_embedding_provider() -> EmbeddingProvider:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -13,10 +14,17 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from app.core.source_snippet import SNIPPET_CHARS, select_source_snippet
 from app.core.text import excerpt_in_source, normalize_name
 from app.core.urls import url_domain
 from app.core.usage_context import usage_scope
-from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType, PipelineStatus
+from app.domain.enums import (
+    ClaimImportance,
+    ClaimStatus,
+    EvidenceType,
+    PipelineStatus,
+    SourceItemStatus,
+)
 from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, Source, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
 from app.providers.registry import ModelRole, get_claim_resolution_provider, get_structured_provider
@@ -30,7 +38,15 @@ from app.schemas.claims import (
 )
 
 CLAIM_STAGE = "claim_resolution"
-SNIPPET_CHARS = 1500
+MIN_USABLE_SOURCE_CHARS = 20
+MAX_FALLBACK_CLAIMS = 8
+MIN_FALLBACK_SENTENCE_CHARS = 28
+
+_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
+_SKIP_FALLBACK_SENTENCE = re.compile(
+    r"lee tambi|nota relacionada|suscrib|compart[ií]|seguinos|publicidad|copyright",
+    re.IGNORECASE,
+)
 
 _EVIDENCE_RANK = {
     EvidenceType.CONTRADICTS: 4,
@@ -40,6 +56,33 @@ _EVIDENCE_RANK = {
 }
 
 _PROTECTED_STATUSES = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
+
+
+def _item_body(item: SourceItem) -> str:
+    return (item.clean_text or item.excerpt or getattr(item, "title", None) or "").strip()
+
+
+def _factual_sentences(text: str, *, limit: int = 6) -> list[str]:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+    parts = [part.strip() for part in _SENTENCE_SPLIT.split(cleaned) if part.strip()]
+    if len(parts) <= 1 and len(cleaned) >= MIN_FALLBACK_SENTENCE_CHARS:
+        parts = [cleaned]
+    sentences: list[str] = []
+    for part in parts:
+        if len(part) < MIN_FALLBACK_SENTENCE_CHARS:
+            continue
+        if _SKIP_FALLBACK_SENTENCE.search(part):
+            continue
+        if len(part) > 280:
+            part = part[:280].rsplit(" ", 1)[0].strip()
+        if len(part) < MIN_FALLBACK_SENTENCE_CHARS:
+            continue
+        sentences.append(part)
+        if len(sentences) >= limit:
+            break
+    return sentences
 
 
 def build_assertion_key(
@@ -290,6 +333,16 @@ class ClaimService:
 
     def _run(self, event: Event) -> dict:
         sources = self._numbered_sources(event)
+        if not sources:
+            return {
+                "extracted": 0,
+                "persisted": 0,
+                "resolved": 0,
+                "needs_external_verification": [],
+                "escalated_claim_refs": [],
+                "fallback_used": False,
+                "reason": "no_usable_sources",
+            }
         extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
         batch = extractor.generate_structured(
             system_prompt=load_prompt("claim_extraction.md"),
@@ -297,6 +350,10 @@ class ClaimService:
             schema=ClaimExtractionBatch,
         )
         pending = self._merge_extracted(batch.claims, sources)
+        fallback_used = False
+        if not pending:
+            pending = self._merge_extracted(self._fallback_extracted(event, sources), sources)
+            fallback_used = bool(pending)
         claims = self._persist(event, pending)
         self.session.flush()
         if not claims:
@@ -306,6 +363,7 @@ class ClaimService:
                 "resolved": 0,
                 "needs_external_verification": [],
                 "escalated_claim_refs": [],
+                "fallback_used": fallback_used,
             }
 
         claims = self._reload_claims(event.id)
@@ -342,31 +400,84 @@ class ClaimService:
             "resolved": len(claims),
             "needs_external_verification": needs,
             "escalated_claim_refs": escalated_done,
+            "fallback_used": fallback_used,
         }
 
     def _numbered_sources(self, event: Event) -> list[SourceItem]:
         links = [link for link in event.event_sources if link.source_item is not None]
         links.sort(key=lambda link: (not link.is_primary, link.added_at or utc_now(), str(link.source_item_id)))
-        return [link.source_item for link in links]
+        usable: list[SourceItem] = []
+        for link in links:
+            item = link.source_item
+            if item.processing_status in (SourceItemStatus.FAILED, SourceItemStatus.SKIPPED):
+                continue
+            text = _item_body(item)
+            if len(text) < MIN_USABLE_SOURCE_CHARS:
+                continue
+            usable.append(item)
+        return usable
 
-    def _snippet(self, item: SourceItem) -> str:
-        text = item.clean_text or item.excerpt or ""
-        return text[:SNIPPET_CHARS]
+    def _fallback_extracted(self, event: Event, sources: list[SourceItem]) -> list[ExtractedClaim]:
+        rows: list[ExtractedClaim] = []
+        seen: set[str] = set()
+        for index, item in enumerate(sources, start=1):
+            snippet = self._snippet(item, event) or _item_body(item)
+            for sentence in _factual_sentences(snippet):
+                key = normalize_name(sentence)
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                rows.append(
+                    ExtractedClaim(
+                        canonical_text=sentence,
+                        claim_type="hecho",
+                        importance=ClaimImportance.HIGH if index == 1 else ClaimImportance.MEDIUM,
+                        evidence=[
+                            ExtractedEvidence(
+                                source_ref=index,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt=sentence[:240],
+                                confidence=0.55,
+                            )
+                        ],
+                    )
+                )
+                if len(rows) >= MAX_FALLBACK_CLAIMS:
+                    return rows
+        return rows
+
+    def _entity_names(self, event: Event) -> list[str]:
+        names: list[str] = []
+        for row in getattr(event, "event_entities", None) or []:
+            entity = getattr(row, "entity", None)
+            if entity is not None and entity.name:
+                names.append(entity.name)
+        return names
+
+    def _snippet(self, item: SourceItem, event: Event) -> str:
+        text = _item_body(item)
+        return select_source_snippet(
+            text,
+            budget=SNIPPET_CHARS,
+            entity_names=self._entity_names(event),
+            locality=event.locality,
+            address=event.address_text,
+        )
 
     def _extraction_prompt(self, event: Event, sources: list[SourceItem]) -> str:
         when = event.started_at or event.detected_at
         lines = [
             f"Título interno: {event.title_internal}",
-            f"Tipo: {event.event_type}",
+            f"Tipo interno (puede estar mal; extraé hechos del texto, no del tipo): {event.event_type}",
             f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
             f"Fecha: {when}",
-            "Fuentes (source_ref 1..N, snippet truncado):",
+            "Fuentes (source_ref 1..N, snippet truncado). Extraé los hechos concretos aunque no coincidan con el tipo interno.",
         ]
         for index, item in enumerate(sources, start=1):
             published = item.published_at.isoformat() if item.published_at else ""
             lines.append(
                 f"{index}. title={item.title or ''} url={item.url} published_at={published}\n"
-                f"snippet={self._snippet(item)}"
+                f"snippet={self._snippet(item, event)}"
             )
         return "\n".join(lines)
 

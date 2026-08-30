@@ -158,7 +158,9 @@ def resolve_event_claims(self, event_id: str, trigger: str = "research") -> dict
         service = ClaimService(session)
         result = service.resolve(UUID(event_id), trigger=trigger)
         session.commit()
-        if not result.get("skipped"):
+        persisted = result.get("persisted")
+        has_claims = persisted is None or int(persisted) > 0
+        if not result.get("skipped") and has_claims:
             verify_event_claims.delay(event_id, trigger)
         return result
     except Exception:

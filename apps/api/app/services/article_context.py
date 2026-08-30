@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from app.core.urls import url_domain
+from app.core.urls import canonicalize_url, url_domain
 from app.domain.enums import ClaimImportance, ClaimStatus, PipelineStatus
 from app.models import Claim, Entity, Event, EventEntity, PipelineRun
 from app.schemas.writing import (
@@ -83,14 +83,30 @@ def last_success_run(runs: Sequence[PipelineRun], stage: str) -> PipelineRun | N
     return None
 
 
-def _to_context_claim(claim: Claim, *, excerpt_chars: int) -> ContextClaim:
+def _to_context_claim(
+    claim: Claim,
+    *,
+    excerpt_chars: int,
+    item_id_to_ref: dict,
+    url_to_ref: dict[str, int],
+) -> ContextClaim:
     evidence = []
     for row in claim.evidence:
+        ref = None
+        if row.source_item_id is not None:
+            ref = item_id_to_ref.get(row.source_item_id)
+        if ref is None:
+            item = row.source_item
+            url = (item.url if item is not None else None) or row.source_url
+            if url:
+                ref = url_to_ref.get(canonicalize_url(url) or url) or url_to_ref.get(url)
+        if ref is None:
+            continue
         evidence.append(
             ContextEvidence(
+                source_ref=ref,
                 evidence_type=row.evidence_type,
                 excerpt=_truncate(row.excerpt, excerpt_chars),
-                source_url=row.source_url,
             )
         )
     return ContextClaim(
@@ -109,27 +125,44 @@ def _to_context_claim(claim: Claim, *, excerpt_chars: int) -> ContextClaim:
     )
 
 
-def _sources(event: Event, *, limit: int) -> list[ContextSource]:
+def _sources(event: Event, *, limit: int) -> tuple[list[ContextSource], dict, dict[str, int]]:
     links = sorted(
         event.event_sources,
         key=lambda link: (not link.is_primary, str(link.id)),
     )
     rows: list[ContextSource] = []
-    for link in links[:limit]:
+    item_id_to_ref: dict = {}
+    url_to_ref: dict[str, int] = {}
+    for index, link in enumerate(links[:limit], start=1):
         item = link.source_item
         source = item.source if item is not None else None
         url = item.url if item is not None else ""
+        domain = (source.domain if source is not None else None) or (url_domain(url) if url else None)
+        name = (source.name if source is not None else None) or domain or url or f"Fuente {index}"
         rows.append(
             ContextSource(
+                ref=index,
+                name=name,
+                domain=domain,
                 url=url,
                 title=item.title if item is not None else None,
-                domain=(source.domain if source is not None else None) or (url_domain(url) if url else None),
                 relation_type=link.relation_type,
                 is_primary=link.is_primary,
                 is_monitored=bool(source.is_monitored) if source is not None else False,
             )
         )
-    return rows
+        if item is not None:
+            item_id_to_ref[item.id] = index
+            if item.url:
+                url_to_ref[item.url] = index
+                canonical = canonicalize_url(item.url)
+                if canonical:
+                    url_to_ref[canonical] = index
+            if item.canonical_url:
+                url_to_ref[item.canonical_url] = index
+        elif url:
+            url_to_ref[url] = index
+    return rows, item_id_to_ref, url_to_ref
 
 
 def _entities(links: Sequence[EventEntity], entities: Sequence[Entity]) -> list[ContextEntity]:
@@ -191,12 +224,20 @@ def build_article_context(
     excerpt_chars: int = 400,
 ) -> ArticleContext:
     selected = select_context_claims(list(event.claims), limit=max_claims)
+    sources, item_id_to_ref, url_to_ref = _sources(event, limit=max_sources)
     buckets: dict[str, list[ContextClaim]] = {name: [] for name in _STATUS_BUCKET.values()}
     for claim in selected:
         bucket = _STATUS_BUCKET.get(claim.status)
         if bucket is None:
             continue
-        buckets[bucket].append(_to_context_claim(claim, excerpt_chars=excerpt_chars))
+        buckets[bucket].append(
+            _to_context_claim(
+                claim,
+                excerpt_chars=excerpt_chars,
+                item_id_to_ref=item_id_to_ref,
+                url_to_ref=url_to_ref,
+            )
+        )
 
     verification = compact_verification(last_success_run(pipeline_runs, VERIFICATION_STAGE))
     return ArticleContext(
@@ -218,6 +259,6 @@ def build_article_context(
         outdated_claims=buckets["outdated_claims"],
         entities=_entities(event.event_entities, entities),
         timeline=_timeline(event, selected),
-        sources=_sources(event, limit=max_sources),
+        sources=sources,
         verification=verification,
     )

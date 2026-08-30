@@ -64,6 +64,21 @@ def test_normalize_audit_result_low_issues_do_not_block() -> None:
     )
     assert normalize_audit_result(medium).passed is False
 
+    redundancy = ArticleAuditResult(
+        passed=True,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.REDUNDANCY,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="summary",
+                explanation="summary y primer párrafo son el mismo texto",
+                suggested_fix="avanzá el lead",
+            )
+        ],
+    )
+    assert normalize_audit_result(redundancy).passed is False
+    assert AuditIssueType.CLARITY.value == "CLARITY"
+
 
 def _source(session: Session, **overrides):
     payload = {

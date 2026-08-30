@@ -4,6 +4,8 @@ from typing import Any, TypeVar
 from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, ValidationError
 
+from app.providers.structured_format import format_schema_retry_feedback, openai_json_schema_format
+
 T = TypeVar("T", bound=BaseModel)
 
 
@@ -69,7 +71,7 @@ class OpenAIStructuredProvider:
                 create_kwargs: dict = {
                     "model": self.model,
                     "messages": messages,
-                    "response_format": {"type": "json_object"},
+                    "response_format": openai_json_schema_format(schema),
                 }
                 if _model_allows_temperature_zero(self.model):
                     create_kwargs["temperature"] = 0
@@ -92,6 +94,11 @@ class OpenAIStructuredProvider:
                 return schema.model_validate_json(content)
             except (ValidationError, ValueError, KeyError) as exc:
                 last_error = exc
+                messages = [
+                    messages[0],
+                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": format_schema_retry_feedback(exc)},
+                ]
         raise last_error or RuntimeError("structured output failed")
 
     def _create_completion(self, create_kwargs: dict) -> tuple[Any, int]:
@@ -105,6 +112,15 @@ class OpenAIStructuredProvider:
                 if key in create_kwargs and key in message:
                     create_kwargs.pop(key, None)
                     stripped = True
+            response_format = create_kwargs.get("response_format") or {}
+            if response_format.get("type") == "json_schema" and (
+                "json_schema" in message
+                or "response_format" in message
+                or "strict" in message
+                or "schema" in message
+            ):
+                create_kwargs["response_format"] = {"type": "json_object"}
+                stripped = True
             if not stripped:
                 raise
             started = time.perf_counter()
@@ -114,7 +130,7 @@ class OpenAIStructuredProvider:
 
 
 class OpenAIEmbeddingProvider:
-    def __init__(self, *, api_key: str, model: str, provider_name: str = "openai") -> None:
+    def __init__(self, *, api_key: str, model: str, provider_name: str = "openai"):
         self.model = model
         self.provider_name = provider_name
         self.client = OpenAI(api_key=api_key)

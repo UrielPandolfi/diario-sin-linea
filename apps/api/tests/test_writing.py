@@ -280,6 +280,7 @@ def test_context_omits_html_and_event_body(db_session: Session) -> None:
     assert result["written"] is True
     prompt = llm.user_prompts[0]
     assert "Un colectivo chocó en Pellegrini" in prompt
+    assert "no conviertas otro hecho del mismo día en el titular" in prompt
     assert "confirmed_claims" in prompt
     assert "status_after" in prompt
     assert html not in prompt

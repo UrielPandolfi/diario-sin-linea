@@ -149,6 +149,7 @@ class EventEntity(Base):
     role: Mapped[str] = mapped_column(String(64), nullable=False)
 
     event: Mapped[Event] = relationship(back_populates="event_entities")
+    entity: Mapped["Entity"] = relationship()
 
 
 class EventEmbedding(TimestampMixin, Base):

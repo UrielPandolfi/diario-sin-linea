@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.text import content_fingerprint
+from app.core.text import content_fingerprint, is_placeholder_text, normalize_name, token_set, usable_text
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import EventSourceRelation, IngestionMethod, PipelineStatus
@@ -70,29 +70,156 @@ def freshness_for_event(event: Event) -> str:
     return "py"
 
 
+_GENERIC_QUERY_PLACES = {"rosario", "santa fe", "argentina"}
+
+# Anclas de suceso: si el Event y el hit tienen anclas disjuntas, no es el mismo hecho
+# aunque coincidan ciudad y día (Foro PyME vs inauguración de La Fluvial).
+_EVENT_ANCHORS = (
+    "foro pyme",
+    "foro de micro",
+    "medianas empresas",
+    "pymes",
+    "pyme",
+    "muelle",
+    "fluvial",
+    "incendio",
+    "choque",
+    "accidente",
+    "homicidio",
+    "asesinato",
+    "balacera",
+    "protesta",
+    "piquete",
+    "manifestacion",
+    "colectivo",
+    "inundacion",
+    "festival",
+    "asesin",
+    "balazos",
+)
+
+_CRIME_ANCHORS = frozenset({"homicidio", "asesin", "balacera", "balazos"})
+
+
+def _event_anchors(text: str) -> set[str]:
+    folded = normalize_name(text or "")
+    if not folded:
+        return set()
+    return {anchor for anchor in _EVENT_ANCHORS if anchor in folded}
+
+
+def hit_conflicts_with_event(event: Event, hit: SearchHit) -> bool:
+    """True si título/snippet del hit describen otro suceso concreto."""
+    event_text = " ".join(
+        part
+        for part in (event.title_internal, event.short_summary, event.event_type)
+        if part and part.casefold() not in {"unknown", "otro", "anuncio_oficial"}
+    )
+    event_anchors = _event_anchors(event_text)
+    hit_anchors = _event_anchors(f"{hit.title or ''} {hit.snippet or ''}")
+    hit_crime = bool(hit_anchors & _CRIME_ANCHORS)
+    event_crime = bool(event_anchors & _CRIME_ANCHORS)
+    if hit_crime and not event_crime:
+        return True
+    if not event_anchors or not hit_anchors:
+        return False
+    return event_anchors.isdisjoint(hit_anchors)
+
+
+def _usable_entity_name(name: str, locality: str | None) -> bool:
+    folded = normalize_name(name)
+    if not folded or folded in _GENERIC_QUERY_PLACES:
+        return False
+    loc = normalize_name(locality or "")
+    if loc and (folded == loc or folded in loc.split()):
+        return False
+    return True
+
+
+_QUERY_STOP = {
+    "el",
+    "la",
+    "los",
+    "las",
+    "de",
+    "del",
+    "un",
+    "una",
+    "unos",
+    "unas",
+    "y",
+    "o",
+    "en",
+    "para",
+    "con",
+    "por",
+    "a",
+    "al",
+    "es",
+    "que",
+    "se",
+    "su",
+    "sus",
+    "lo",
+    "null",
+    "none",
+    "undefined",
+    "nil",
+}
+
+
+def _headline_query(headline: str, *, max_words: int = 8) -> str:
+    words: list[str] = []
+    for raw in headline.replace(":", " ").replace("—", " ").split():
+        token = raw.strip(".,;:¡!¿?\"'«»")
+        if not token or token.casefold() in _QUERY_STOP:
+            continue
+        words.append(token)
+        if len(words) >= max_words:
+            break
+    return " ".join(words)
+
+
 def build_code_research_queries(
     event: Event,
     *,
     entity_names: Sequence[str] = (),
     limit: int = 2,
 ) -> list[str]:
-    """1–2 consultas desde tipo, entidades, localidad y fecha. Sin LLM."""
+    """1–2 consultas desde titular, entidades, localidad y fecha. Sin LLM."""
     when = event.started_at or event.detected_at
     date_part = when.strftime("%Y-%m-%d") if when is not None else ""
     locality = (event.locality or "").strip()
     event_type = (event.event_type or "").strip()
     if event_type.casefold() in {"unknown", "otro", ""}:
         event_type = ""
-    names = [name.strip() for name in entity_names if name and name.strip()]
-    headline = (event.title_internal or "").strip()
+    names = [
+        name.strip()
+        for name in entity_names
+        if name and name.strip() and _usable_entity_name(name, locality)
+    ]
+    headline = usable_text(event.title_internal, event.short_summary)
     queries: list[str] = []
 
     def add(text: str) -> None:
         compact = " ".join(text.split())
-        if not compact:
+        if not compact or is_placeholder_text(compact):
             return
         folded = compact.casefold()
         if any(folded == existing.casefold() for existing in queries):
+            return
+        tokens = token_set(folded)
+        if tokens & {"null", "none", "undefined", "nil"}:
+            return
+        loc = locality.casefold()
+        remainder = folded
+        if loc:
+            remainder = remainder.replace(loc, " ")
+        if date_part:
+            remainder = remainder.replace(date_part.casefold(), " ")
+        if event_type:
+            remainder = remainder.replace(event_type.casefold(), " ")
+        if not token_set(remainder):
             return
         queries.append(compact)
 
@@ -108,9 +235,13 @@ def build_code_research_queries(
             seen.append(token)
         return " ".join(seen)
 
-    add(join_unique(event_type, locality, date_part))
-    entity = names[0] if names else ""
-    add(join_unique(entity or headline, locality))
+    lead = _headline_query(headline) if headline else ""
+    if lead:
+        add(join_unique(lead, locality))
+    if names:
+        add(join_unique(names[0], locality, date_part))
+    elif lead:
+        add(join_unique(_headline_query(headline, max_words=12), date_part))
     return queries[:limit]
 
 
@@ -254,9 +385,9 @@ class ResearchService:
         )
         query_source = "code"
         if len(queries) < query_target:
-            extra = self._complete_queries(event, queries, query_target)
-            queries = extra
-            query_source = "code+ultra"
+            had_code = bool(queries)
+            queries = self._complete_queries(event, queries, query_target)
+            query_source = "code+ultra" if had_code else "ultra"
         queries = queries[:query_target]
         if not queries:
             return {
@@ -289,7 +420,7 @@ class ResearchService:
                 "source_cap": source_cap,
             }
 
-        same_event_urls, relevance_counts, relevance_fallback = self._same_event_urls(
+        same_event_urls, relevance_counts, relevance_fallback, relevance_demoted = self._same_event_urls(
             event, candidates
         )
         attached = 0
@@ -348,6 +479,7 @@ class ResearchService:
             "source_cap": source_cap,
             "relevance": relevance_counts,
             "relevance_fallback": relevance_fallback,
+            "relevance_demoted": relevance_demoted,
         }
 
     def _complete_queries(
@@ -371,7 +503,9 @@ class ResearchService:
         seen = {query.casefold() for query in queries}
         for raw in batch.queries:
             text = " ".join((raw or "").split())
-            if not text or text.casefold() in seen:
+            if not text or text.casefold() in seen or is_placeholder_text(text):
+                continue
+            if token_set(text.casefold()) & {"null", "none", "undefined", "nil"}:
                 continue
             queries.append(text)
             seen.add(text.casefold())
@@ -383,16 +517,33 @@ class ResearchService:
         self,
         event: Event,
         candidates: list[SearchHit],
-    ) -> tuple[set[str], dict[str, int], bool]:
+    ) -> tuple[set[str], dict[str, int], bool, int]:
         batch, used_fallback = self._classify_relevance(event, candidates)
         counts = {item.value: 0 for item in ResearchRelevance}
         chosen: set[str] = set()
+        demoted = 0
+        by_url: dict[str, SearchHit] = {}
+        for candidate in candidates:
+            if candidate.url:
+                by_url[candidate.url] = candidate
+                canonical = canonicalize_url(candidate.url)
+                if canonical:
+                    by_url[canonical] = candidate
         for hit in batch.hits:
-            counts[hit.classification.value] = counts.get(hit.classification.value, 0) + 1
-            if hit.classification == ResearchRelevance.SAME_EVENT:
+            classification = hit.classification
+            search_hit = by_url.get(canonicalize_url(hit.url) or "") or by_url.get(hit.url)
+            if (
+                classification == ResearchRelevance.SAME_EVENT
+                and search_hit is not None
+                and hit_conflicts_with_event(event, search_hit)
+            ):
+                classification = ResearchRelevance.DIFFERENT_EVENT
+                demoted += 1
+            counts[classification.value] = counts.get(classification.value, 0) + 1
+            if classification == ResearchRelevance.SAME_EVENT:
                 chosen.add(canonicalize_url(hit.url))
                 chosen.add(hit.url)
-        return chosen, counts, used_fallback
+        return chosen, counts, used_fallback, demoted
 
     def _classify_relevance(
         self,
@@ -455,19 +606,22 @@ class ResearchService:
                 schema=schema,
             )
 
-    def _event_prompt(self, event: Event, max_queries: int) -> str:
+    def _event_facts(self, event: Event) -> str:
         when = event.started_at or event.detected_at
+        title = usable_text(event.title_internal, event.short_summary) or "(sin título usable)"
         return (
-            f"Máximo {max_queries} consultas.\n"
-            f"Título interno: {event.title_internal}\n"
+            f"Título interno: {title}\n"
             f"Tipo: {event.event_type}\n"
             f"Resumen: {event.short_summary or ''}\n"
             f"Lugar: {event.locality or ''} {event.province or ''}\n"
             f"Fecha: {when}\n"
         )
 
+    def _event_prompt(self, event: Event, max_queries: int) -> str:
+        return f"Máximo {max_queries} consultas.\n" + self._event_facts(event)
+
     def _relevance_prompt(self, event: Event, candidates: list[SearchHit]) -> str:
-        lines = [self._event_prompt(event, 0), "Resultados:"]
+        lines = [self._event_facts(event), "Resultados:"]
         for hit in candidates:
             lines.append(f"- url={hit.url} title={hit.title} snippet={hit.snippet or ''}")
         return "\n".join(lines)

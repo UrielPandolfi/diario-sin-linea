@@ -518,13 +518,47 @@ def test_resolve_event_claims_enqueues_verify_when_not_skipped(monkeypatch) -> N
     monkeypatch.setattr("app.workers.tasks.SessionLocal", Sess)
     monkeypatch.setattr(
         "app.workers.tasks.ClaimService",
-        lambda session: SimpleNamespace(resolve=lambda *_a, **_k: {"skipped": False, "event_id": "eid"}),
+        lambda session: SimpleNamespace(
+            resolve=lambda *_a, **_k: {"skipped": False, "event_id": "eid", "persisted": 1}
+        ),
     )
     monkeypatch.setattr("app.workers.tasks.verify_event_claims.delay", lambda *args: queued.append(args))
     from app.workers.tasks import resolve_event_claims
 
     resolve_event_claims.run("00000000-0000-0000-0000-000000000001", "research")
     assert queued == [("00000000-0000-0000-0000-000000000001", "research")]
+
+
+def test_resolve_event_claims_does_not_enqueue_verify_when_no_claims(monkeypatch) -> None:
+    queued: list[tuple] = []
+
+    class Sess:
+        def commit(self) -> None:
+            pass
+
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", Sess)
+    monkeypatch.setattr(
+        "app.workers.tasks.ClaimService",
+        lambda session: SimpleNamespace(
+            resolve=lambda *_a, **_k: {
+                "skipped": False,
+                "event_id": "eid",
+                "persisted": 0,
+                "reason": "no_usable_sources",
+            }
+        ),
+    )
+    monkeypatch.setattr("app.workers.tasks.verify_event_claims.delay", lambda *args: queued.append(args))
+    from app.workers.tasks import resolve_event_claims
+
+    resolve_event_claims.run("00000000-0000-0000-0000-000000000001", "research")
+    assert queued == []
 
 
 def test_resolve_event_claims_does_not_enqueue_verify_when_skipped(monkeypatch) -> None:
