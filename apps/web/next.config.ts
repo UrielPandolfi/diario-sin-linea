@@ -3,6 +3,12 @@ import type { NextConfig } from "next";
 const apiUrl = process.env.API_URL ?? "http://localhost:8000";
 
 const nextConfig: NextConfig = {
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "**" },
+      { protocol: "http", hostname: "**" },
+    ],
+  },
   async rewrites() {
     return [
       {

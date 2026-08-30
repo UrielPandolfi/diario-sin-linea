@@ -18,8 +18,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "Sin Línea",
+  title: {
+    default: "Sin Línea",
+    template: "%s · Sin Línea",
+  },
   description: "Medio informativo digital centrado en sucesos, no en noticias sueltas.",
+  icons: { icon: "/mark.svg" },
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
