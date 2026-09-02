@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 import httpx
@@ -28,3 +29,19 @@ class HttpFetcher:
 
 def extract_text(html: str, url: str) -> str | None:
     return trafilatura.extract(html, url=url)
+
+
+def fetch_failure_reason(exc: BaseException) -> str:
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        code = exc.response.status_code if exc.response is not None else 0
+        if 500 <= code <= 599:
+            return "http_5xx"
+        if code:
+            return f"http_{code}"
+        return "http_error"
+    if isinstance(exc, httpx.ConnectError):
+        return "connect"
+    name = re.sub(r"[^A-Za-z0-9_]", "", type(exc).__name__)
+    return (name[:40] or "error")

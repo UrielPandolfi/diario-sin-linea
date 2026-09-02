@@ -1,8 +1,11 @@
+from datetime import datetime
 from typing import NamedTuple
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.source_content import has_extracted_body, is_extracted_body
+from app.core.text import content_fingerprint
 from app.domain.enums import SourceItemStatus
 from app.models import SourceItem
 from app.repositories import SourceItemRepository
@@ -13,6 +16,14 @@ class IngestOutcome(NamedTuple):
     item: SourceItem
     created: bool
     updated: bool
+
+
+def _is_blank(value: object) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return False
 
 
 class SourceItemService:
@@ -38,6 +49,68 @@ class SourceItemService:
             updated = self._refresh_content(existing, data)
             return IngestOutcome(existing, False, updated)
         return IngestOutcome(item, True, False)
+
+    def enrich_content(
+        self,
+        item: SourceItem,
+        *,
+        url: str | None = None,
+        canonical_url: str | None = None,
+        title: str | None = None,
+        raw_text: str | None = None,
+        clean_text: str | None = None,
+        excerpt: str | None = None,
+        author: str | None = None,
+        published_at: datetime | None = None,
+    ) -> bool:
+        changed = False
+        if not _is_blank(url) and url != item.url:
+            item.url = url
+            changed = True
+        if not _is_blank(canonical_url) and not item.canonical_url:
+            item.canonical_url = canonical_url
+            changed = True
+        if _is_blank(item.title) and not _is_blank(title):
+            item.title = title
+            changed = True
+        if _is_blank(item.author) and not _is_blank(author):
+            item.author = author
+            changed = True
+        if item.published_at is None and published_at is not None:
+            item.published_at = published_at
+            changed = True
+
+        incoming_ok = is_extracted_body(clean_text, title or item.title)
+        existing_ok = has_extracted_body(item)
+        if incoming_ok:
+            incoming = (clean_text or "").strip()
+            current = (item.clean_text or "").strip()
+            if not existing_ok or len(incoming) > len(current):
+                item.clean_text = incoming
+                changed = True
+                if not _is_blank(excerpt):
+                    item.excerpt = excerpt.strip()[:500]
+                elif not item.excerpt:
+                    item.excerpt = incoming[:500]
+
+        if not _is_blank(raw_text):
+            incoming_raw = raw_text.strip()
+            current_raw = (item.raw_text or "").strip()
+            if not current_raw or len(incoming_raw) > len(current_raw):
+                item.raw_text = incoming_raw
+                changed = True
+
+        if (
+            not _is_blank(excerpt)
+            and _is_blank(item.excerpt)
+            and is_extracted_body(excerpt, title or item.title)
+        ):
+            item.excerpt = excerpt.strip()[:500]
+            changed = True
+
+        if changed:
+            item.content_hash = content_fingerprint(title=item.title, body=item.clean_text)
+        return changed
 
     def _find_publication(self, data: SourceItemCreate) -> SourceItem | None:
         if data.external_id:

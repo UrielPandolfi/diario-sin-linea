@@ -1,7 +1,9 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.domain.enums import EventSourceRelation, IngestionMethod
+from app.domain.enums import EventSourceRelation, IngestionMethod, SourceItemStatus
 from app.schemas import ArticleContentUpdate, ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
 from app.services import ArticleService, EventService, SourceItemService, SourceService
 
@@ -176,3 +178,63 @@ def test_article_update_preserves_previous_version(db_session: Session) -> None:
     )
     assert created_again is False
     assert again.id == article.id
+
+
+def test_enrich_content_fills_body_without_clobbering_metadata(db_session: Session) -> None:
+    source = _source(db_session)
+    published = datetime(2026, 8, 20, tzinfo=timezone.utc)
+    item = SourceItemService(db_session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url="https://www.rosario3.com/choque",
+            canonical_url="https://www.rosario3.com/choque",
+            content_hash="h1",
+            title="Choque en Pellegrini",
+            author="Redacción",
+            published_at=published,
+            clean_text=None,
+        )
+    ).item
+    item.processing_status = SourceItemStatus.PROCESSED
+    db_session.flush()
+
+    updated = SourceItemService(db_session).enrich_content(
+        item,
+        title=None,
+        author="",
+        published_at=None,
+        clean_text="La Policía confirmó un choque en Pellegrini y Corrientes.",
+        raw_text="<article><p>html</p></article>",
+    )
+
+    assert updated is True
+    assert item.title == "Choque en Pellegrini"
+    assert item.author == "Redacción"
+    assert item.published_at == published
+    assert item.processing_status == SourceItemStatus.PROCESSED
+    assert item.clean_text == "La Policía confirmó un choque en Pellegrini y Corrientes."
+
+
+def test_enrich_content_does_not_replace_body_with_title(db_session: Session) -> None:
+    source = _source(db_session)
+    summary = "La Policía confirmó un homicidio en barrio Alvear."
+    item = SourceItemService(db_session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url="https://www.rosario3.com/homicidio",
+            canonical_url="https://www.rosario3.com/homicidio",
+            content_hash="h-sum",
+            title="Homicidio en Ayacucho 4100",
+            clean_text=summary,
+        )
+    ).item
+
+    updated = SourceItemService(db_session).enrich_content(
+        item,
+        title="Homicidio en Ayacucho 4100",
+        clean_text="Homicidio en Ayacucho 4100",
+        excerpt="Homicidio en Ayacucho 4100",
+    )
+
+    assert updated is False
+    assert item.clean_text == summary

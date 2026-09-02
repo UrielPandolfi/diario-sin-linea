@@ -2,18 +2,37 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.domain.enums import EventSourceRelation, EventStatus, IngestionMethod, PipelineStatus
+from app.domain.enums import (
+    ClaimImportance,
+    ClaimStatus,
+    EventSourceRelation,
+    EventStatus,
+    EvidenceType,
+    IngestionMethod,
+    PipelineStatus,
+    SourceItemStatus,
+)
 from app.main import app
-from app.models import EventSource, PipelineRun
+from app.models import Claim, ClaimEvidence, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, SearchHit
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM, RecordingFetcher
 from app.schemas import EventCreate, SourceCreate, SourceItemCreate
+from app.schemas.claims import (
+    ClaimExtractionBatch,
+    ClaimResolutionBatch,
+    ClaimResolutionItem,
+    ExtractedClaim,
+    ExtractedEvidence,
+)
 from app.schemas.research import RelevanceHit, RelevanceBatch, ResearchQueries, ResearchRelevance
+from app.core.source_content import has_extracted_body
+from app.services.claim_service import ClaimService
 from app.services.event_service import EventService
 from app.services.research_service import ResearchService
 from app.services.source_item_service import SourceItemService
@@ -32,7 +51,7 @@ def _source(session: Session, **overrides):
     return SourceService(session).create(SourceCreate(**payload))
 
 
-def _item(session: Session, source_id, *, url: str, title: str, body: str, content_hash: str):
+def _item(session: Session, source_id, *, url: str, title: str, body: str | None, content_hash: str):
     return SourceItemService(session).ingest(
         SourceItemCreate(
             source_id=source_id,
@@ -806,3 +825,302 @@ def test_contradiction_allows_escalated_source_cap(db_session: Session) -> None:
     )
     assert counted == 8
     assert result["attached"] == 7
+
+
+def _coverage_extract(html: str, url: str) -> str:
+    return "El choque dejó seis heridos en Rosario."
+
+
+def test_existing_title_only_item_is_hydrated_without_duplicate(db_session: Session) -> None:
+    source_a = _source(db_session, name="A")
+    source_b = _source(db_session, name="B", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/choque",
+        title="Choque",
+        body="Un colectivo chocó",
+        content_hash="ha",
+    )
+    orphan = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/ya-existia",
+        title="Otra cobertura",
+        body=None,
+        content_hash="hb",
+    )
+    orphan.processing_status = SourceItemStatus.PROCESSED
+    db_session.flush()
+    event = _event(db_session, item_a)
+    llm = _llm(["choque"], [orphan.url])
+    search = FakeSearchProvider([SearchHit(title="Otra cobertura", url=orphan.url, snippet="colisión")])
+    fetcher = RecordingFetcher()
+    service = ResearchService(
+        db_session, llm=llm, search=search, fetcher=fetcher, extract=_coverage_extract
+    )
+
+    result = service.research(event.id, trigger="admin")
+
+    db_session.refresh(orphan)
+    assert result["hydrated"] == 1
+    assert result["fetched"] == 0
+    assert result["reused"] == 0
+    assert fetcher.fetched == [orphan.url]
+    assert orphan.clean_text == "El choque dejó seis heridos en Rosario."
+    assert orphan.processing_status == SourceItemStatus.PROCESSED
+    assert has_extracted_body(orphan) is True
+    links = _links(db_session, event.id)
+    assert sum(1 for link in links if link.source_item_id == orphan.id) == 1
+
+
+def test_already_linked_empty_item_is_hydrated_on_rerun(db_session: Session) -> None:
+    source_a = _source(db_session, name="A")
+    source_b = _source(db_session, name="B", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/choque",
+        title="Choque",
+        body="Un colectivo chocó",
+        content_hash="ha",
+    )
+    empty = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/adicional",
+        title="Otra cobertura",
+        body=None,
+        content_hash="hb",
+    )
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(
+        event, empty.id, relation_type=EventSourceRelation.ADDITIONAL, is_primary=False
+    )
+    llm = _llm(["choque"], [empty.url])
+    search = FakeSearchProvider([SearchHit(title="Otra cobertura", url=empty.url, snippet="colisión")])
+    fetcher = RecordingFetcher()
+    result = ResearchService(
+        db_session, llm=llm, search=search, fetcher=fetcher, extract=_coverage_extract
+    ).research(event.id, trigger="admin")
+
+    db_session.refresh(empty)
+    assert result["hydrated"] == 1
+    assert result["attached"] == 0
+    assert fetcher.fetched == [empty.url]
+    assert empty.clean_text == "El choque dejó seis heridos en Rosario."
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(EventSource).where(EventSource.event_id == event.id)
+        )
+        == 2
+    )
+
+
+def test_hydrate_fetch_failure_is_success_and_skipped_by_claims(db_session: Session) -> None:
+    source_a = _source(db_session, name="A")
+    source_b = _source(db_session, name="B", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/choque",
+        title="Choque",
+        body="Un colectivo chocó en Rosario y dejó heridos.",
+        content_hash="ha",
+    )
+    orphan = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/bloqueo",
+        title="Otra cobertura del choque",
+        body=None,
+        content_hash="hb",
+    )
+    event = _event(db_session, item_a)
+    llm = _llm(["choque"], [orphan.url])
+    search = FakeSearchProvider([SearchHit(title="Otra cobertura", url=orphan.url, snippet="colisión")])
+    fetcher = RecordingFetcher(errors={orphan.url: httpx.TimeoutException("timed out")})
+    result = ResearchService(
+        db_session, llm=llm, search=search, fetcher=fetcher, extract=_coverage_extract
+    ).research(event.id, trigger="admin")
+
+    db_session.refresh(orphan)
+    assert result["skipped"] is False
+    assert result.get("error") is None
+    assert result["hydrated"] == 0
+    assert {"url": orphan.url, "reason": "timeout"} in result["fetch_failures"]
+    assert has_extracted_body(orphan) is False
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.event_id == event.id, PipelineRun.stage == "research")
+    ).one()
+    assert run.status == PipelineStatus.SUCCESS
+    loaded = ClaimService(db_session)._load_event(event.id)
+    usable = ClaimService(db_session)._numbered_sources(loaded)
+    assert [item.id for item in usable] == [item_a.id]
+
+
+def test_research_retries_failed_hydrate_on_second_run(db_session: Session) -> None:
+    source_a = _source(db_session, name="A")
+    source_b = _source(db_session, name="B", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/choque",
+        title="Choque",
+        body="Un colectivo chocó",
+        content_hash="ha",
+    )
+    empty = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/adicional",
+        title="Otra cobertura",
+        body=None,
+        content_hash="hb",
+    )
+    empty_id = empty.id
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(
+        event, empty.id, relation_type=EventSourceRelation.ADDITIONAL, is_primary=False
+    )
+    llm = _llm(["choque"], [empty.url])
+    search = FakeSearchProvider([SearchHit(title="Otra cobertura", url=empty.url, snippet="colisión")])
+    fetcher = RecordingFetcher(errors={empty.url: [httpx.TimeoutException("timed out")]})
+    service = ResearchService(
+        db_session, llm=llm, search=search, fetcher=fetcher, extract=_coverage_extract
+    )
+
+    first = service.research(event.id, trigger="admin")
+    db_session.refresh(empty)
+    assert first["skipped"] is False
+    assert first["hydrated"] == 0
+    assert has_extracted_body(empty) is False
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(EventSource).where(EventSource.event_id == event.id)
+        )
+        == 2
+    )
+
+    second = service.research(event.id, trigger="admin")
+    db_session.refresh(empty)
+    assert second["hydrated"] == 1
+    assert second["attached"] == 0
+    assert empty.id == empty_id
+    assert empty.clean_text == "El choque dejó seis heridos en Rosario."
+    assert has_extracted_body(empty) is True
+    assert fetcher.fetched == [empty.url, empty.url]
+    assert (
+        db_session.scalar(
+            select(func.count()).select_from(EventSource).where(EventSource.event_id == event.id)
+        )
+        == 2
+    )
+    assert (
+        db_session.scalar(select(func.count()).select_from(SourceItem).where(SourceItem.id == empty_id))
+        == 1
+    )
+
+
+def test_hydrated_additional_sources_can_make_claim_supported(db_session: Session) -> None:
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    source_c = _source(db_session, name="C", domain="c.test", feed_url="https://c.test/rss.xml")
+    body = "El choque dejó seis heridos en Rosario."
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/n",
+        title="A",
+        body=body,
+        content_hash="ha",
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/n",
+        title="B",
+        body=None,
+        content_hash="hb",
+    )
+    item_c = _item(
+        db_session,
+        source_c.id,
+        url="https://c.test/n",
+        title="C",
+        body=None,
+        content_hash="hc",
+    )
+    event = _event(db_session, item_a)
+    llm = _llm(["choque"], [item_b.url, item_c.url])
+    search = FakeSearchProvider(
+        [
+            SearchHit(title="B", url=item_b.url, snippet="heridos"),
+            SearchHit(title="C", url=item_c.url, snippet="heridos"),
+        ]
+    )
+    fetcher = RecordingFetcher()
+    ResearchService(
+        db_session, llm=llm, search=search, fetcher=fetcher, extract=lambda html, url: body
+    ).research(event.id, trigger="admin")
+    db_session.refresh(item_b)
+    db_session.refresh(item_c)
+    assert has_extracted_body(item_b) is True
+    assert has_extracted_body(item_c) is True
+
+    claims_llm = FakeStructuredLLM(
+        {
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[
+                    ExtractedClaim(
+                        canonical_text="El choque dejó seis heridos",
+                        claim_type="hecho",
+                        importance=ClaimImportance.HIGH,
+                        subject="accidente",
+                        predicate="cantidad_heridos",
+                        object_text="El choque dejó seis heridos",
+                        normalized_value="6",
+                        unit="personas",
+                        evidence=[
+                            ExtractedEvidence(
+                                source_ref=1,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt="seis heridos",
+                                confidence=0.9,
+                            ),
+                            ExtractedEvidence(
+                                source_ref=2,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt="seis heridos",
+                                confidence=0.8,
+                            ),
+                            ExtractedEvidence(
+                                source_ref=3,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt="seis heridos",
+                                confidence=0.8,
+                            ),
+                        ],
+                    )
+                ]
+            ),
+            "ClaimResolutionBatch": ClaimResolutionBatch(
+                items=[
+                    ClaimResolutionItem(
+                        claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="tres medios"
+                    )
+                ]
+            ),
+        }
+    )
+    ClaimService(db_session, extractor_llm=claims_llm, resolver_llm=claims_llm).resolve(
+        event.id, trigger="admin"
+    )
+
+    claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
+    assert claim.status == ClaimStatus.SUPPORTED
+    ids = {
+        row.source_item_id
+        for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id))
+    }
+    assert ids == {item_a.id, item_b.id, item_c.id}

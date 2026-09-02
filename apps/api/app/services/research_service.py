@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from app.core.source_content import has_extracted_body, is_extracted_body
 from app.core.text import content_fingerprint, is_placeholder_text, normalize_name, token_set, usable_text
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
@@ -40,7 +41,7 @@ from app.repositories import (
 from app.schemas import SourceCreate, SourceItemCreate
 from app.schemas.research import RelevanceBatch, ResearchQueries, ResearchRelevance
 from app.services.event_service import EventService
-from app.services.fetching import HttpFetcher, extract_text
+from app.services.fetching import HttpFetcher, extract_text, fetch_failure_reason
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 
@@ -379,6 +380,10 @@ class ResearchService:
             else self.settings.max_standard_event_sources
         )
 
+        fetch_log: list[str] = []
+        fetch_failures: list[dict[str, str]] = []
+        hydrated = self._hydrate_linked_without_body(event, fetch_log, fetch_failures)
+
         entity_names = self._entity_names(event.id)
         queries = build_code_research_queries(
             event, entity_names=entity_names, limit=query_target
@@ -395,6 +400,9 @@ class ResearchService:
                 "attached": 0,
                 "fetched": 0,
                 "reused": 0,
+                "hydrated": hydrated,
+                "fetch_failures": fetch_failures,
+                "fetched_urls": fetch_log,
                 "query_source": query_source,
                 "escalated": escalate,
                 "source_cap": source_cap,
@@ -414,7 +422,10 @@ class ResearchService:
                 "attached": 0,
                 "fetched": 0,
                 "reused": 0,
+                "hydrated": hydrated,
                 "candidates": 0,
+                "fetch_failures": fetch_failures,
+                "fetched_urls": fetch_log,
                 "query_source": query_source,
                 "escalated": escalate,
                 "source_cap": source_cap,
@@ -426,7 +437,6 @@ class ResearchService:
         attached = 0
         fetched = 0
         reused = 0
-        fetch_log: list[str] = []
         counted = self._counted_source_count(event.id)
         for hit in candidates:
             if counted >= source_cap:
@@ -440,6 +450,16 @@ class ResearchService:
                 hit.url
             )
             if existing is not None:
+                had_body = has_extracted_body(existing)
+                if not had_body and self._hydrate_existing(
+                    existing,
+                    url=hit.url,
+                    title=hit.title,
+                    snippet=hit.snippet,
+                    fetch_log=fetch_log,
+                    fetch_failures=fetch_failures,
+                ):
+                    hydrated += 1
                 _, created_link = self.event_service.attach_source(
                     event,
                     existing.id,
@@ -448,11 +468,12 @@ class ResearchService:
                 )
                 if created_link:
                     attached += 1
-                    reused += 1
                     counted += 1
                     linked.add(canonical)
+                    if had_body:
+                        reused += 1
                 continue
-            item = self._ingest_new(hit, canonical, fetch_log)
+            item = self._ingest_new(hit, canonical, fetch_log, fetch_failures)
             if item is None:
                 continue
             fetched += 1
@@ -472,8 +493,10 @@ class ResearchService:
             "attached": attached,
             "fetched": fetched,
             "reused": reused,
+            "hydrated": hydrated,
             "candidates": len(candidates),
             "fetched_urls": fetch_log,
+            "fetch_failures": fetch_failures,
             "query_source": query_source,
             "escalated": escalate,
             "source_cap": source_cap,
@@ -653,17 +676,27 @@ class ResearchService:
             selected.append(hit)
         return selected
 
-    def _ingest_new(self, hit: SearchHit, canonical: str, fetch_log: list[str]) -> SourceItem | None:
-        try:
-            fetched = self.fetcher.fetch(hit.url)
-            fetch_log.append(hit.url)
-        except Exception:
-            fetch_log.append(f"fail:{hit.url}")
+    def _ingest_new(
+        self,
+        hit: SearchHit,
+        canonical: str,
+        fetch_log: list[str],
+        fetch_failures: list[dict[str, str]],
+    ) -> SourceItem | None:
+        fetched = self._fetch_page(hit.url, fetch_log, fetch_failures)
+        if fetched is None:
             return None
         html = fetched.body or ""
         final_url = fetched.url or hit.url
         canonical = canonicalize_url(final_url) or canonical
-        text = self.extract(html, final_url) or hit.snippet or hit.title
+        extracted = self.extract(html, final_url)
+        if is_extracted_body(extracted, hit.title):
+            text = extracted
+        elif is_extracted_body(hit.snippet, hit.title):
+            text = (hit.snippet or "").strip()
+        else:
+            fetch_failures.append({"url": hit.url, "reason": "empty_extract"})
+            text = None
         domain = url_domain(canonical)
         source = self._source_for_domain(domain, canonical)
         fingerprint = content_fingerprint(title=hit.title, body=text)
@@ -680,6 +713,80 @@ class ResearchService:
             )
         )
         return outcome.item
+
+    def _hydrate_linked_without_body(
+        self,
+        event: Event,
+        fetch_log: list[str],
+        fetch_failures: list[dict[str, str]],
+    ) -> int:
+        hydrated = 0
+        for row in self._event_source_rows(event.id):
+            item = row.source_item or self.items.get(row.source_item_id)
+            if item is None or has_extracted_body(item):
+                continue
+            if self._hydrate_existing(
+                item,
+                url=item.url,
+                title=item.title,
+                snippet=item.excerpt,
+                fetch_log=fetch_log,
+                fetch_failures=fetch_failures,
+            ):
+                hydrated += 1
+        return hydrated
+
+    def _hydrate_existing(
+        self,
+        item: SourceItem,
+        *,
+        url: str,
+        title: str | None,
+        snippet: str | None,
+        fetch_log: list[str],
+        fetch_failures: list[dict[str, str]],
+    ) -> bool:
+        fetched = self._fetch_page(url, fetch_log, fetch_failures)
+        if fetched is None:
+            return False
+        html = fetched.body or ""
+        final_url = fetched.url or url
+        extracted = self.extract(html, final_url)
+        if not is_extracted_body(extracted, title or item.title):
+            fetch_failures.append({"url": url, "reason": "empty_extract"})
+            if html:
+                self.item_service.enrich_content(
+                    item,
+                    url=final_url,
+                    canonical_url=canonicalize_url(final_url),
+                    raw_text=html[:20000],
+                )
+            return False
+        self.item_service.enrich_content(
+            item,
+            url=final_url,
+            canonical_url=canonicalize_url(final_url),
+            title=title,
+            raw_text=html[:20000] if html else None,
+            clean_text=extracted,
+            excerpt=(extracted[:500] if extracted else None) or snippet,
+        )
+        return has_extracted_body(item)
+
+    def _fetch_page(
+        self,
+        url: str,
+        fetch_log: list[str],
+        fetch_failures: list[dict[str, str]],
+    ):
+        try:
+            fetched = self.fetcher.fetch(url)
+            fetch_log.append(url)
+            return fetched
+        except Exception as exc:
+            fetch_log.append(f"fail:{url}")
+            fetch_failures.append({"url": url, "reason": fetch_failure_reason(exc)})
+            return None
 
     def _source_for_domain(self, domain: str, url: str) -> Source:
         existing = self.sources.get_by_domain(domain) if domain else None

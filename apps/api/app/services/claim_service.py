@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from app.core.source_content import has_extracted_body
 from app.core.source_snippet import SNIPPET_CHARS, select_source_snippet
 from app.core.text import excerpt_in_source, normalize_name
 from app.core.urls import url_domain
@@ -38,7 +39,6 @@ from app.schemas.claims import (
 )
 
 CLAIM_STAGE = "claim_resolution"
-MIN_USABLE_SOURCE_CHARS = 20
 MAX_FALLBACK_CLAIMS = 8
 MIN_FALLBACK_SENTENCE_CHARS = 28
 
@@ -59,7 +59,7 @@ _PROTECTED_STATUSES = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
 
 
 def _item_body(item: SourceItem) -> str:
-    return (item.clean_text or item.excerpt or getattr(item, "title", None) or "").strip()
+    return (item.clean_text or "").strip()
 
 
 def _factual_sentences(text: str, *, limit: int = 6) -> list[str]:
@@ -411,8 +411,7 @@ class ClaimService:
             item = link.source_item
             if item.processing_status in (SourceItemStatus.FAILED, SourceItemStatus.SKIPPED):
                 continue
-            text = _item_body(item)
-            if len(text) < MIN_USABLE_SOURCE_CHARS:
+            if not has_extracted_body(item):
                 continue
             usable.append(item)
         return usable

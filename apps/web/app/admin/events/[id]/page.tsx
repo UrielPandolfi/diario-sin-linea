@@ -330,6 +330,11 @@ export default function AdminEventDetailPage() {
                       {link.relation_type}
                       {link.is_primary ? " · primaria" : ""}
                       {link.source_item ? ` · ${link.source_item.processing_status}` : ""}
+                      {link.source_item
+                        ? link.source_item.has_extracted_body
+                          ? " · Contenido"
+                          : " · Sin cuerpo"
+                        : ""}
                     </p>
                   </li>
                 ))}

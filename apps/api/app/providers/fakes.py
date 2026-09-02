@@ -74,13 +74,24 @@ class FakeSearchProvider:
 
 
 class RecordingFetcher:
-    def __init__(self, pages: dict[str, str] | None = None) -> None:
+    def __init__(
+        self,
+        pages: dict[str, str] | None = None,
+        errors: dict[str, Exception | list[Exception]] | None = None,
+    ) -> None:
         self.pages = pages or {}
+        self.errors = {
+            url: list(exc) if isinstance(exc, list) else [exc]
+            for url, exc in (errors or {}).items()
+        }
         self.fetched: list[str] = []
 
     def fetch(self, url: str, *, timeout: float = 20.0):
         from app.services.fetching import FetchResult
 
         self.fetched.append(url)
+        pending = self.errors.get(url)
+        if pending:
+            raise pending.pop(0)
         body = self.pages.get(url, f"<article><p>Texto de {url}</p></article>")
         return FetchResult(url=url, body=body, content_type="text/html")

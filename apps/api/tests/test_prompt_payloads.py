@@ -12,7 +12,7 @@ from app.domain.enums import (
 from app.providers.base import SearchHit
 from app.schemas.detection import EventCandidate
 from app.services.article_context import _sources, _to_context_claim
-from app.services.claim_service import ClaimService, MIN_USABLE_SOURCE_CHARS
+from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.research_service import ResearchService
 
@@ -52,7 +52,7 @@ def test_numbered_sources_skips_failed_and_empty() -> None:
     )
     empty = SimpleNamespace(
         processing_status=SourceItemStatus.PENDING,
-        clean_text="x",
+        clean_text=None,
         excerpt=None,
         title=None,
     )
@@ -77,8 +77,7 @@ def test_numbered_sources_skips_failed_and_empty() -> None:
             SimpleNamespace(source_item=title_only, is_primary=False, added_at=None, source_item_id=uuid4()),
         ]
     )
-    assert ClaimService._numbered_sources(svc, event) == [good, title_only]
-    assert MIN_USABLE_SOURCE_CHARS > 1
+    assert ClaimService._numbered_sources(svc, event) == [good]
 
 
 def test_terra_dump_omits_editorial_fields() -> None:

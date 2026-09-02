@@ -47,6 +47,7 @@ export type AdminSourceItem = {
   published_at: string | null;
   detected_at: string | null;
   processing_status: string;
+  has_extracted_body: boolean;
 };
 
 export type AdminEvent = {

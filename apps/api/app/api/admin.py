@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.api.deps import DbSession, require_admin
 from app.core.clock import utc_now
 from app.core.config import get_settings
+from app.core.source_content import has_extracted_body
 from app.domain.enums import IngestionMethod
 from app.repositories import (
     ArticleRepository,
@@ -84,6 +85,7 @@ def _item_out(item) -> dict:
         "published_at": _iso(item.published_at),
         "detected_at": _iso(item.detected_at),
         "processing_status": item.processing_status.value,
+        "has_extracted_body": has_extracted_body(item),
     }
 
 
