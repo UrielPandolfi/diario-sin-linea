@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from app.core.source_content import has_extracted_body
 from app.core.urls import canonicalize_url, url_domain
 from app.domain.enums import ClaimImportance, ClaimStatus, PipelineStatus
 from app.models import Claim, Entity, Event, EventEntity, PipelineRun
@@ -12,6 +13,7 @@ from app.schemas.writing import (
     ContextEventStub,
     ContextEvidence,
     ContextSource,
+    ContextSourceText,
     ContextTimelineItem,
     ContextVerification,
     ContextVerificationSol,
@@ -86,31 +88,33 @@ def last_success_run(runs: Sequence[PipelineRun], stage: str) -> PipelineRun | N
 def _to_context_claim(
     claim: Claim,
     *,
+    ref: str,
     excerpt_chars: int,
     item_id_to_ref: dict,
     url_to_ref: dict[str, int],
 ) -> ContextClaim:
     evidence = []
     for row in claim.evidence:
-        ref = None
+        source_ref = None
         if row.source_item_id is not None:
-            ref = item_id_to_ref.get(row.source_item_id)
-        if ref is None:
+            source_ref = item_id_to_ref.get(row.source_item_id)
+        if source_ref is None:
             item = row.source_item
             url = (item.url if item is not None else None) or row.source_url
             if url:
-                ref = url_to_ref.get(canonicalize_url(url) or url) or url_to_ref.get(url)
-        if ref is None:
+                source_ref = url_to_ref.get(canonicalize_url(url) or url) or url_to_ref.get(url)
+        if source_ref is None:
             continue
         evidence.append(
             ContextEvidence(
-                source_ref=ref,
+                source_ref=source_ref,
                 evidence_type=row.evidence_type,
                 excerpt=_truncate(row.excerpt, excerpt_chars),
             )
         )
     return ContextClaim(
         id=str(claim.id),
+        ref=ref,
         canonical_text=claim.canonical_text,
         claim_type=claim.claim_type,
         importance=claim.importance,
@@ -163,6 +167,41 @@ def _sources(event: Event, *, limit: int) -> tuple[list[ContextSource], dict, di
         elif url:
             url_to_ref[url] = index
     return rows, item_id_to_ref, url_to_ref
+
+
+def _source_contexts(
+    event: Event,
+    *,
+    limit: int,
+    text_chars: int,
+) -> list[ContextSourceText]:
+    links = sorted(
+        event.event_sources,
+        key=lambda link: (not link.is_primary, str(link.id)),
+    )
+    rows: list[ContextSourceText] = []
+    for link in links:
+        if limit > 0 and len(rows) >= limit:
+            break
+        item = link.source_item
+        if item is None or not has_extracted_body(item):
+            continue
+        source = item.source
+        name = (source.name if source is not None else None) or url_domain(item.url) or item.url
+        text = _truncate(item.clean_text, text_chars) or ""
+        if not text:
+            continue
+        rows.append(
+            ContextSourceText(
+                source_id=str(item.id),
+                source_name=name,
+                url=item.url,
+                title=item.title,
+                published_at=item.published_at,
+                text=text,
+            )
+        )
+    return rows
 
 
 def _entities(links: Sequence[EventEntity], entities: Sequence[Entity]) -> list[ContextEntity]:
@@ -222,17 +261,23 @@ def build_article_context(
     max_claims: int = 40,
     max_sources: int = 20,
     excerpt_chars: int = 400,
+    max_source_contexts: int = 6,
+    source_context_chars: int = 5000,
 ) -> ArticleContext:
     selected = select_context_claims(list(event.claims), limit=max_claims)
     sources, item_id_to_ref, url_to_ref = _sources(event, limit=max_sources)
+    claim_refs: dict[str, str] = {}
     buckets: dict[str, list[ContextClaim]] = {name: [] for name in _STATUS_BUCKET.values()}
-    for claim in selected:
+    for index, claim in enumerate(selected, start=1):
         bucket = _STATUS_BUCKET.get(claim.status)
         if bucket is None:
             continue
+        ref = f"C{index}"
+        claim_refs[ref] = str(claim.id)
         buckets[bucket].append(
             _to_context_claim(
                 claim,
+                ref=ref,
                 excerpt_chars=excerpt_chars,
                 item_id_to_ref=item_id_to_ref,
                 url_to_ref=url_to_ref,
@@ -260,5 +305,9 @@ def build_article_context(
         entities=_entities(event.event_entities, entities),
         timeline=_timeline(event, selected),
         sources=sources,
+        source_contexts=_source_contexts(
+            event, limit=max_source_contexts, text_chars=source_context_chars
+        ),
+        claim_refs=claim_refs,
         verification=verification,
     )

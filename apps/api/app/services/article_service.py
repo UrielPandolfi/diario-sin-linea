@@ -23,6 +23,7 @@ class ArticleService:
             headline=data.headline,
             summary=data.summary,
             body=data.body,
+            body_blocks=data.body_blocks,
             status=data.status,
             hero_image_url=data.hero_image_url,
             current_version=1,
@@ -37,6 +38,7 @@ class ArticleService:
         article.headline = data.headline
         article.summary = data.summary
         article.body = data.body
+        article.body_blocks = data.body_blocks
         if data.hero_image_url is not None:
             article.hero_image_url = data.hero_image_url
         article.current_version += 1
@@ -51,6 +53,7 @@ class ArticleService:
             headline=article.headline,
             summary=article.summary,
             body=article.body,
+            body_blocks=article.body_blocks,
             change_reason=change_reason,
         )
         self.session.add(version)

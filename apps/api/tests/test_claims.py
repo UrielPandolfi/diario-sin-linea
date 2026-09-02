@@ -897,3 +897,34 @@ def test_high_confidence_resolution_is_not_escalated(db_session: Session) -> Non
     ).resolve(event.id, trigger="admin")
     assert result["escalated_claim_refs"] == []
     assert escalated.calls == []
+
+
+def test_extraction_prompt_includes_material_after_1500_chars(db_session: Session, monkeypatch) -> None:
+    lead = ("Medida administrativa del Ejecutivo. " * 50).strip()
+    assert len(lead) > 1500
+    late = "El aumento para las Fuerzas Armadas será del 12,22%."
+    body = f"{lead}\n\n{late}"
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/ffaa",
+        title="Aumento FFAA",
+        body=body,
+        content_hash="ffaa5000",
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="Aumento para las Fuerzas Armadas",
+        event_type="anuncio_oficial",
+    )
+    service = ClaimService(db_session, extractor_llm=FakeStructuredLLM({}), resolver_llm=FakeStructuredLLM({}))
+
+    monkeypatch.setattr(service.settings, "claim_extraction_source_chars", 1500)
+    short_prompt = service._extraction_prompt(event, [item])
+    assert "12,22%" not in short_prompt
+
+    monkeypatch.setattr(service.settings, "claim_extraction_source_chars", 5000)
+    long_prompt = service._extraction_prompt(event, [item])
+    assert "12,22%" in long_prompt

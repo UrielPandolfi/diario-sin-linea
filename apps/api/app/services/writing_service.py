@@ -7,6 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.article_body import context_claim_ref_map, resolve_article_draft
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
@@ -163,20 +164,16 @@ class WritingService:
             base["material_reasons"] = change.reasons
             return base
 
-        article_context = build_article_context(
-            event,
-            entities=self.entities.list_for_event(event.id),
-            pipeline_runs=self.pipeline.list_for_event(event.id, limit=50),
-            max_claims=self.settings.max_writing_claims_per_event,
-            max_sources=self.settings.max_writing_sources_per_event,
-            excerpt_chars=self.settings.writing_excerpt_chars,
-        )
+        article_context = self._article_context(event)
         llm = self.llm or get_structured_provider(ModelRole.WRITING)
         bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
         draft = llm.generate_structured(
             system_prompt=load_prompt("article_writing.md"),
             user_prompt=self._user_prompt(article_context),
             schema=ArticleDraft,
+        )
+        body, body_blocks = resolve_article_draft(
+            draft, claim_ref_map=context_claim_ref_map(article_context)
         )
         change_reason = "initial" if article is None else ",".join(change.reasons) or "material_change"
         if article is None:
@@ -185,7 +182,8 @@ class WritingService:
                     event_id=event.id,
                     headline=draft.headline,
                     summary=draft.summary,
-                    body=draft.body,
+                    body=body,
+                    body_blocks=body_blocks,
                     status=ArticleStatus.DRAFT,
                 )
             )
@@ -196,7 +194,8 @@ class WritingService:
                 ArticleContentUpdate(
                     headline=draft.headline,
                     summary=draft.summary,
-                    body=draft.body,
+                    body=body,
+                    body_blocks=body_blocks,
                     change_reason=change_reason,
                 ),
             )
@@ -220,10 +219,23 @@ class WritingService:
             return True
         return article.status == ArticleStatus.PUBLISHED and article.published_version is not None
 
+    def _article_context(self, event: Event):
+        return build_article_context(
+            event,
+            entities=self.entities.list_for_event(event.id),
+            pipeline_runs=self.pipeline.list_for_event(event.id, limit=50),
+            max_claims=self.settings.max_writing_claims_per_event,
+            max_sources=self.settings.max_writing_sources_per_event,
+            excerpt_chars=self.settings.writing_excerpt_chars,
+            max_source_contexts=self.settings.max_writing_source_contexts,
+            source_context_chars=self.settings.writing_source_context_chars,
+        )
+
     def _user_prompt(self, article_context) -> str:
         return (
             "Redactá a partir de este ArticleContext JSON. "
             "El suceso a cubrir es event.working_title; no conviertas otro hecho del mismo día en el titular. "
-            "No uses fuentes ni claims que no estén listados.\n\n"
+            "No uses fuentes ni claims que no estén listados. "
+            "En body_blocks usá claim_refs C1/C2 del context, nunca UUIDs.\n\n"
             + article_context.model_dump_json()
         )

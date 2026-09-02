@@ -137,10 +137,13 @@ def test_context_evidence_maps_source_ref() -> None:
     )
     mapped = _to_context_claim(
         claim,
+        ref="C1",
         excerpt_chars=400,
         item_id_to_ref={item_id: 3},
         url_to_ref={},
     )
+    assert mapped.ref == "C1"
+    assert mapped.id == str(claim.id)
     assert mapped.evidence[0].source_ref == 3
     assert mapped.evidence[0].excerpt == "6 heridos"
     assert "source_url" not in mapped.evidence[0].model_dump()

@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.article_body import plain_article_draft
 from app.domain.enums import (
     ArticleStatus,
     ClaimImportance,
@@ -26,10 +27,9 @@ from app.schemas.claims import (
     ExtractedClaim,
     ExtractedEvidence,
 )
-from app.schemas.detection import EventCandidate
+from app.schemas.detection import EditorialTopic, EventCandidate, RelevanceLevel
 from app.schemas.research import RelevanceBatch, RelevanceHit, ResearchQueries
 from app.schemas.verification import VerificationResult
-from app.schemas.writing import ArticleDraft
 from app.services.audit_service import AuditService
 from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
@@ -76,6 +76,9 @@ def test_pipeline_fake_source_to_public_apis(db_session: Session) -> None:
                 locality="Rosario",
                 province="Santa Fe",
                 short_summary="Choque de colectivos en Rosario",
+                editorial_topic=EditorialTopic.GOVERNMENT,
+                is_public_affairs=True,
+                political_relevance=RelevanceLevel.HIGH,
                 entities=[],
             )
         }
@@ -217,10 +220,10 @@ def test_pipeline_fake_source_to_public_apis(db_session: Session) -> None:
     assert verified.get("skipped") is False
     assert verified.get("error") is None
 
-    draft = ArticleDraft(
-        headline="Choque de colectivos en Pellegrini y Corrientes",
-        summary="Dos unidades chocaron en Rosario. Hay heridos y el tránsito sigue cortado.",
-        body=(
+    draft = plain_article_draft(
+        "Choque de colectivos en Pellegrini y Corrientes",
+        "Dos unidades chocaron en Rosario. Hay heridos y el tránsito sigue cortado.",
+        (
             "Dos colectivos chocaron en Pellegrini y Corrientes.\n\n"
             "El choque dejó seis heridos.\n\n"
             "El tránsito permanece cortado."

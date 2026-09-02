@@ -113,6 +113,7 @@ def _article_out(article) -> dict:
         "headline": article.headline,
         "summary": article.summary,
         "body": article.body,
+        "body_blocks": article.body_blocks,
         "status": article.status.value,
         "current_version": article.current_version,
         "published_version": article.published_version,

@@ -1,4 +1,4 @@
-"""Filtro editorial determinista: deportes-only / irrelevante / fuera de Rosario.
+"""Filtro editorial determinista: deporte / irrelevante / fuera de política argentina.
 
 Puede correr sobre el texto crudo (prefiltro, sin LLM) y otra vez sobre el
 EventCandidate. No llama LLM. Normaliza país/provincia/localidad.
@@ -9,8 +9,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from app.core.config import get_settings
 from app.core.text import normalize_name
-from app.schemas.detection import EditorialScope, EventCandidate
+from app.schemas.detection import (
+    EditorialScope,
+    EditorialTopic,
+    EventCandidate,
+    RelevanceLevel,
+)
 
 TARGET_COUNTRY = "AR"
 TARGET_LOCALITY = "rosario"
@@ -21,7 +27,15 @@ LOCALITY_ALIASES = {"rosario"}
 LOCALITY_DISPLAY = {"rosario": "Rosario"}
 PROVINCE_DISPLAY = {"santa fe": "Santa Fe", "santafe": "Santa Fe"}
 
-# Fallback a Luna si la confianza es menor y no hay localidad usable o hay contradicción.
+STRONG_POLITICAL_TOPICS = {
+    EditorialTopic.NATIONAL_POLITICS,
+    EditorialTopic.PROVINCIAL_POLITICS,
+    EditorialTopic.GOVERNMENT,
+    EditorialTopic.LEGISLATION,
+    EditorialTopic.ELECTIONS,
+}
+
+# Fallback a Luna si la confianza es menor y hay contradicción de lugar.
 LOCATION_CONFIDENCE_FALLBACK = 0.4
 
 _SPLIT = re.compile(r"[\s,;|/–—\-]+")
@@ -62,6 +76,8 @@ class EditorialFilterReason:
     IRRELEVANT = "IRRELEVANT"
     LOCATION_UNKNOWN = "LOCATION_UNKNOWN"
     OUTSIDE_TARGET_LOCALITY = "OUTSIDE_TARGET_LOCALITY"
+    OUTSIDE_TARGET_COUNTRY = "OUTSIDE_TARGET_COUNTRY"
+    NOT_PUBLIC_AFFAIRS = "NOT_PUBLIC_AFFAIRS"
 
 
 @dataclass(frozen=True)
@@ -127,6 +143,11 @@ def normalize_country(value: str | None) -> str | None:
     if len(folded) == 2:
         return folded.upper()
     return folded.upper()[:8]
+
+
+def target_country_code() -> str:
+    code = (get_settings().editorial_country_code or TARGET_COUNTRY).strip().upper()
+    return code or TARGET_COUNTRY
 
 
 def split_locality_raw(locality: str | None) -> tuple[str | None, str | None]:
@@ -215,13 +236,29 @@ def needs_location_fallback(
     *,
     threshold: float = LOCATION_CONFIDENCE_FALLBACK,
 ) -> bool:
-    """True si conviene reextraer con Luna: poca confianza y localidad vacía o contradictoria."""
+    """True si conviene reextraer: poca confianza y lugar contradictorio.
+
+    Una noticia nacional AR sin ciudad no dispara fallback (ahorra una llamada).
+    """
     if candidate.location_confidence >= threshold:
         return False
-    loc, _ = parse_locality_field(candidate.locality)
-    if not loc:
+    if location_is_contradictory(candidate):
         return True
-    return location_is_contradictory(candidate)
+    loc, _ = parse_locality_field(candidate.locality)
+    if loc:
+        return False
+    country = normalize_country(candidate.country_code) or target_country_code()
+    if country == target_country_code():
+        return False
+    return True
+
+
+def is_public_affairs_scope(candidate: EventCandidate) -> bool:
+    if candidate.is_public_affairs:
+        return True
+    if candidate.political_relevance in (RelevanceLevel.MEDIUM, RelevanceLevel.HIGH):
+        return True
+    return candidate.editorial_topic in STRONG_POLITICAL_TOPICS
 
 
 def evaluate_editorial_gate(
@@ -231,17 +268,17 @@ def evaluate_editorial_gate(
 ) -> EditorialGateResult:
     apply_canonical_location(candidate)
     scope = candidate.editorial_scope or EditorialScope.GENERAL_NEWS
-    loc = fold_place(candidate.locality)
-    province = fold_place(candidate.province)
     country = candidate.country_code
+    wanted = target_country_code()
     blob = join_editorial_text(
         candidate.what_happened,
         candidate.short_summary,
         candidate.editorial_reason,
+        candidate.gate_reason,
         source_text,
     )
     sports = looks_like_sports_coverage(blob)
-    impact = has_public_news_impact(blob)
+    in_scope = is_public_affairs_scope(candidate)
 
     def _result(allowed: bool, reason: str | None) -> EditorialGateResult:
         return EditorialGateResult(
@@ -255,23 +292,16 @@ def evaluate_editorial_gate(
 
     if scope == EditorialScope.IRRELEVANT:
         return _result(False, EditorialFilterReason.IRRELEVANT)
-    if scope == EditorialScope.SPORTS_ONLY and not impact:
+
+    if not in_scope and (
+        scope in (EditorialScope.SPORTS_ONLY, EditorialScope.SPORTS_PUBLIC_IMPACT) or sports
+    ):
         return _result(False, EditorialFilterReason.SPORTS_ONLY)
-    if sports and not impact:
-        return _result(False, EditorialFilterReason.SPORTS_ONLY)
-    if scope == EditorialScope.SPORTS_PUBLIC_IMPACT and not impact:
-        return _result(False, EditorialFilterReason.SPORTS_ONLY)
 
-    if not loc:
-        return _result(False, EditorialFilterReason.LOCATION_UNKNOWN)
+    if country and country != wanted and not candidate.argentina_relevance:
+        return _result(False, EditorialFilterReason.OUTSIDE_TARGET_COUNTRY)
 
-    if country and country != TARGET_COUNTRY:
-        return _result(False, EditorialFilterReason.OUTSIDE_TARGET_LOCALITY)
-
-    if not locality_is_rosario(loc):
-        return _result(False, EditorialFilterReason.OUTSIDE_TARGET_LOCALITY)
-
-    if province and not province_is_santa_fe(province):
-        return _result(False, EditorialFilterReason.OUTSIDE_TARGET_LOCALITY)
+    if not in_scope:
+        return _result(False, EditorialFilterReason.NOT_PUBLIC_AFFAIRS)
 
     return _result(True, None)

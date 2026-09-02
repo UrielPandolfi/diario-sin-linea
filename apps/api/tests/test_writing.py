@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.article_body import annotated_article_draft, plain_article_draft
 from app.core.config import get_settings
 from app.domain.enums import (
     ArticleStatus,
@@ -23,7 +24,7 @@ from app.models import Article, ArticleVersion, Claim, ClaimEvidence, PipelineRu
 from app.providers.anthropic_provider import AnthropicJsonProvider, parse_json_payload, parse_structured
 from app.providers.fakes import FakeStructuredLLM
 from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
-from app.schemas.writing import ArticleDraft
+from app.schemas.writing import ArticleDraft, ArticleDraftBlock, ArticleDraftSegment
 from app.services.article_context import select_context_claims
 from app.services.article_service import ArticleService
 from app.services.event_service import EventService
@@ -104,13 +105,18 @@ def _claim(session: Session, event, *, text: str, claim_type: str, importance: C
 
 
 def _draft(**overrides) -> ArticleDraft:
-    payload = {
-        "headline": "Un colectivo chocó contra un automóvil en avenida Pellegrini",
-        "summary": "El choque ocurrió esta tarde en Rosario y hay heridos, según fuentes locales.",
-        "body": "Un colectivo chocó contra un automóvil en avenida Pellegrini.\n\nLas fuentes listadas coinciden en el lugar del hecho.",
-    }
-    payload.update(overrides)
-    return ArticleDraft(**payload)
+    body = overrides.pop(
+        "body",
+        "Un colectivo chocó contra un automóvil en avenida Pellegrini.\n\nLas fuentes listadas coinciden en el lugar del hecho.",
+    )
+    headline = overrides.pop(
+        "headline", "Un colectivo chocó contra un automóvil en avenida Pellegrini"
+    )
+    summary = overrides.pop(
+        "summary", "El choque ocurrió esta tarde en Rosario y hay heridos, según fuentes locales."
+    )
+    draft = plain_article_draft(headline, summary, body)
+    return draft.model_copy(update=overrides) if overrides else draft
 
 
 def _service(session: Session, llm: FakeStructuredLLM) -> WritingService:
@@ -128,19 +134,26 @@ def _snapshot_row(claim_id, *, text: str, status: str, importance: str = "HIGH",
     }
 
 
+_DRAFT_JSON = (
+    '{"headline": "H", "summary": "S", '
+    '"body_blocks": [{"type": "paragraph", "segments": [{"text": "B", "claim_refs": []}]}]}'
+)
+_DRAFT_JSON_EMPTY_HEADLINE = (
+    '{"headline": "", "summary": "S", '
+    '"body_blocks": [{"type": "paragraph", "segments": [{"text": "B", "claim_refs": []}]}]}'
+)
+
+
 def test_parse_json_payload_strips_fences() -> None:
     assert parse_json_payload('```json\n{"headline": "H"}\n```') == {"headline": "H"}
-    parsed = parse_structured(
-        'texto\n{"headline": "H", "summary": "S", "body": "B"}',
-        ArticleDraft,
-    )
+    parsed = parse_structured("texto\n" + _DRAFT_JSON, ArticleDraft)
     assert parsed.headline == "H"
 
 
 def test_anthropic_retries_invalid_json_then_validates() -> None:
     payloads = [
         "no es json",
-        '{"headline": "H", "summary": "S", "body": "B"}',
+        _DRAFT_JSON,
     ]
     client = SimpleNamespace(
         messages=SimpleNamespace(
@@ -161,8 +174,8 @@ def test_anthropic_retries_invalid_json_then_validates() -> None:
 
 def test_anthropic_retries_pydantic_validation_error() -> None:
     payloads = [
-        '{"headline": "", "summary": "S", "body": "B"}',
-        '{"headline": "H", "summary": "S", "body": "B"}',
+        _DRAFT_JSON_EMPTY_HEADLINE,
+        _DRAFT_JSON,
     ]
     client = SimpleNamespace(
         messages=SimpleNamespace(
@@ -177,10 +190,10 @@ def test_anthropic_retries_pydantic_validation_error() -> None:
         user_prompt="user",
         schema=ArticleDraft,
     )
-    assert result.body == "B"
+    assert result.body_blocks[0].segments[0].text == "B"
     assert payloads == []
     try:
-        ArticleDraft(headline="", summary="S", body="B")
+        ArticleDraft(headline="", summary="S", body_blocks=[])
     except ValidationError:
         pass
     else:
@@ -233,7 +246,7 @@ def test_context_omits_html_and_event_body(db_session: Session) -> None:
         source.id,
         url="https://ejemplo.test/nota",
         title="Nota",
-        body="Un colectivo chocó en Pellegrini",
+        body="Un colectivo chocó en Pellegrini. TEXTO_LIMPIO_FUENTE.",
         content_hash="h1",
         raw_text=html,
     )
@@ -283,6 +296,10 @@ def test_context_omits_html_and_event_body(db_session: Session) -> None:
     assert "no conviertas otro hecho del mismo día en el titular" in prompt
     assert "confirmed_claims" in prompt
     assert "status_after" in prompt
+    assert "source_contexts" in prompt
+    assert "claim_refs" in prompt
+    assert "C1" in prompt
+    assert "TEXTO_LIMPIO_FUENTE" in prompt
     assert html not in prompt
     assert "raw_text" not in prompt
     assert "SECRETO" not in prompt
@@ -377,6 +394,9 @@ def test_first_write_creates_draft_and_keeps_event_status(db_session: Session) -
     assert article is not None
     assert article.status == ArticleStatus.DRAFT
     assert article.current_version == 1
+    assert article.body_blocks is not None
+    assert "<" not in article.body
+    assert "claim_refs" not in json.dumps(article.body_blocks)
     assert event.status == EventStatus.DETECTED
     versions = list(db_session.scalars(select(ArticleVersion).where(ArticleVersion.article_id == article.id)))
     assert len(versions) == 1
@@ -640,3 +660,122 @@ def test_verify_enqueues_write_only_on_success(monkeypatch) -> None:
     )
     verify_event_claims.run("00000000-0000-0000-0000-000000000001", "admin")
     assert queued == []
+
+
+def _seed_writeable_event(session: Session, *, extra_claims: list[str] | None = None):
+    source = _source(session)
+    item = _item(session, source.id, url="https://ejemplo.test/a", title="A", body="Choque", content_hash="h1")
+    event = _event(session, item)
+    claims = [
+        _claim(
+            session,
+            event,
+            text="Un colectivo chocó",
+            claim_type="hecho",
+            importance=ClaimImportance.HIGH,
+            status=ClaimStatus.SUPPORTED,
+        )
+    ]
+    for text in extra_claims or []:
+        claims.append(
+            _claim(
+                session,
+                event,
+                text=text,
+                claim_type="hecho",
+                importance=ClaimImportance.HIGH,
+                status=ClaimStatus.SUPPORTED,
+            )
+        )
+    session.flush()
+    return event, claims
+
+
+def test_write_maps_c1_to_claim_uuid(db_session: Session) -> None:
+    event, claims = _seed_writeable_event(db_session)
+    draft = annotated_article_draft(
+        "Un colectivo chocó en Pellegrini",
+        "El choque ocurrió esta tarde en Rosario.",
+        paragraphs=[
+            [("Durante una conferencia este martes se informó el hecho.", [])],
+            [("Un colectivo chocó.", ["C1"])],
+        ],
+    )
+    result = _service(db_session, FakeStructuredLLM({"ArticleDraft": draft})).write(
+        event.id, trigger="admin"
+    )
+    article = db_session.get(Article, result["article_id"])
+    assert result["written"] is True
+    assert article is not None
+    assert article.body == (
+        "Durante una conferencia este martes se informó el hecho.\n\nUn colectivo chocó."
+    )
+    assert "<" not in article.body
+    segment = article.body_blocks[1]["segments"][0]
+    assert segment["claim_ids"] == [str(claims[0].id)]
+    assert "claim_refs" not in segment
+    version = db_session.scalars(select(ArticleVersion).where(ArticleVersion.article_id == article.id)).one()
+    assert version.body_blocks[1]["segments"][0]["claim_ids"] == [str(claims[0].id)]
+
+
+def test_write_maps_multiple_claim_refs(db_session: Session) -> None:
+    event, claims = _seed_writeable_event(db_session, extra_claims=["Hubo heridos"])
+    draft = annotated_article_draft(
+        "Choque con heridos",
+        "El choque dejó heridos en Rosario.",
+        paragraphs=[[("Un colectivo chocó y hubo heridos.", ["C1", "C2"])]],
+    )
+    result = _service(db_session, FakeStructuredLLM({"ArticleDraft": draft})).write(
+        event.id, trigger="admin"
+    )
+    article = db_session.get(Article, result["article_id"])
+    ordered = sorted(claims, key=lambda row: str(row.id))
+    assert result["written"] is True
+    assert article.body_blocks[0]["segments"][0]["claim_ids"] == [str(ordered[0].id), str(ordered[1].id)]
+
+
+def test_write_rejects_unknown_claim_ref(db_session: Session) -> None:
+    event, _claims = _seed_writeable_event(db_session)
+    draft = annotated_article_draft(
+        "Choque",
+        "Resumen del choque en Rosario.",
+        paragraphs=[[("Un colectivo chocó.", ["C99"])]],
+    )
+    result = _service(db_session, FakeStructuredLLM({"ArticleDraft": draft})).write(
+        event.id, trigger="admin"
+    )
+    assert result["written"] is False
+    assert "C99" in (result.get("error") or "")
+    assert db_session.scalar(select(func.count()).select_from(Article).where(Article.event_id == event.id)) == 0
+
+
+def test_write_rejects_raw_uuid_claim_ref(db_session: Session) -> None:
+    event, claims = _seed_writeable_event(db_session)
+    draft = annotated_article_draft(
+        "Choque",
+        "Resumen del choque en Rosario.",
+        paragraphs=[[("Un colectivo chocó.", [str(claims[0].id)])]],
+    )
+    result = _service(db_session, FakeStructuredLLM({"ArticleDraft": draft})).write(
+        event.id, trigger="admin"
+    )
+    assert result["written"] is False
+    assert "UUID" in (result.get("error") or "")
+
+
+def test_write_rejects_html_in_segments(db_session: Session) -> None:
+    event, _claims = _seed_writeable_event(db_session)
+    draft = ArticleDraft(
+        headline="Choque",
+        summary="Resumen del choque en Rosario.",
+        body_blocks=[
+            ArticleDraftBlock(
+                segments=[ArticleDraftSegment(text="<b>Un colectivo chocó</b>", claim_refs=["C1"])]
+            )
+        ],
+    )
+    result = _service(db_session, FakeStructuredLLM({"ArticleDraft": draft})).write(
+        event.id, trigger="admin"
+    )
+    assert result["written"] is False
+    assert "HTML" in (result.get("error") or "")

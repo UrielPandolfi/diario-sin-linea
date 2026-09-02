@@ -1,5 +1,6 @@
+from app.core.config import get_settings
 from app.providers.base import ProviderNotConfiguredError
-from app.providers.registry import ModelRole, get_claim_resolution_provider
+from app.providers.registry import ModelRole, get_claim_resolution_provider, get_structured_provider
 
 
 class _FakeLLM:
@@ -48,3 +49,22 @@ def test_escalated_claim_resolution_uses_escalated_when_configured(monkeypatch) 
     monkeypatch.setattr("app.providers.registry.get_structured_provider", provider)
     resolved = get_claim_resolution_provider(escalated=True)
     assert resolved.role == ModelRole.CLAIM_RESOLUTION_ESCALATED
+
+
+def test_writing_openai_receives_configured_reasoning_effort(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "writing_provider", "openai")
+    monkeypatch.setattr(settings, "writing_model", "gpt-5.6-luna")
+    monkeypatch.setattr(settings, "writing_reasoning_effort", "none")
+    monkeypatch.setattr(settings, "openai_api_key", "sk-test")
+    captured: dict = {}
+
+    class Capturing:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("app.providers.registry.OpenAIStructuredProvider", Capturing)
+    provider = get_structured_provider(ModelRole.WRITING)
+    assert isinstance(provider, Capturing)
+    assert captured["model"] == "gpt-5.6-luna"
+    assert captured["reasoning_effort"] == "none"

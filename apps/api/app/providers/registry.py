@@ -86,9 +86,15 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
             f"Falta API key para el proveedor {provider_name} (rol {role.value})"
         )
     bind_model_role(role.value, provider=provider_name.lower())
+    reasoning_effort = None
+    if role == ModelRole.WRITING:
+        reasoning_effort = settings.writing_reasoning_effort
     if provider_name.lower() == "openai":
         return OpenAIStructuredProvider(
-            api_key=api_key, model=model, provider_name="openai"
+            api_key=api_key,
+            model=model,
+            provider_name="openai",
+            reasoning_effort=reasoning_effort,
         )
     if provider_name.lower() == "deepseek":
         return OpenAIStructuredProvider(
@@ -96,6 +102,7 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
             model=model,
             base_url="https://api.deepseek.com",
             provider_name="deepseek",
+            reasoning_effort=reasoning_effort,
         )
     if provider_name.lower() == "anthropic":
         from app.providers.anthropic_provider import AnthropicJsonProvider

@@ -6,7 +6,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.article_body import annotated_article_draft, plain_article_draft
 from app.core.config import get_settings
+from app.core.prompts import load_prompt
 from app.domain.enums import (
     ArticleStatus,
     ClaimImportance,
@@ -145,13 +147,14 @@ def _claim(session: Session, event, *, text: str, claim_type: str, importance: C
 
 
 def _draft(**overrides) -> ArticleDraft:
-    payload = {
-        "headline": "Un colectivo chocó en avenida Pellegrini",
-        "summary": "El choque ocurrió esta tarde en Rosario.",
-        "body": "Un colectivo chocó en avenida Pellegrini.\n\nLas fuentes listadas coinciden en el lugar.",
-    }
-    payload.update(overrides)
-    return ArticleDraft(**payload)
+    body = overrides.pop(
+        "body",
+        "Un colectivo chocó en avenida Pellegrini.\n\nLas fuentes listadas coinciden en el lugar.",
+    )
+    headline = overrides.pop("headline", "Un colectivo chocó en avenida Pellegrini")
+    summary = overrides.pop("summary", "El choque ocurrió esta tarde en Rosario.")
+    draft = plain_article_draft(headline, summary, body)
+    return draft.model_copy(update=overrides) if overrides else draft
 
 
 def _pass_audit() -> ArticleAuditResult:
@@ -260,6 +263,7 @@ def test_audit_prompt_has_context_and_draft_not_html(db_session: Session) -> Non
     assert article.headline in prompt
     assert "Un colectivo chocó en Pellegrini" in prompt
     assert "confirmed_claims" in prompt
+    assert "body_blocks" in prompt
     assert html not in prompt
     assert "raw_text" not in prompt
     assert "SECRETO" not in prompt
@@ -630,3 +634,169 @@ def test_published_second_audit_does_not_create_article(db_session: Session) -> 
     assert count == 1
     assert article.status == ArticleStatus.PUBLISHED
     assert article.id
+
+
+def test_audit_prompt_covers_unattributed_characterization_and_causality() -> None:
+    prompt = load_prompt("article_audit.md")
+    assert "UNATTRIBUTED_CHARACTERIZATION" in prompt
+    assert "SUPPORTED no significa que cualquier formulación" in prompt
+    assert "mayor crisis diplomática entre Argentina y Brasil" in prompt
+    assert "Algunas de las fuentes consultadas describieron el episodio" in prompt
+    assert "desataron la crisis diplomática" in prompt
+    assert "Tras los dichos de Milei, Brasil llamó a consultas a su embajador" in prompt
+    assert "Julio Bitelli" in prompt
+    assert "Nunca uses un type OTHER" in prompt
+    assert "Causalidad más fuerte que la evidencia → CAUSALITY" in prompt
+
+
+def test_writing_prompt_covers_characterization_and_causality() -> None:
+    prompt = load_prompt("article_writing.md")
+    assert "Caracterizaciones no son hechos por consenso" in prompt
+    assert "Fue la mayor crisis diplomática entre ambos países en años" in prompt
+    assert "Algunas de las fuentes consultadas describieron el episodio" in prompt
+    assert "SUPPORTED no autoriza rankings" in prompt
+    assert "Los insultos de Milei desataron la crisis" in prompt
+    assert "Tras los dichos de Milei, el gobierno brasileño llamó a consultas" in prompt
+    assert "sin “según varias fuentes” delante de cada oración" in prompt or 'sin "según varias fuentes"' in prompt
+
+
+def test_audit_schema_has_no_other_catchall() -> None:
+    assert "OTHER" not in {item.value for item in AuditIssueType}
+    assert AuditIssueType.UNATTRIBUTED_CHARACTERIZATION.value == "UNATTRIBUTED_CHARACTERIZATION"
+    assert AuditIssueType.CAUSALITY.value == "CAUSALITY"
+
+
+def test_unattributed_characterization_medium_is_valid_and_blocks() -> None:
+    result = ArticleAuditResult(
+        passed=True,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.UNATTRIBUTED_CHARACTERIZATION,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="la mayor crisis diplomática entre Argentina y Brasil en años",
+                explanation="caracterización de fuentes escrita como hecho",
+                suggested_fix=(
+                    "El episodio escaló en los días siguientes con nuevas medidas diplomáticas. "
+                    "Algunas de las fuentes consultadas lo describieron como uno de los conflictos "
+                    "bilaterales más graves de los últimos años."
+                ),
+            )
+        ],
+    )
+    normalized = normalize_audit_result(result)
+    assert normalized.passed is False
+    assert normalized.issues[0].type == AuditIssueType.UNATTRIBUTED_CHARACTERIZATION
+
+
+def test_causality_medium_is_valid_and_blocks() -> None:
+    result = ArticleAuditResult(
+        passed=True,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.CAUSALITY,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="Los dichos de Milei desataron la crisis diplomática",
+                explanation="la secuencia no respalda esa causa",
+                suggested_fix=(
+                    "Milei insultó a Lula durante un acto en Brasil y el gobierno brasileño "
+                    "llamó a consultas a su embajador."
+                ),
+            )
+        ],
+    )
+    assert normalize_audit_result(result).passed is False
+
+
+def test_unattributed_characterization_low_does_not_block() -> None:
+    result = ArticleAuditResult(
+        passed=False,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.UNATTRIBUTED_CHARACTERIZATION,
+                severity=AuditIssueSeverity.LOW,
+                text="tono menor",
+                explanation="nitpick",
+                suggested_fix=None,
+            )
+        ],
+    )
+    assert normalize_audit_result(result).passed is True
+
+
+def test_unattributed_characterization_medium_triggers_rewrite_loop(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    blocking = ArticleAuditResult(
+        passed=False,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.UNATTRIBUTED_CHARACTERIZATION,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="la mayor crisis diplomática",
+                explanation="caracterización no atribuida",
+                suggested_fix="Atribuí la caracterización a las fuentes",
+            )
+        ],
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": [blocking, _pass_audit()],
+            "ArticleDraft": [_draft(headline="Corrección con atribución")],
+        }
+    )
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert result["passed"] is True
+    assert result["rewrite_count"] == 1
+    assert result["audit_count"] == 2
+    assert llm.calls == ["ArticleAuditResult", "ArticleDraft", "ArticleAuditResult"]
+    assert article.headline == "Corrección con atribución"
+
+
+def test_audit_schema_accepts_annotation_issue_types() -> None:
+    result = ArticleAuditResult(
+        passed=False,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.INVALID_CLAIM_MAPPING,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="fragmento",
+                explanation="el claim no corresponde",
+                suggested_fix="quitá la annotation",
+            ),
+            AuditIssue(
+                type=AuditIssueType.UNMAPPED_MATERIAL_CLAIM,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="12,22%",
+                explanation="falta annotation",
+                suggested_fix="asociá C1",
+            ),
+        ],
+    )
+    assert result.issues[0].type == AuditIssueType.INVALID_CLAIM_MAPPING
+    assert result.issues[1].type == AuditIssueType.UNMAPPED_MATERIAL_CLAIM
+    assert normalize_audit_result(result).passed is False
+
+
+def test_audit_rewrite_remaps_claim_refs_to_uuid(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
+    rewrite = annotated_article_draft(
+        "Corrección sobre Pellegrini",
+        "El choque ocurrió en avenida Pellegrini.",
+        paragraphs=[[("Un colectivo chocó en Pellegrini.", ["C1"])]],
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": [_fail_audit(), _pass_audit()],
+            "ArticleDraft": [rewrite],
+        }
+    )
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert result["passed"] is True
+    assert result["rewrite_count"] == 1
+    assert result["audit_count"] == 2
+    assert llm.calls == ["ArticleAuditResult", "ArticleDraft", "ArticleAuditResult"]
+    segment = article.body_blocks[0]["segments"][0]
+    assert segment["claim_ids"] == [str(claim.id)]
+    assert "claim_refs" not in segment

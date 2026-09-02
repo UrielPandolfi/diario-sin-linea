@@ -3,7 +3,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utc_now
@@ -27,6 +27,7 @@ class Article(TimestampMixin, Base):
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    body_blocks: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[ArticleStatus] = mapped_column(
         Enum(ArticleStatus, native_enum=False, length=32),
         default=ArticleStatus.DRAFT,
@@ -65,6 +66,7 @@ class ArticleVersion(TimestampMixin, Base):
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
+    body_blocks: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)
     change_reason: Mapped[str | None] = mapped_column(Text)
     search_tsv: Mapped[Any] = mapped_column(
         TSVECTOR,

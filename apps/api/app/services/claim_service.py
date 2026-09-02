@@ -15,7 +15,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.source_content import has_extracted_body
-from app.core.source_snippet import SNIPPET_CHARS, select_source_snippet
+from app.core.source_snippet import select_source_snippet
 from app.core.text import excerpt_in_source, normalize_name
 from app.core.urls import url_domain
 from app.core.usage_context import usage_scope
@@ -457,7 +457,7 @@ class ClaimService:
         text = _item_body(item)
         return select_source_snippet(
             text,
-            budget=SNIPPET_CHARS,
+            budget=self.settings.claim_extraction_source_chars,
             entity_names=self._entity_names(event),
             locality=event.locality,
             address=event.address_text,

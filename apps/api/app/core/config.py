@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     verification_model: str | None = None
     writing_provider: str | None = None
     writing_model: str | None = None
+    writing_reasoning_effort: str | None = None
     auditing_provider: str | None = None
     auditing_model: str | None = None
     embedding_provider: str | None = None
@@ -59,8 +60,12 @@ class Settings(BaseSettings):
     max_verification_results_per_query: int = 3
     max_writing_claims_per_event: int = 40
     max_writing_sources_per_event: int = 20
+    max_writing_source_contexts: int = 6
+    writing_source_context_chars: int = 5000
     writing_excerpt_chars: int = 400
     writing_max_output_tokens: int = 4096
+    claim_extraction_source_chars: int = 5000
+    editorial_country_code: str = "AR"
     max_audit_rewrite_cycles: int = 2
     job_max_retries: int = 3
     event_match_high_threshold: float = 0.88

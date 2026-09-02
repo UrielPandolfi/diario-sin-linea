@@ -8,7 +8,7 @@ from app.models import Event, PipelineRun, SourceItem
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
 from app.providers.registry import ModelRole
 from app.schemas import SourceCreate, SourceItemCreate
-from app.schemas.detection import EditorialScope, EventCandidate, ExtractedEntity
+from app.schemas.detection import EditorialScope, EditorialTopic, EventCandidate, ExtractedEntity, RelevanceLevel
 from app.services.detection_service import DetectionService
 from app.services.editorial_gate import EditorialFilterReason
 from app.services.source_item_service import SourceItemService
@@ -42,12 +42,16 @@ def _item(session: Session, source_id, *, url: str, title: str, body: str, conte
 
 def _candidate(**overrides) -> EventCandidate:
     payload = {
-        "event_type": "accidente",
-        "what_happened": "Un colectivo chocó en Pellegrini y Corrientes",
+        "event_type": "anuncio_oficial",
+        "what_happened": "El Gobierno dispuso un aumento salarial para las Fuerzas Armadas",
         "occurred_at": datetime(2026, 8, 23, 15, 0, tzinfo=timezone.utc),
-        "locality": "Rosario",
-        "province": "Santa Fe",
-        "short_summary": "Choque de un colectivo en Rosario",
+        "locality": "Buenos Aires",
+        "province": "Buenos Aires",
+        "country_code": "AR",
+        "short_summary": "Aumento salarial para las Fuerzas Armadas",
+        "editorial_topic": EditorialTopic.GOVERNMENT,
+        "is_public_affairs": True,
+        "political_relevance": RelevanceLevel.HIGH,
         "entities": [],
     }
     payload.update(overrides)
@@ -374,7 +378,7 @@ def test_newells_match_is_skipped(db_session: Session) -> None:
     assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
 
 
-def test_stadium_disturbances_in_rosario_create_event(db_session: Session) -> None:
+def test_stadium_disturbances_without_public_affairs_are_skipped(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(
         db_session,
@@ -390,12 +394,17 @@ def test_stadium_disturbances_in_rosario_create_event(db_session: Session) -> No
         _candidate(
             event_type="disturbios",
             what_happened="Disturbios con heridos en un estadio de Rosario",
+            locality="Rosario",
+            province="Santa Fe",
             short_summary="Incidentes con heridos",
             editorial_scope=EditorialScope.SPORTS_PUBLIC_IMPACT,
+            editorial_topic=EditorialTopic.CRIME,
+            is_public_affairs=False,
+            political_relevance=RelevanceLevel.NONE,
         ),
     )
-    assert result["created"] is True
-    assert result.get("filtered") is not True
+    assert result["created"] is False
+    assert result["reason"] == EditorialFilterReason.SPORTS_ONLY
 
 
 def test_formative_leagues_are_prefiltered_without_llm(db_session: Session) -> None:
@@ -425,7 +434,7 @@ def test_formative_leagues_are_prefiltered_without_llm(db_session: Session) -> N
     assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
 
 
-def test_pellegrini_crash_creates_event(db_session: Session) -> None:
+def test_pellegrini_crash_is_skipped(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(
         db_session,
@@ -435,8 +444,22 @@ def test_pellegrini_crash_creates_event(db_session: Session) -> None:
         body="Un colectivo chocó en Pellegrini y Corrientes.",
         content_hash="pel",
     )
-    result, _, _ = _detect(db_session, item, _candidate())
-    assert result["created"] is True
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            event_type="accidente",
+            what_happened="Un colectivo chocó en Pellegrini y Corrientes",
+            locality="Rosario",
+            province="Santa Fe",
+            short_summary="Choque de un colectivo en Rosario",
+            editorial_topic=EditorialTopic.ACCIDENT,
+            is_public_affairs=False,
+            political_relevance=RelevanceLevel.NONE,
+        ),
+    )
+    assert result["created"] is False
+    assert result["reason"] == EditorialFilterReason.NOT_PUBLIC_AFFAIRS
 
 
 def test_null_what_happened_uses_summary_as_title(db_session: Session) -> None:
@@ -456,16 +479,16 @@ def test_null_what_happened_uses_summary_as_title(db_session: Session) -> None:
             event_type="festival",
             what_happened="null",
             short_summary="Se celebra la 25ª edición del Festival El Cruce en Rosario",
+            editorial_topic=EditorialTopic.ENTERTAINMENT,
+            is_public_affairs=False,
+            political_relevance=RelevanceLevel.NONE,
         ),
     )
-    assert result["created"] is True
-    event = db_session.get(Event, result["event_id"])
-    assert event is not None
-    assert event.title_internal != "null"
-    assert "Cruce" in event.title_internal or "Festival" in event.title_internal
+    assert result["created"] is False
+    assert result["reason"] == EditorialFilterReason.NOT_PUBLIC_AFFAIRS
 
 
-def test_cordoba_item_is_skipped(db_session: Session) -> None:
+def test_cordoba_crash_is_skipped(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(
         db_session,
@@ -478,13 +501,45 @@ def test_cordoba_item_is_skipped(db_session: Session) -> None:
     result, _, _ = _detect(
         db_session,
         item,
-        _candidate(locality="Córdoba", province="Córdoba"),
+        _candidate(
+            locality="Córdoba",
+            province="Córdoba",
+            editorial_topic=EditorialTopic.ACCIDENT,
+            is_public_affairs=False,
+            political_relevance=RelevanceLevel.NONE,
+            what_happened="Un colectivo chocó en el centro de Córdoba",
+            short_summary="Choque en Córdoba",
+        ),
     )
-    assert result["reason"] == EditorialFilterReason.OUTSIDE_TARGET_LOCALITY
+    assert result["reason"] == EditorialFilterReason.NOT_PUBLIC_AFFAIRS
     assert db_session.execute(text("SELECT count(*) FROM events")).scalar_one() == 0
 
 
-def test_missing_locality_is_skipped(db_session: Session) -> None:
+def test_cordoba_politics_creates_event(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/cordoba-presupuesto",
+        title="Presupuesto en Córdoba",
+        body="La gobernación de Córdoba anunció un recorte presupuestario.",
+        content_hash="cbapol",
+    )
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            locality="Córdoba",
+            province="Córdoba",
+            editorial_topic=EditorialTopic.PROVINCIAL_POLITICS,
+            what_happened="La gobernación de Córdoba anunció un recorte presupuestario",
+            short_summary="Recorte presupuestario provincial",
+        ),
+    )
+    assert result["created"] is True
+
+
+def test_missing_locality_crash_is_skipped(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(
         db_session,
@@ -494,9 +549,45 @@ def test_missing_locality_is_skipped(db_session: Session) -> None:
         body="Un colectivo chocó.",
         content_hash="noloc",
     )
-    result, _, _ = _detect(db_session, item, _candidate(locality=None, province=None))
-    assert result["reason"] == EditorialFilterReason.LOCATION_UNKNOWN
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            locality=None,
+            province=None,
+            editorial_topic=EditorialTopic.ACCIDENT,
+            is_public_affairs=False,
+            political_relevance=RelevanceLevel.NONE,
+            what_happened="Un colectivo chocó",
+            short_summary="Choque",
+        ),
+    )
+    assert result["reason"] == EditorialFilterReason.NOT_PUBLIC_AFFAIRS
     assert db_session.get(SourceItem, item.id) is not None
+
+
+def test_national_politics_without_city_creates_event(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/dnu",
+        title="DNU presidencial",
+        body="El Presidente firmó un decreto de necesidad y urgencia.",
+        content_hash="dnu1",
+    )
+    result, _, _ = _detect(
+        db_session,
+        item,
+        _candidate(
+            locality=None,
+            province=None,
+            editorial_topic=EditorialTopic.LEGISLATION,
+            what_happened="El Presidente firmó un decreto de necesidad y urgencia",
+            short_summary="Decreto presidencial",
+        ),
+    )
+    assert result["created"] is True
 
 
 def test_ultra_fallback_on_invalid_schema(db_session: Session) -> None:
@@ -536,7 +627,7 @@ def test_ultra_fallback_on_low_location_confidence(db_session: Session) -> None:
     ultra = FakeStructuredLLM(
         {
             "EventCandidate": _candidate(
-                locality=None, province=None, location_confidence=0.1
+                locality="Rosario", province="Córdoba", location_confidence=0.1
             )
         }
     )

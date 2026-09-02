@@ -1,18 +1,198 @@
-export function ArticleBody({ body }: { body: string }) {
-  const paragraphs = body
+"use client";
+
+import { claimsForIds, claimStatusLabel } from "@/features/article/claim-status";
+import type { ArticleBodyBlock, ArticleClaim } from "@/lib/api/types";
+import { useEffect, useId, useRef, useState } from "react";
+
+function splitPlainBody(body: string): string[] {
+  return body
     .split(/\n{2,}/)
     .map((part) => part.trim())
     .filter(Boolean);
+}
 
-  if (paragraphs.length === 0) return null;
+export function ArticleBody({
+  body,
+  bodyBlocks,
+  claims,
+}: {
+  body: string;
+  bodyBlocks?: ArticleBodyBlock[] | null;
+  claims?: ArticleClaim[];
+}) {
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!openKey) return;
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpenKey(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openKey]);
+
+  if (!bodyBlocks?.length) {
+    const paragraphs = splitPlainBody(body);
+    if (paragraphs.length === 0) return null;
+    return (
+      <div className="mt-6 space-y-4">
+        {paragraphs.map((paragraph, index) => (
+          <p key={index} className="font-sans text-[17px] leading-[1.65] text-primary">
+            {paragraph}
+          </p>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-6 space-y-4">
-      {paragraphs.map((paragraph, index) => (
-        <p key={index} className="font-sans text-[17px] leading-[1.65] text-primary">
-          {paragraph}
+      {bodyBlocks.map((block, blockIndex) => (
+        <p key={blockIndex} className="font-sans text-[17px] leading-[1.65] text-primary">
+          {(block.segments ?? []).map((segment, segmentIndex) => {
+            const key = `${blockIndex}-${segmentIndex}`;
+            const matched = claimsForIds(segment.claim_ids ?? [], claims);
+            if (matched.length === 0) {
+              return <span key={key}>{segment.text}</span>;
+            }
+            return (
+              <ClaimSegment
+                key={key}
+                segmentKey={key}
+                text={segment.text}
+                claims={matched}
+                open={openKey === key}
+                onOpen={() => setOpenKey(key)}
+                onClose={() => setOpenKey((current) => (current === key ? null : current))}
+                onToggle={() => setOpenKey((current) => (current === key ? null : key))}
+              />
+            );
+          })}
         </p>
       ))}
     </div>
+  );
+}
+
+function ClaimSegment({
+  segmentKey,
+  text,
+  claims,
+  open,
+  onOpen,
+  onClose,
+  onToggle,
+}: {
+  segmentKey: string;
+  text: string;
+  claims: ArticleClaim[];
+  open: boolean;
+  onOpen: () => void;
+  onClose: () => void;
+  onToggle: () => void;
+}) {
+  const popoverId = useId();
+  const rootRef = useRef<HTMLSpanElement>(null);
+  const closeTimer = useRef<number | null>(null);
+
+  function clearCloseTimer() {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }
+
+  function scheduleClose() {
+    clearCloseTimer();
+    closeTimer.current = window.setTimeout(() => onClose(), 160);
+  }
+
+  useEffect(() => () => clearCloseTimer(), []);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: PointerEvent) {
+      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+        onClose();
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [open, onClose]);
+
+  return (
+    <span ref={rootRef} className="relative inline">
+      <span
+        tabIndex={0}
+        role="button"
+        aria-expanded={open}
+        aria-controls={popoverId}
+        aria-haspopup="dialog"
+        data-claim-segment={segmentKey}
+        className="cursor-help rounded-[2px] underline decoration-dotted decoration-border underline-offset-[0.28em] transition-colors duration-150 hover:bg-hover focus-visible:bg-hover"
+        onMouseEnter={() => {
+          clearCloseTimer();
+          onOpen();
+        }}
+        onMouseLeave={scheduleClose}
+        onClick={(event) => {
+          event.stopPropagation();
+          if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+          onToggle();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            onToggle();
+          }
+        }}
+      >
+        {text}
+      </span>
+      {open ? (
+        <span
+          id={popoverId}
+          role="dialog"
+          aria-label="Información del claim"
+          className="absolute left-0 top-full z-30 mt-1.5 w-72 max-w-[min(18rem,calc(100vw-2rem))] rounded-md border border-border bg-surface p-3 shadow-lg"
+          onMouseEnter={clearCloseTimer}
+          onMouseLeave={scheduleClose}
+        >
+          {claims.map((claim, index) => (
+            <ClaimPopoverItem key={claim.id} claim={claim} divided={index > 0} />
+          ))}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: boolean }) {
+  const verificationBits: string[] = [];
+  if (claim.verification?.status_after) {
+    verificationBits.push(claimStatusLabel(claim.verification.status_after));
+  }
+  if (claim.verification?.unresolved) {
+    verificationBits.push("Sin resolver");
+  }
+  if (claim.verification?.reason) {
+    verificationBits.push(claim.verification.reason);
+  }
+
+  return (
+    <span className={divided ? "mt-3 block border-t border-border pt-3" : "block"}>
+      <span className="block font-sans text-sm leading-snug text-primary">{claim.canonical_text}</span>
+      <span className="mt-1.5 block font-sans text-[11px] uppercase tracking-[0.12em] text-accent-petrol">
+        {claimStatusLabel(claim.status)}
+      </span>
+      <span className="mt-1 block font-sans text-xs text-muted">
+        {claim.source_count} {claim.source_count === 1 ? "fuente" : "fuentes"}
+        {" · "}
+        {claim.evidence_count} {claim.evidence_count === 1 ? "evidencia" : "evidencias"}
+      </span>
+      {verificationBits.length > 0 ? (
+        <span className="mt-1.5 block font-sans text-xs leading-snug text-secondary">{verificationBits.join(" · ")}</span>
+      ) : null}
+    </span>
   );
 }

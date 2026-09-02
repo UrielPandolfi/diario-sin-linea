@@ -110,6 +110,7 @@ export type AdminEventDetail = AdminEvent & {
     headline: string;
     summary: string;
     body: string;
+    body_blocks?: unknown[] | null;
     status: string;
     current_version: number;
     published_version: number | null;

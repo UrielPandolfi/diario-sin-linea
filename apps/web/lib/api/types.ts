@@ -18,9 +18,35 @@ export type EventCard = {
   score?: number;
 };
 
+export type ArticleBodySegment = {
+  text: string;
+  claim_ids: string[];
+};
+
+export type ArticleBodyBlock = {
+  type: "paragraph";
+  segments: ArticleBodySegment[];
+};
+
+export type ArticleClaim = {
+  id: string;
+  canonical_text: string;
+  status: string;
+  importance: string;
+  source_count: number;
+  evidence_count: number;
+  verification: {
+    status_after: string | null;
+    unresolved: boolean | null;
+    reason: string | null;
+  } | null;
+};
+
 export type Article = EventCard & {
   body: string;
+  body_blocks?: ArticleBodyBlock[] | null;
   hero_image_url: string | null;
+  claims?: ArticleClaim[];
 };
 
 export type NowItem = {

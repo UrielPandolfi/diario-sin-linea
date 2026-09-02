@@ -8,8 +8,17 @@ from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType
-from app.models import Article, ArticleVersion, Event, EventSource, EventUpdate, SourceItem
+from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType, PipelineStatus
+from app.models import (
+    Article,
+    ArticleVersion,
+    Claim,
+    Event,
+    EventSource,
+    EventUpdate,
+    PipelineRun,
+    SourceItem,
+)
 from app.repositories import ArticleRepository, EventRepository
 
 PUBLIC_CANDIDATE_CAP = 200
@@ -95,11 +104,50 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
     return payload
 
 
-def article_payload(event: Event, article: Article, live: ArticleVersion) -> dict:
+def compact_public_claims(session: Session, event: Event) -> list[dict]:
+    sol_by_id: dict[str, dict] = {}
+    run = session.scalars(
+        select(PipelineRun)
+        .where(
+            PipelineRun.event_id == event.id,
+            PipelineRun.stage == "verification",
+            PipelineRun.status == PipelineStatus.SUCCESS,
+        )
+        .order_by(PipelineRun.finished_at.desc())
+    ).first()
+    if run is not None:
+        for row in (run.metadata_json or {}).get("sol") or []:
+            if not isinstance(row, dict) or not row.get("claim_id"):
+                continue
+            sol_by_id[str(row["claim_id"])] = {
+                "status_after": row.get("status_after"),
+                "unresolved": row.get("unresolved"),
+                "reason": row.get("reason"),
+            }
+    rows: list[dict] = []
+    for claim in event.claims:
+        source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
+        rows.append(
+            {
+                "id": str(claim.id),
+                "canonical_text": claim.canonical_text,
+                "status": claim.status.value,
+                "importance": claim.importance.value,
+                "source_count": len(source_ids),
+                "evidence_count": len(claim.evidence),
+                "verification": sol_by_id.get(str(claim.id)),
+            }
+        )
+    return rows
+
+
+def article_payload(event: Event, article: Article, live: ArticleVersion, *, session: Session) -> dict:
     return {
         **card_payload(event, article, live),
         "body": live.body,
+        "body_blocks": live.body_blocks,
         "hero_image_url": article.hero_image_url,
+        "claims": compact_public_claims(session, event),
     }
 
 
@@ -213,7 +261,7 @@ class FeedRankingService:
         if live is None:
             return None
         event = self._event_with_sources(event.id) or event
-        return article_payload(event, article, live)
+        return article_payload(event, article, live, session=self.session)
 
     def _is_public(self, event: Event, article: Article) -> bool:
         if article.published_at is None or article.published_version is None:
@@ -228,7 +276,8 @@ class FeedRankingService:
             .options(
                 selectinload(Event.event_sources)
                 .selectinload(EventSource.source_item)
-                .selectinload(SourceItem.source)
+                .selectinload(SourceItem.source),
+                selectinload(Event.claims).selectinload(Claim.evidence),
             )
             .where(Event.id == event_id)
         )

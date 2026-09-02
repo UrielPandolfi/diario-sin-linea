@@ -15,10 +15,44 @@ class EditorialScope(StrEnum):
     IRRELEVANT = "IRRELEVANT"
 
 
+class EditorialTopic(StrEnum):
+    NATIONAL_POLITICS = "NATIONAL_POLITICS"
+    PROVINCIAL_POLITICS = "PROVINCIAL_POLITICS"
+    GOVERNMENT = "GOVERNMENT"
+    LEGISLATION = "LEGISLATION"
+    ELECTIONS = "ELECTIONS"
+    PUBLIC_ECONOMY = "PUBLIC_ECONOMY"
+    PUBLIC_SECURITY = "PUBLIC_SECURITY"
+    PUBLIC_EDUCATION = "PUBLIC_EDUCATION"
+    PUBLIC_HEALTH = "PUBLIC_HEALTH"
+    JUSTICE = "JUSTICE"
+    CORRUPTION = "CORRUPTION"
+    INTERNATIONAL_AR = "INTERNATIONAL_AR"
+    OTHER_PUBLIC_AFFAIRS = "OTHER_PUBLIC_AFFAIRS"
+    CRIME = "CRIME"
+    ACCIDENT = "ACCIDENT"
+    SPORTS = "SPORTS"
+    ENTERTAINMENT = "ENTERTAINMENT"
+    OTHER = "OTHER"
+
+
+class RelevanceLevel(StrEnum):
+    NONE = "NONE"
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
 class ExtractedEntity(BaseModel):
     name: str
     entity_type: EntityType = EntityType.OTHER
     role: str = "mencionado"
+
+
+def _normalize_enum_token(value: object) -> object:
+    if isinstance(value, str):
+        return value.strip().upper().replace("-", "_").replace(" ", "_")
+    return value
 
 
 class EventCandidate(BaseModel):
@@ -36,14 +70,19 @@ class EventCandidate(BaseModel):
     short_summary: str
     editorial_scope: EditorialScope = EditorialScope.GENERAL_NEWS
     editorial_reason: str | None = None
+    editorial_topic: EditorialTopic = EditorialTopic.OTHER
+    is_public_affairs: bool = False
+    political_relevance: RelevanceLevel = RelevanceLevel.NONE
+    public_interest_relevance: RelevanceLevel = RelevanceLevel.NONE
+    has_contestable_public_claims: bool = False
+    argentina_relevance: bool = False
+    gate_reason: str | None = None
     location_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
-    @field_validator("editorial_scope", mode="before")
+    @field_validator("editorial_scope", "editorial_topic", "political_relevance", "public_interest_relevance", mode="before")
     @classmethod
-    def _normalize_editorial_scope(cls, value: object) -> object:
-        if isinstance(value, str):
-            return value.strip().upper().replace("-", "_").replace(" ", "_")
-        return value
+    def _normalize_editorial_enums(cls, value: object) -> object:
+        return _normalize_enum_token(value)
 
 
 class DedupDecision(BaseModel):

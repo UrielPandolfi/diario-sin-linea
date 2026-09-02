@@ -83,6 +83,7 @@ class ArticleCreate(BaseModel):
     headline: str
     summary: str
     body: str
+    body_blocks: list | None = None
     slug: str | None = None
     status: ArticleStatus = ArticleStatus.DRAFT
     hero_image_url: str | None = None
@@ -92,5 +93,6 @@ class ArticleContentUpdate(BaseModel):
     headline: str
     summary: str
     body: str
+    body_blocks: list | None = None
     change_reason: str
     hero_image_url: str | None = None

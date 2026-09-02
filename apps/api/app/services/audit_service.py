@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
+from app.core.article_body import context_claim_ref_map, resolve_article_draft
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
@@ -169,6 +170,8 @@ class AuditService:
             max_claims=self.settings.max_writing_claims_per_event,
             max_sources=self.settings.max_writing_sources_per_event,
             excerpt_chars=self.settings.writing_excerpt_chars,
+            max_source_contexts=self.settings.max_writing_source_contexts,
+            source_context_chars=self.settings.writing_source_context_chars,
         )
         cap = self.settings.max_audit_rewrite_cycles
         rewrites = 0
@@ -225,12 +228,16 @@ class AuditService:
                 user_prompt=self._rewrite_user_prompt(article_context, article, rewrite_issues),
                 schema=ArticleDraft,
             )
+            body, body_blocks = resolve_article_draft(
+                draft, claim_ref_map=context_claim_ref_map(article_context)
+            )
             article = self.article_service.update_content(
                 article,
                 ArticleContentUpdate(
                     headline=draft.headline,
                     summary=draft.summary,
-                    body=draft.body,
+                    body=body,
+                    body_blocks=body_blocks,
                     change_reason=REWRITE_CHANGE_REASON,
                 ),
             )
@@ -255,11 +262,13 @@ class AuditService:
                 "headline": article.headline,
                 "summary": article.summary,
                 "body": article.body,
+                "body_blocks": article.body_blocks,
             },
         }
         return (
             "Audita este draft contra el ArticleContext JSON. "
-            "No reescribas el artículo; devolvé passed e issues.\n\n"
+            "No reescribas el artículo; devolvé passed e issues. "
+            "Revisá también body_blocks y las annotations de claims.\n\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
@@ -270,11 +279,13 @@ class AuditService:
                 "headline": article.headline,
                 "summary": article.summary,
                 "body": article.body,
+                "body_blocks": article.body_blocks,
             },
             "issues": [issue.model_dump(mode="json") for issue in issues],
         }
         return (
             "Corregí el draft según estos issues de auditoría. "
-            "No inventes claims fuera del context.\n\n"
+            "No inventes claims fuera del context. "
+            "Devolvé body_blocks con claim_refs C1/C2, nunca UUIDs.\n\n"
             + json.dumps(payload, ensure_ascii=False)
         )

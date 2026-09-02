@@ -21,9 +21,9 @@ def _model_allows_temperature_zero(model: str) -> bool:
 
 
 def _reasoning_effort_for_model(model: str) -> str | None:
-    """Effort mínimo si el id sugiere nano o gpt-5 reasoning. No hardcodear el id en services."""
+    """Effort mínimo solo para nano. No inferir por prefijo gpt-5 (Luna usa none/low/…)."""
     name = (model or "").casefold()
-    if "nano" in name or name.startswith("gpt-5"):
+    if "nano" in name:
         return "minimal"
     return None
 
@@ -37,9 +37,11 @@ class OpenAIStructuredProvider:
         base_url: str | None = None,
         provider_name: str = "openai",
         client: Any | None = None,
+        reasoning_effort: str | None = None,
     ) -> None:
         self.model = model
         self.provider_name = provider_name
+        self.reasoning_effort = (reasoning_effort or "").strip() or None
         if client is not None:
             self.client = client
         else:
@@ -75,7 +77,7 @@ class OpenAIStructuredProvider:
                 }
                 if _model_allows_temperature_zero(self.model):
                     create_kwargs["temperature"] = 0
-                effort = _reasoning_effort_for_model(self.model)
+                effort = self.reasoning_effort or _reasoning_effort_for_model(self.model)
                 if effort:
                     create_kwargs["reasoning_effort"] = effort
                 response, duration_ms = self._create_completion(create_kwargs)

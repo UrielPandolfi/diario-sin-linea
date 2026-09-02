@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.article_body import plain_article_draft
 from app.core.config import get_settings
 from app.domain.enums import (
     ArticleStatus,
@@ -150,6 +151,10 @@ def _audit_pass(session: Session, event) -> None:
     )
 
 
+def _draft(headline: str, summary: str = "s", body: str = "b") -> ArticleDraft:
+    return plain_article_draft(headline, summary, body)
+
+
 def _publish(session: Session, event):
     return PublishService(session).publish(event.id, trigger="test")
 
@@ -161,8 +166,8 @@ def test_draft_and_cap_exhausted_are_not_published(db_session: Session) -> None:
         {
             "ArticleAuditResult": [_fail_audit(), _fail_audit(), _fail_audit()],
             "ArticleDraft": [
-                ArticleDraft(headline="Uno", summary="s", body="b"),
-                ArticleDraft(headline="Dos", summary="s", body="b"),
+                _draft("Uno"),
+                _draft("Dos"),
             ],
         }
     )
@@ -234,7 +239,7 @@ def test_auto_publish_flag_does_not_gate_passed_chain(monkeypatch) -> None:
 def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> None:
     event, article, claim = _seed_draft(db_session, headline="Titular publicado")
     llm = FakeStructuredLLM(
-        {"ArticleDraft": ArticleDraft(headline="Titular publicado", summary="Resumen", body="Cuerpo live")}
+        {"ArticleDraft": _draft("Titular publicado", "Resumen", "Cuerpo live")}
     )
     WritingService(db_session, llm=llm).write(event.id, trigger="test")
     _audit_pass(db_session, event)
@@ -272,7 +277,7 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
     )
     db_session.flush()
     update_llm = FakeStructuredLLM(
-        {"ArticleDraft": ArticleDraft(headline="Nuevo titular con heridos", summary="s", body="cuerpo nuevo")}
+        {"ArticleDraft": _draft("Nuevo titular con heridos", "s", "cuerpo nuevo")}
     )
     written = WritingService(db_session, llm=update_llm).write(event.id, trigger="test")
     db_session.refresh(article)
@@ -296,8 +301,8 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
         {
             "ArticleAuditResult": [_fail_audit(), _fail_audit(), _fail_audit()],
             "ArticleDraft": [
-                ArticleDraft(headline="Cap 1", summary="s", body="b"),
-                ArticleDraft(headline="Cap 2", summary="s", body="b"),
+                _draft("Cap 1"),
+                _draft("Cap 2"),
             ],
         }
     )
@@ -338,7 +343,7 @@ def test_write_blocked_when_publishing_running(db_session: Session) -> None:
     )
     db_session.flush()
     llm = FakeStructuredLLM(
-        {"ArticleDraft": ArticleDraft(headline="H", summary="s", body="b")}
+        {"ArticleDraft": _draft("H")}
     )
     result = WritingService(db_session, llm=llm).write(event.id, trigger="test")
     assert result["skipped"] is True

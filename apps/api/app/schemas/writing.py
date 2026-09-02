@@ -1,14 +1,35 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ClaimImportance, ClaimStatus, EntityType, EventSourceRelation, EvidenceType
 
 
+class ArticleDraftSegment(BaseModel):
+    text: str = Field(min_length=1)
+    claim_refs: list[str] = Field(default_factory=list)
+
+
+class ArticleDraftBlock(BaseModel):
+    type: Literal["paragraph"] = "paragraph"
+    segments: list[ArticleDraftSegment] = Field(min_length=1)
+
+
 class ArticleDraft(BaseModel):
     headline: str = Field(min_length=1)
     summary: str = Field(min_length=1)
-    body: str = Field(min_length=1)
+    body_blocks: list[ArticleDraftBlock] = Field(min_length=1)
+
+
+class PersistedBodySegment(BaseModel):
+    text: str
+    claim_ids: list[str] = Field(default_factory=list)
+
+
+class PersistedBodyBlock(BaseModel):
+    type: Literal["paragraph"] = "paragraph"
+    segments: list[PersistedBodySegment] = Field(default_factory=list)
 
 
 class ContextEvidence(BaseModel):
@@ -28,8 +49,18 @@ class ContextSource(BaseModel):
     is_monitored: bool = False
 
 
+class ContextSourceText(BaseModel):
+    source_id: str
+    source_name: str
+    url: str
+    title: str | None = None
+    published_at: datetime | None = None
+    text: str
+
+
 class ContextClaim(BaseModel):
     id: str
+    ref: str
     canonical_text: str
     claim_type: str | None = None
     importance: ClaimImportance
@@ -90,6 +121,8 @@ class ArticleContext(BaseModel):
     entities: list[ContextEntity] = Field(default_factory=list)
     timeline: list[ContextTimelineItem] = Field(default_factory=list)
     sources: list[ContextSource] = Field(default_factory=list)
+    source_contexts: list[ContextSourceText] = Field(default_factory=list)
+    claim_refs: dict[str, str] = Field(default_factory=dict)
     verification: ContextVerification = Field(default_factory=ContextVerification)
 
 
