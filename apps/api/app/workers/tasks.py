@@ -8,7 +8,12 @@ from app.core.db import SessionLocal
 from app.services.claim_service import ClaimService
 from app.services.detection_service import DetectionService
 from app.services.ingestion_service import IngestionService
-from app.services.pipeline_budget import allow_new_event_pipeline
+from app.services.pipeline_budget import (
+    allow_fill_enqueue,
+    allow_new_event_pipeline,
+    claim_detection_item,
+    release_new_event_pipeline,
+)
 from app.services.research_service import ResearchService
 from app.services.audit_service import AuditService
 from app.services.verification_service import VerificationService
@@ -37,8 +42,33 @@ celery_app.conf.beat_schedule = {
 }
 
 
-def _enqueue_detection(source_item_id: UUID, poll_id: str) -> None:
-    detect_event.delay(str(source_item_id), poll_id)
+def _enqueue_detection(source_item_id: UUID, poll_id: str, fill_quota: bool = False) -> None:
+    detect_event.delay(str(source_item_id), poll_id, fill_quota)
+
+
+def _enqueue_next_for_quota(poll_id: str, exclude_item_id: str) -> None:
+    session = SessionLocal()
+    try:
+        from app.repositories import SourceItemRepository
+
+        for item in SourceItemRepository(session).list_retryable(limit=20):
+            if str(item.id) == exclude_item_id:
+                continue
+            if not claim_detection_item(poll_id, str(item.id)):
+                continue
+            if not allow_fill_enqueue(poll_id):
+                return
+            _enqueue_detection(item.id, poll_id, fill_quota=True)
+            return
+    finally:
+        session.close()
+
+
+def _item_ids_for_detection(item_ids: list[UUID]) -> list[UUID]:
+    cap = int(get_settings().max_new_events_per_poll or 0)
+    if cap <= 0:
+        return list(item_ids)
+    return list(item_ids[:cap])
 
 
 @celery_app.task(name="app.workers.tasks.ping")
@@ -62,7 +92,8 @@ def poll_source(self, source_id: str) -> dict:
         service = IngestionService(session)
         result = service.poll_source(UUID(source_id))
         session.commit()
-        for item_id in result.item_ids:
+        queued_ids = _item_ids_for_detection(result.item_ids)
+        for item_id in queued_ids:
             _enqueue_detection(item_id, poll_id)
         return {
             "skipped": result.skipped,
@@ -71,6 +102,7 @@ def poll_source(self, source_id: str) -> dict:
             "seen": result.seen,
             "reason": result.reason,
             "item_ids": [str(item_id) for item_id in result.item_ids],
+            "detection_queued": len(queued_ids),
             "poll_id": poll_id,
         }
     except Exception:
@@ -100,21 +132,31 @@ def poll_monitored_sources() -> dict:
     max_retries=settings.job_max_retries,
     retry_backoff=True,
 )
-def detect_event(self, source_item_id: str, poll_id: str | None = None) -> dict:
+def detect_event(
+    self,
+    source_item_id: str,
+    poll_id: str | None = None,
+    fill_quota: bool = False,
+) -> dict:
+    # Retries already reserved a slot on the first attempt.
+    if self.request.retries == 0 and not allow_new_event_pipeline(poll_id):
+        return {
+            "created": False,
+            "detection_skipped": True,
+            "pipeline_skipped": True,
+            "reason": "max_new_events_per_poll",
+        }
     session = SessionLocal()
     try:
         service = DetectionService(session)
         result = service.detect(UUID(source_item_id), attempt=self.request.retries + 1)
         session.commit()
-        if result.get("created") and result.get("event_id"):
-            if allow_new_event_pipeline(poll_id):
-                research_event.delay(result["event_id"], "new_event")
-            else:
-                result = {
-                    **result,
-                    "pipeline_skipped": True,
-                    "reason": "max_new_events_per_poll",
-                }
+        created_new = bool(result.get("created") and result.get("event_id"))
+        if created_new:
+            research_event.delay(result["event_id"], "new_event")
+        elif fill_quota:
+            release_new_event_pipeline(poll_id)
+            _enqueue_next_for_quota(poll_id, source_item_id)
         return result
     except Exception as exc:
         session.rollback()

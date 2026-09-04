@@ -23,6 +23,7 @@ from app.schemas import SourceCreate, SourceUpdate
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
 from app.services.pipeline_lock import is_write_audit_publish_busy
+from app.services.pipeline_budget import claim_detection_item
 from app.workers.tasks import (
     audit_event_article,
     detect_event,
@@ -255,7 +256,7 @@ def requeue_pending_detection(
     db: DbSession,
     limit: int = Query(default=3, ge=1, le=50),
 ) -> dict:
-    """Re-encola detección para SourceItems PENDING o FAILED (p.ej. tras un poll o un fallo de config)."""
+    """Re-encola detección para SourceItems PENDING o FAILED hasta el tope de sucesos nuevos."""
     settings = get_settings()
     cap = int(settings.max_new_events_per_poll or 0)
     if cap > 0:
@@ -263,7 +264,8 @@ def requeue_pending_detection(
     items = SourceItemRepository(db).list_retryable(limit=limit)
     poll_id = str(uuid4())
     for item in items:
-        detect_event.delay(str(item.id), poll_id)
+        claim_detection_item(poll_id, str(item.id))
+        detect_event.delay(str(item.id), poll_id, True)
     return {
         "queued": len(items),
         "poll_id": poll_id,

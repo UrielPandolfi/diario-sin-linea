@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -39,14 +38,6 @@ from app.schemas.claims import (
 )
 
 CLAIM_STAGE = "claim_resolution"
-MAX_FALLBACK_CLAIMS = 8
-MIN_FALLBACK_SENTENCE_CHARS = 28
-
-_SENTENCE_SPLIT = re.compile(r"(?<=[.!?…])\s+")
-_SKIP_FALLBACK_SENTENCE = re.compile(
-    r"lee tambi|nota relacionada|suscrib|compart[ií]|seguinos|publicidad|copyright",
-    re.IGNORECASE,
-)
 
 _EVIDENCE_RANK = {
     EvidenceType.CONTRADICTS: 4,
@@ -60,29 +51,6 @@ _PROTECTED_STATUSES = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
 
 def _item_body(item: SourceItem) -> str:
     return (item.clean_text or "").strip()
-
-
-def _factual_sentences(text: str, *, limit: int = 6) -> list[str]:
-    cleaned = (text or "").strip()
-    if not cleaned:
-        return []
-    parts = [part.strip() for part in _SENTENCE_SPLIT.split(cleaned) if part.strip()]
-    if len(parts) <= 1 and len(cleaned) >= MIN_FALLBACK_SENTENCE_CHARS:
-        parts = [cleaned]
-    sentences: list[str] = []
-    for part in parts:
-        if len(part) < MIN_FALLBACK_SENTENCE_CHARS:
-            continue
-        if _SKIP_FALLBACK_SENTENCE.search(part):
-            continue
-        if len(part) > 280:
-            part = part[:280].rsplit(" ", 1)[0].strip()
-        if len(part) < MIN_FALLBACK_SENTENCE_CHARS:
-            continue
-        sentences.append(part)
-        if len(sentences) >= limit:
-            break
-    return sentences
 
 
 def build_assertion_key(
@@ -340,7 +308,6 @@ class ClaimService:
                 "resolved": 0,
                 "needs_external_verification": [],
                 "escalated_claim_refs": [],
-                "fallback_used": False,
                 "reason": "no_usable_sources",
             }
         extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
@@ -350,10 +317,6 @@ class ClaimService:
             schema=ClaimExtractionBatch,
         )
         pending = self._merge_extracted(batch.claims, sources)
-        fallback_used = False
-        if not pending:
-            pending = self._merge_extracted(self._fallback_extracted(event, sources), sources)
-            fallback_used = bool(pending)
         claims = self._persist(event, pending)
         self.session.flush()
         if not claims:
@@ -363,7 +326,6 @@ class ClaimService:
                 "resolved": 0,
                 "needs_external_verification": [],
                 "escalated_claim_refs": [],
-                "fallback_used": fallback_used,
             }
 
         claims = self._reload_claims(event.id)
@@ -400,7 +362,6 @@ class ClaimService:
             "resolved": len(claims),
             "needs_external_verification": needs,
             "escalated_claim_refs": escalated_done,
-            "fallback_used": fallback_used,
         }
 
     def _numbered_sources(self, event: Event) -> list[SourceItem]:
@@ -415,35 +376,6 @@ class ClaimService:
                 continue
             usable.append(item)
         return usable
-
-    def _fallback_extracted(self, event: Event, sources: list[SourceItem]) -> list[ExtractedClaim]:
-        rows: list[ExtractedClaim] = []
-        seen: set[str] = set()
-        for index, item in enumerate(sources, start=1):
-            snippet = self._snippet(item, event) or _item_body(item)
-            for sentence in _factual_sentences(snippet):
-                key = normalize_name(sentence)
-                if not key or key in seen:
-                    continue
-                seen.add(key)
-                rows.append(
-                    ExtractedClaim(
-                        canonical_text=sentence,
-                        claim_type="hecho",
-                        importance=ClaimImportance.HIGH if index == 1 else ClaimImportance.MEDIUM,
-                        evidence=[
-                            ExtractedEvidence(
-                                source_ref=index,
-                                evidence_type=EvidenceType.SUPPORTS,
-                                excerpt=sentence[:240],
-                                confidence=0.55,
-                            )
-                        ],
-                    )
-                )
-                if len(rows) >= MAX_FALLBACK_CLAIMS:
-                    return rows
-        return rows
 
     def _entity_names(self, event: Event) -> list[str]:
         names: list[str] = []

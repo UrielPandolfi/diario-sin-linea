@@ -2,10 +2,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.prompts import load_prompt
 from app.domain.enums import (
     ClaimImportance,
     ClaimStatus,
@@ -569,15 +571,18 @@ def test_invented_excerpt_is_discarded(db_session: Session) -> None:
     result = _service(db_session, llm).resolve(event.id, trigger="admin")
 
     claims = _event_claims(db_session, event.id)
-    assert result["persisted"] >= 1
-    assert result["fallback_used"] is True
-    assert all("doce" not in claim.canonical_text.lower() for claim in claims)
-    assert any("colectivo" in claim.canonical_text.lower() for claim in claims)
-    assert db_session.scalar(select(func.count()).select_from(ClaimEvidence)) >= 1
-    assert "ClaimResolutionBatch" in llm.calls
+    assert result["skipped"] is False
+    assert result.get("error") is None
+    assert result["extracted"] == 1
+    assert result["persisted"] == 0
+    assert result["resolved"] == 0
+    assert claims == []
+    assert "fallback_used" not in result
+    assert "ClaimResolutionBatch" not in llm.calls
+    assert db_session.scalar(select(func.count()).select_from(ClaimEvidence)) == 0
 
 
-def test_empty_extraction_falls_back_to_source_sentences(db_session: Session) -> None:
+def test_empty_extraction_persists_zero_claims(db_session: Session) -> None:
     source = _source(db_session)
     body = "Un colectivo chocó contra un automóvil en avenida Pellegrini y hubo cuatro heridos."
     item = _item(
@@ -597,10 +602,56 @@ def test_empty_extraction_falls_back_to_source_sentences(db_session: Session) ->
     result = _service(db_session, llm).resolve(event.id, trigger="admin")
 
     claims = _event_claims(db_session, event.id)
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.event_id == event.id, PipelineRun.stage == CLAIM_STAGE)
+    ).one()
+    assert result["skipped"] is False
+    assert result.get("error") is None
     assert result["extracted"] == 0
-    assert result["fallback_used"] is True
-    assert result["persisted"] >= 1
-    assert any("colectivo" in claim.canonical_text.lower() for claim in claims)
+    assert result["persisted"] == 0
+    assert result["resolved"] == 0
+    assert "fallback_used" not in result
+    assert claims == []
+    assert "ClaimResolutionBatch" not in llm.calls
+    assert run.status == PipelineStatus.SUCCESS
+    assert not any("colectivo" in (claim.canonical_text or "").lower() for claim in claims)
+
+
+def test_invalid_structured_extraction_fails_without_synthetic_claims(db_session: Session) -> None:
+    source = _source(db_session)
+    body = "Un colectivo chocó contra un automóvil en avenida Pellegrini y hubo cuatro heridos."
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/choque-invalido",
+        title="Choque en Pellegrini",
+        body=body,
+        content_hash="invalid-schema",
+    )
+    event = _event(db_session, item)
+    llm = FakeStructuredLLM(
+        {
+            "ClaimExtractionBatch": ValidationError.from_exception_data(
+                "ClaimExtractionBatch",
+                [{"type": "missing", "loc": ("claims",), "input": {}}],
+            )
+        }
+    )
+
+    result = _service(db_session, llm).resolve(event.id, trigger="admin")
+
+    claims = _event_claims(db_session, event.id)
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.event_id == event.id, PipelineRun.stage == CLAIM_STAGE)
+    ).one()
+    assert result["skipped"] is False
+    assert result["persisted"] == 0
+    assert result.get("error")
+    assert "fallback_used" not in result
+    assert claims == []
+    assert "ClaimResolutionBatch" not in llm.calls
+    assert run.status == PipelineStatus.FAILED
+    assert not any("colectivo" in (claim.canonical_text or "").lower() for claim in claims)
 
 
 def test_second_run_does_not_duplicate(db_session: Session) -> None:
@@ -928,3 +979,21 @@ def test_extraction_prompt_includes_material_after_1500_chars(db_session: Sessio
     monkeypatch.setattr(service.settings, "claim_extraction_source_chars", 5000)
     long_prompt = service._extraction_prompt(event, [item])
     assert "12,22%" in long_prompt
+
+
+def test_extraction_prompt_covers_selective_claim_philosophy() -> None:
+    prompt = load_prompt("claim_extraction.md")
+    assert "SINGLE_SOURCE" not in prompt
+    assert "¿Qué gana el lector" in prompt
+    assert "una sola fuente cuya falsedad o confirmación cambiaría sustancialmente la noticia" in prompt
+    assert "oportunidad histórica" in prompt
+    assert "redujo la deuda un 30%" in prompt
+    assert "acusó al ministro de beneficiar a una empresa" in prompt
+    assert "cantidades diferentes de víctimas" in prompt
+    assert "La reunión se realizó el martes." in prompt
+    assert "Carolina del Norte" in prompt
+    assert "$98,08 millones" in prompt
+    assert "$108,2 millones" in prompt
+    assert "derivables matemáticamente" in prompt
+    assert "`[]` es un resultado válido" in prompt or "es un resultado válido" in prompt
+

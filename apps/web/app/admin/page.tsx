@@ -70,12 +70,12 @@ export default function AdminDashboardPage() {
       });
       setNotice(
         result.queued
-          ? `Detección encolada para ${result.queued} ítem${result.queued === 1 ? "" : "s"} PENDING o FAILED. El pipeline de IA arranca en el worker.`
-          : "No hay ítems PENDING o FAILED para reprocesar.",
+          ? `Hasta ${result.queued} suceso${result.queued === 1 ? "" : "s"} nuevo${result.queued === 1 ? "" : "s"}: si una nota es el mismo hecho o el gate la descarta, se prueba la siguiente PENDING. Solo un suceso nuevo aparece en Publicadas / No pasaron.`
+          : "No hay ítems PENDING o FAILED para procesar.",
       );
       await load();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "No se pudo reencolar PENDING.");
+      setError(err instanceof Error ? err.message : "No se pudieron encolar más notas.");
     } finally {
       setRequeuing(false);
     }
@@ -104,7 +104,7 @@ export default function AdminDashboardPage() {
             disabled={requeuing}
             className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
           >
-            {requeuing ? "Encolando…" : "Reprocesar fallidos (3)"}
+            {requeuing ? "Encolando…" : "Procesar 3 más"}
           </button>
           <button
             type="button"

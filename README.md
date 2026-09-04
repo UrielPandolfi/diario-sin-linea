@@ -73,7 +73,7 @@ M9 publica solo si el último audit `SUCCESS` tiene `passed=true` sobre `current
 
 Caps: `INITIAL_RESEARCH_QUERIES` (2) y `MAX_RESEARCH_QUERIES_PER_EVENT` (4, solo si hay escalación). `MAX_STANDARD_EVENT_SOURCES` (4) / `MAX_ESCALATED_EVENT_SOURCES` (8) limitan INITIAL+ADDITIONAL. `MAX_RESEARCH_RESULTS_PER_QUERY` (5), `MAX_RESEARCH_RESULTS_PER_DOMAIN` (3). M6: `MAX_VERIFICATION_CLAIMS_PER_EVENT` (5), `MAX_VERIFICATION_QUERIES_PER_CLAIM` (2), `MAX_VERIFICATION_RESULTS_PER_QUERY` (3). M7: `MAX_WRITING_CLAIMS_PER_EVENT` (40, solo el prompt a Claude; el detector de cambio material ve todos los claims), `MAX_WRITING_SOURCES_PER_EVENT` (20). M8: `MAX_AUDIT_REWRITE_CYCLES` (2). Búsqueda: `SEARCH_PROVIDER=exa` o `brave` más `EXA_API_KEY` / `BRAVE_API_KEY` en el worker. Sin clave del provider elegido, research/verification quedan `FAILED` y verification **no** encola writing.
 
-El poll manual del Admin es el criterio de aceptación de M2. Beat es el periódico: cada `INGESTION_POLL_INTERVAL_SECONDS` (default **900**). Para testeo acotado: `MAX_NEW_EVENTS_PER_POLL=3` (default `0` = sin tope) limita cuántos sucesos **nuevos** de un mismo Poll encolan research→publish; **Investigar** a mano no usa ese tope.
+El poll manual del Admin es el criterio de aceptación de M2. Beat es el periódico: cada `INGESTION_POLL_INTERVAL_SECONDS` (default **900**). Para testeo acotado: `MAX_NEW_EVENTS_PER_POLL=3` (default `0` = sin tope) limita cuántas **noticias** encola un Poll a detección (tokens de Ultra/Luna). **Procesar N más** en el tablero busca hasta N **sucesos nuevos**: si una nota se fusiona a un suceso ya existente o el gate la marca SKIPPED, prueba la siguiente PENDING. **Investigar** a mano no usa ese tope.
 
 ## Variables de entorno
 

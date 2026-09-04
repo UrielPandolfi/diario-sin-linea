@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.text import content_fingerprint
 from app.domain.enums import IngestionMethod, SourceItemStatus
 from app.schemas import SourceCreate
@@ -234,4 +235,58 @@ def test_poll_source_task_enqueues_detection_after_commit(monkeypatch) -> None:
     assert events[:2] == ["poll", "commit"]
     assert events[2:] == [f"enqueue:{item_a}", f"enqueue:{item_b}"]
     assert result["created"] == 2
+    assert result["detection_queued"] == 2
     assert result["poll_id"]
+
+
+def test_poll_source_task_caps_detection_enqueue(monkeypatch) -> None:
+    from uuid import uuid4
+
+    events: list[str] = []
+    item_a = uuid4()
+    item_b = uuid4()
+    item_c = uuid4()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "max_new_events_per_poll", 1)
+
+    class Sess:
+        def commit(self) -> None:
+            events.append("commit")
+
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakeIngestion:
+        def __init__(self, session, **_kwargs) -> None:
+            return None
+
+        def poll_source(self, source_id):
+            events.append("poll")
+            return type(
+                "R",
+                (),
+                {
+                    "skipped": False,
+                    "created": 3,
+                    "updated": 0,
+                    "seen": 3,
+                    "reason": None,
+                    "item_ids": [item_a, item_b, item_c],
+                },
+            )()
+
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", Sess)
+    monkeypatch.setattr("app.workers.tasks.IngestionService", FakeIngestion)
+    monkeypatch.setattr(
+        "app.workers.tasks._enqueue_detection",
+        lambda item_id, poll_id: events.append(f"enqueue:{item_id}"),
+    )
+    from app.workers.tasks import poll_source
+
+    result = poll_source.run(str(uuid4()))
+    assert events[2:] == [f"enqueue:{item_a}"]
+    assert result["detection_queued"] == 1
+    assert result["item_ids"] == [str(item_a), str(item_b), str(item_c)]

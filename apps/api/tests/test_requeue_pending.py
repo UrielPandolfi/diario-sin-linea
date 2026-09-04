@@ -12,6 +12,7 @@ from app.services.source_service import SourceService
 def test_requeue_pending_enqueues_detection(db_session: Session, monkeypatch) -> None:
     queued: list[tuple] = []
     monkeypatch.setattr("app.api.admin.detect_event.delay", lambda *args: queued.append(args))
+    monkeypatch.setattr("app.api.admin.claim_detection_item", lambda *_a, **_k: True)
     source = SourceService(db_session).create(
         SourceCreate(
             name="Fuente",
@@ -43,12 +44,14 @@ def test_requeue_pending_enqueues_detection(db_session: Session, monkeypatch) ->
     assert body["queued"] == 3
     assert len(queued) == 3
     assert body["poll_id"]
-    assert all(len(args) == 2 for args in queued)
+    assert all(len(args) == 3 for args in queued)
+    assert all(args[2] is True for args in queued)
 
 
 def test_requeue_pending_empty(db_session: Session, monkeypatch) -> None:
     queued: list[tuple] = []
     monkeypatch.setattr("app.api.admin.detect_event.delay", lambda *args: queued.append(args))
+    monkeypatch.setattr("app.api.admin.claim_detection_item", lambda *_a, **_k: True)
     db_session.commit()
     settings = get_settings()
     with TestClient(app) as client:
@@ -62,6 +65,7 @@ def test_requeue_pending_empty(db_session: Session, monkeypatch) -> None:
 def test_requeue_includes_failed_items(db_session: Session, monkeypatch) -> None:
     queued: list[tuple] = []
     monkeypatch.setattr("app.api.admin.detect_event.delay", lambda *args: queued.append(args))
+    monkeypatch.setattr("app.api.admin.claim_detection_item", lambda *_a, **_k: True)
     source = SourceService(db_session).create(
         SourceCreate(
             name="Fuente",

@@ -31,7 +31,8 @@ export default function AdminPublishedPage() {
         <h1 className="mt-2 font-heading text-3xl font-medium text-primary">Qué salió y qué no</h1>
         <p className="mt-2 font-sans text-sm text-secondary">
           Mismo recorte que Sucesos (hasta 100). A la izquierda las que llegaron a publicado; a la
-          derecha el resto.
+          derecha, sucesos detectados que no se publicaron. Notas SKIPPED o adjuntadas a un suceso
+          que ya existía no aparecen acá: no son un suceso nuevo.
         </p>
       </div>
 

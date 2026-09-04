@@ -8,7 +8,7 @@ SUPPORTED no significa que cualquier formulación del claim pueda escribirse com
 
 Revisá el draft contra el context:
 
-- afirmaciones factuales que no estén representadas por un claim (la evidencia no autoriza hechos nuevos)
+- hechos nuevos que no estén en claims ni en `source_contexts`; afirmaciones materialmente sensibles escritas como voz propia o hecho sin Claim (UNSUPPORTED_CLAIM)
 - números, nombres y fechas
 - atribuciones (SINGLE_SOURCE no como consenso; CONFLICTING con ambos lados; usá `sources[].name` vía `source_ref`, no infieras el medio desde una URL)
 - contradicciones internas
@@ -44,6 +44,8 @@ No marques (hechos ordinarios y secuencia factual):
 - “Tras los dichos de Milei, Brasil llamó a consultas a su embajador.” con ambos hechos SUPPORTED.
 - “Algunas de las fuentes consultadas describieron el episodio como uno de los conflictos bilaterales más graves de los últimos años.” (caracterización ya atribuida).
 - No exijas “según varias fuentes” delante de cada hecho confirmado.
+- Hechos ordinarios respaldados por `source_contexts` aunque no haya Claim: hora, lugar, secuencia, cifras secundarias de un documento. No marques “el martes en Carolina del Norte” ni “informó deudas por $98,08 millones” si esa cifra ya está en las fuentes y no es una afirmación materialmente sensible.
+- `source_contexts` no sustituyen un Claim para afirmaciones materialmente sensibles (declaraciones, acusaciones, causalidad, controversia, caracterizaciones que deban atribuirse, cifras cuya comprobación externa cambiaría la noticia) escritas como hecho o voz propia.
 
 Annotations (`body_blocks`):
 
@@ -56,6 +58,7 @@ Verificá:
 - SINGLE_SOURCE, UNCERTAIN y CONFLICTING mantienen su nivel de certeza/atribución en el texto anotado;
 - una afirmación material claramente cubierta por un Claim disponible no quedó sin annotation → UNMAPPED_MATERIAL_CLAIM;
 - no se usa un Claim irrelevante solo para satisfacer el requisito de annotation → INVALID_CLAIM_MAPPING.
+- No exijas annotation de contexto ordinario ni de cifras que no son Claim. Párrafos sin `claim_ids` son correctos.
 
 Si `body_blocks` es null (artículo legado), no exijas annotations; auditá headline, summary y body como hasta ahora.
 

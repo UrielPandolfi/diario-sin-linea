@@ -430,10 +430,7 @@ def test_detect_event_does_not_enqueue_research_when_not_created(monkeypatch) ->
         ),
     )
     monkeypatch.setattr("app.workers.tasks.research_event.delay", lambda *args: queued.append(args))
-    monkeypatch.setattr(
-        "app.workers.tasks.allow_new_event_pipeline",
-        lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no debería consultar budget")),
-    )
+    monkeypatch.setattr("app.workers.tasks.allow_new_event_pipeline", lambda poll_id: True)
     from app.workers.tasks import detect_event
 
     detect_event.run("00000000-0000-0000-0000-000000000001", "poll-test")

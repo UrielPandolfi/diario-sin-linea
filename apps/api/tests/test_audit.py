@@ -647,6 +647,10 @@ def test_audit_prompt_covers_unattributed_characterization_and_causality() -> No
     assert "Julio Bitelli" in prompt
     assert "Nunca uses un type OTHER" in prompt
     assert "Causalidad más fuerte que la evidencia → CAUSALITY" in prompt
+    assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
+    assert "el martes en Carolina del Norte" in prompt
+    assert "$98,08 millones" in prompt
+    assert "No exijas annotation de contexto ordinario" in prompt
 
 
 def test_writing_prompt_covers_characterization_and_causality() -> None:
@@ -658,6 +662,9 @@ def test_writing_prompt_covers_characterization_and_causality() -> None:
     assert "Los insultos de Milei desataron la crisis" in prompt
     assert "Tras los dichos de Milei, el gobierno brasileño llamó a consultas" in prompt
     assert "sin “según varias fuentes” delante de cada oración" in prompt or 'sin "según varias fuentes"' in prompt
+    assert "Son respaldo suficiente para hechos ordinarios" in prompt
+    assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
+    assert "Párrafos o segmentos enteros con `claim_refs: []` son correctos" in prompt
 
 
 def test_audit_schema_has_no_other_catchall() -> None:
