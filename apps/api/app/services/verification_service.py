@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -12,12 +13,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.text import content_fingerprint, excerpt_in_source
+from app.core.text import content_fingerprint, excerpt_in_source, postgres_safe_text
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import (
     ClaimStatus,
     EventSourceRelation,
+    EvidenceType,
     IngestionMethod,
     PipelineStatus,
 )
@@ -29,24 +31,46 @@ from app.providers.base import (
     SearchQuery,
     StructuredLLMProvider,
 )
-from app.providers.registry import ModelRole, get_search_provider, get_structured_provider
+from app.providers.registry import (
+    ModelRole,
+    get_search_provider,
+    get_structured_provider,
+    get_structured_provider_optional,
+)
 from app.repositories import (
     PipelineRunRepository,
     SourceItemRepository,
     SourceRepository,
 )
 from app.schemas import SourceCreate, SourceItemCreate
-from app.schemas.verification import VerificationResult
+from app.schemas.verification import (
+    CheapClaimEvidenceAssessment,
+    CheapEvidenceJudgement,
+    EvidenceJudgementType,
+    PERSISTABLE_JUDGEMENTS,
+    VerificationPlan,
+    VerificationResult,
+)
 from app.services.claim_service import CLAIM_STAGE, clamp_supported_status
 from app.services.event_service import EventService
-from app.services.fetching import HttpFetcher, extract_text
-from app.services.research_service import freshness_for_event
+from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
+from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
+from app.services.verification_plan import (
+    assessment_has_support,
+    build_verification_queries,
+    heuristic_plan,
+    needs_sol_after_assessment,
+    refine_plan,
+    search_window_for,
+    skip_directed_search,
+)
 from app.services.verification_policy import canonicalize_claim_type, select_claims
 
 VERIFICATION_STAGE = "verification"
 SNIPPET_CHARS = 1500
+_PLANNER_ERRORS = (ProviderNotConfiguredError, ValidationError, ValueError, KeyError, RuntimeError)
 
 
 @dataclass
@@ -67,6 +91,8 @@ class VerificationService:
         session: Session,
         *,
         llm: StructuredLLMProvider | None = None,
+        planner_llm: StructuredLLMProvider | None = None,
+        assessor_llm: StructuredLLMProvider | None = None,
         search: SearchProvider | None = None,
         fetcher: HttpFetcher | None = None,
         extract: Callable[[str, str], str | None] = extract_text,
@@ -80,6 +106,8 @@ class VerificationService:
         self.source_service = SourceService(session)
         self.item_service = SourceItemService(session)
         self.llm = llm
+        self.planner_llm = planner_llm
+        self.assessor_llm = assessor_llm
         self.search = search
         self.fetcher = fetcher or HttpFetcher()
         self.extract = extract
@@ -133,7 +161,16 @@ class VerificationService:
         except ProviderNotConfiguredError as exc:
             return self._fail(run, event, original_status, str(exc))
         except Exception as exc:
-            return self._fail(run, event, original_status, str(exc))
+            try:
+                return self._fail(run, event, original_status, str(exc))
+            except Exception:
+                self.session.rollback()
+                return {
+                    "skipped": False,
+                    "event_id": str(event.id),
+                    "verified": 0,
+                    "error": str(exc),
+                }
 
     def _fail(self, run: PipelineRun, event: Event, original_status: Any, message: str) -> dict:
         run.status = PipelineStatus.FAILED
@@ -180,6 +217,13 @@ class VerificationService:
             break
         return flagged, consumed
 
+    def _cheap_provider(self, injected: StructuredLLMProvider | None) -> StructuredLLMProvider | None:
+        if injected is not None:
+            return injected
+        if self.llm is not None:
+            return None
+        return get_structured_provider_optional(ModelRole.ULTRA_LIGHT_PROCESSING)
+
     def _run(self, event: Event) -> dict:
         flagged, consumed = self._flagged_ids(event.id)
         selected, skipped_policy = select_claims(
@@ -192,6 +236,13 @@ class VerificationService:
             "skipped_policy": skipped_policy,
             "consumed_needs_external_verification": consumed,
             "queries": {},
+            "plans": {},
+            "temporal_scope": {},
+            "freshness": {},
+            "primary_found": {},
+            "escalated": {},
+            "assessments": {},
+            "skipped_search": [],
             "sol": [],
             "attached": 0,
             "fetched": 0,
@@ -202,58 +253,178 @@ class VerificationService:
             return payload
 
         search = self.search or get_search_provider()
-        llm = self.llm or get_structured_provider(ModelRole.VERIFICATION)
-        freshness = freshness_for_event(event)
-        system_prompt = load_prompt("verification.md")
+        sol_prompt = load_prompt("verification.md")
 
         for row in selected:
             claim = row.claim
             status_before = claim.status
-            queries = self._queries_for(claim, event)
-            payload["queries"][str(claim.id)] = queries
-            packet, fetched = self._packet_for(claim, search, queries, freshness)
-            payload["fetched"] += fetched
-            result = llm.generate_structured(
-                system_prompt=system_prompt,
-                user_prompt=self._user_prompt(event, claim, packet),
-                schema=VerificationResult,
+            claim_id = str(claim.id)
+            plan = self._plan_for(claim, event)
+            preferred = preferred_domains(
+                plan.jurisdiction,
+                plan.verification_target.value,
+                plan.subject.value,
+                province=event.province,
             )
-            attached, cited = self._apply_result(event, claim, packet, result)
-            payload["attached"] += attached
-            payload["cited"] += cited
+            payload["plans"][claim_id] = plan.model_dump(mode="json")
+            payload["temporal_scope"][claim_id] = plan.temporal_scope.value
+            if skip_directed_search(claim, plan, preferred):
+                payload["skipped_search"].append(claim_id)
+                payload["escalated"][claim_id] = False
+                payload["primary_found"][claim_id] = False
+                continue
+
+            queries = build_verification_queries(
+                claim,
+                plan,
+                preferred,
+                limit=self.settings.max_verification_queries_per_claim,
+            )
+            window = search_window_for(plan, claim)
+            payload["queries"][claim_id] = queries
+            payload["freshness"][claim_id] = window.freshness
+            hits = self._collect_hits(search, queries, plan, window.freshness, window.since, window.until)
+            packet, fetched = self._packet_for(claim, hits)
+            payload["fetched"] += fetched
+            assessment = self._assess(event, claim, packet, plan)
+            if assessment is not None:
+                payload["assessments"][claim_id] = assessment.model_dump(mode="json")
+                attached, cited, primary_support = self._apply_judgements(event, claim, packet, assessment, preferred)
+                payload["attached"] += attached
+                payload["cited"] += cited
+            else:
+                primary_support = any(is_preferred_domain(src.url, preferred) for src in packet if src.hit is not None)
+            payload["primary_found"][claim_id] = bool(primary_support)
+            escalate = needs_sol_after_assessment(
+                claim, plan, assessment, primary_support=bool(primary_support)
+            )
+            payload["escalated"][claim_id] = escalate
             payload["verified"] += 1
+            if escalate:
+                llm = self.llm or get_structured_provider(ModelRole.VERIFICATION)
+                result = llm.generate_structured(
+                    system_prompt=sol_prompt,
+                    user_prompt=self._user_prompt(event, claim, packet, plan),
+                    schema=VerificationResult,
+                )
+                attached, cited = self._apply_result(event, claim, packet, result)
+                payload["attached"] += attached
+                payload["cited"] += cited
+                payload["sol"].append(
+                    {
+                        "claim_id": claim_id,
+                        "status_before": status_before.value,
+                        "status_after": claim.status.value,
+                        "unresolved": result.unresolved,
+                        "reason": result.reason,
+                        "escalated": True,
+                    }
+                )
+                continue
+            if assessment is not None and assessment_has_support(assessment):
+                claim.status = clamp_supported_status(claim, ClaimStatus.SUPPORTED)
             payload["sol"].append(
                 {
-                    "claim_id": str(claim.id),
+                    "claim_id": claim_id,
                     "status_before": status_before.value,
                     "status_after": claim.status.value,
-                    "unresolved": result.unresolved,
-                    "reason": result.reason,
+                    "unresolved": False,
+                    "reason": (assessment.reason if assessment is not None else None) or "cheap_assessment",
+                    "escalated": False,
                 }
             )
         return payload
 
-    def _queries_for(self, claim: Claim, event: Event) -> list[str]:
-        place = " ".join(part for part in (event.locality, event.province) if part)
-        base = " ".join(part for part in (claim.canonical_text, place) if part)
-        kind = canonicalize_claim_type(claim.claim_type)
-        extra = {
-            "declaracion": "discurso OR comunicado",
-            "cifra": "oficial OR boletín",
-            "documento": "oficial OR boletín",
-        }.get(kind)
-        queries = [base]
-        if extra:
-            queries.append(f"{base} {extra}")
-        return queries[: self.settings.max_verification_queries_per_claim]
+    def _plan_for(self, claim: Claim, event: Event) -> VerificationPlan:
+        fallback = heuristic_plan(claim, jurisdiction=self.settings.editorial_country_code)
+        provider = self._cheap_provider(self.planner_llm)
+        if provider is None:
+            return fallback
+        try:
+            planned = provider.generate_structured(
+                system_prompt=load_prompt("verification_plan.md"),
+                user_prompt=self._plan_prompt(event, claim),
+                schema=VerificationPlan,
+            )
+            return refine_plan(planned, fallback)
+        except _PLANNER_ERRORS:
+            return fallback
 
-    def _packet_for(
+    def _assess(
         self,
+        event: Event,
         claim: Claim,
+        packet: list[_PacketSource],
+        plan: VerificationPlan,
+    ) -> CheapClaimEvidenceAssessment | None:
+        provider = self._cheap_provider(self.assessor_llm)
+        if provider is None or not packet:
+            return None
+        try:
+            return provider.generate_structured(
+                system_prompt=load_prompt("claim_evidence_assessment.md"),
+                user_prompt=self._user_prompt(event, claim, packet, plan),
+                schema=CheapClaimEvidenceAssessment,
+            )
+        except _PLANNER_ERRORS:
+            return None
+
+    def _plan_prompt(self, event: Event, claim: Claim) -> str:
+        occurred = claim.occurred_at.isoformat() if claim.occurred_at else ""
+        when = event.started_at or event.detected_at
+        return "\n".join(
+            [
+                f"Suceso (contexto mínimo, no uses su fecha para la temporalidad del Claim): {event.title_internal}",
+                f"Detectado/inicio: {when}",
+                f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
+                f"canonical_text={claim.canonical_text}",
+                f"claim_type={canonicalize_claim_type(claim.claim_type)}",
+                f"importance={claim.importance.value} status={claim.status.value}",
+                f"occurred_at={occurred}",
+                f"subject={claim.subject or ''} predicate={claim.predicate or ''} "
+                f"object_text={claim.object_text or ''} normalized_value={claim.normalized_value or ''} "
+                f"unit={claim.unit or ''}",
+            ]
+        )
+
+    def _collect_hits(
+        self,
         search: SearchProvider,
         queries: list[str],
-        freshness: str,
-    ) -> tuple[list[_PacketSource], int]:
+        plan: VerificationPlan,
+        freshness: str | None,
+        since,
+        until,
+    ) -> list[SearchHit]:
+        official = [text for text in queries if "site:" in text.lower()]
+        general = [text for text in queries if "site:" not in text.lower()]
+        hits: list[SearchHit] = []
+        seen: set[str] = set()
+        per_query = self.settings.max_verification_results_per_query
+
+        def _run(texts: list[str]) -> int:
+            added = 0
+            for text in texts:
+                for hit in search.search(
+                    SearchQuery(text=text, count=per_query, freshness=freshness, since=since, until=until)
+                ):
+                    if not hit.url:
+                        continue
+                    canonical = canonicalize_url(hit.url) or hit.url
+                    if canonical in seen:
+                        continue
+                    seen.add(canonical)
+                    hits.append(hit)
+                    added += 1
+            return added
+
+        official_added = _run(official) if official else 0
+        need_general = (not official) or official_added == 0 or plan.independent_corroboration_required
+        if need_general and general:
+            _run(general)
+        return hits
+
+    def _packet_for(self, claim: Claim, hits: list[SearchHit]) -> tuple[list[_PacketSource], int]:
         packet: list[_PacketSource] = []
         seen: set[str] = set()
         ref = 1
@@ -269,11 +440,6 @@ class VerificationService:
                 _PacketSource(ref=ref, url=item.url, title=item.title or "", snippet=snippet, item=item)
             )
             ref += 1
-
-        hits: list[SearchHit] = []
-        per_query = self.settings.max_verification_results_per_query
-        for text in queries:
-            hits.extend(search.search(SearchQuery(text=text, count=per_query, freshness=freshness)))
 
         fetched = 0
         for hit in hits:
@@ -324,10 +490,19 @@ class VerificationService:
         except Exception:
             return None, None
         html = fetched.body or ""
+        content_type = getattr(fetched, "content_type", "") or ""
+        if not html or not is_extractable_document(fetched.url or url, content_type, html):
+            return None, None
         text = self.extract(html, fetched.url or url)
         return html, text
 
-    def _user_prompt(self, event: Event, claim: Claim, packet: list[_PacketSource]) -> str:
+    def _user_prompt(
+        self,
+        event: Event,
+        claim: Claim,
+        packet: list[_PacketSource],
+        plan: VerificationPlan | None = None,
+    ) -> str:
         kind = canonicalize_claim_type(claim.claim_type)
         occurred = claim.occurred_at.isoformat() if claim.occurred_at else ""
         lines = [
@@ -339,11 +514,43 @@ class VerificationService:
             f"subject={claim.subject or ''} predicate={claim.predicate or ''} "
             f"object_text={claim.object_text or ''} normalized_value={claim.normalized_value or ''} "
             f"unit={claim.unit or ''} occurred_at={occurred}",
-            "Fuentes (source_ref 1..N, snippet truncado; no hay HTML crudo ni el Event entero):",
         ]
+        if plan is not None:
+            lines.append(f"VerificationPlan={plan.model_dump_json()}")
+        lines.append("Fuentes (source_ref 1..N, snippet truncado; no hay HTML crudo ni el Event entero):")
         for src in packet:
             lines.append(f"{src.ref}. title={src.title} url={src.url}\nsnippet={src.snippet}")
         return "\n".join(lines)
+
+    def _apply_judgements(
+        self,
+        event: Event,
+        claim: Claim,
+        packet: list[_PacketSource],
+        assessment: CheapClaimEvidenceAssessment,
+        preferred: list[str],
+    ) -> tuple[int, int, bool]:
+        attached = 0
+        cited = 0
+        primary_support = False
+        by_ref = {src.ref: src for src in packet}
+        for row in assessment.judgements:
+            evidence_type = PERSISTABLE_JUDGEMENTS.get(row.relation)
+            if evidence_type is None:
+                continue
+            added, counted = self._attach_evidence(event, claim, by_ref, row.source_ref, evidence_type, row)
+            attached += added
+            cited += counted
+            src = by_ref.get(row.source_ref)
+            if (
+                counted
+                and row.relation == EvidenceJudgementType.SUPPORTS
+                and src is not None
+                and is_preferred_domain(src.url, preferred)
+            ):
+                primary_support = True
+        self.session.flush()
+        return attached, cited, primary_support
 
     def _apply_result(
         self,
@@ -356,39 +563,11 @@ class VerificationService:
         attached = 0
         cited = 0
         for row in result.evidence:
-            src = by_ref.get(row.source_ref)
-            if src is None:
-                continue
-            item = self._materialize_cited(src)
-            if item is None:
-                continue
-            excerpt = (row.excerpt or "").strip() or None
-            if excerpt and not excerpt_in_source(
-                excerpt, item.clean_text, item.excerpt, item.title, src.snippet
-            ):
-                continue
-            if any(existing.source_item_id == item.id for existing in claim.evidence):
-                cited += 1
-                continue
-            evidence = ClaimEvidence(
-                claim_id=claim.id,
-                source_item_id=item.id,
-                evidence_type=row.evidence_type,
-                excerpt=excerpt,
-                source_url=item.url,
-                confidence=row.confidence,
+            added, counted = self._attach_evidence(
+                event, claim, by_ref, row.source_ref, row.evidence_type, row
             )
-            self.session.add(evidence)
-            claim.evidence.append(evidence)
-            _, created_link = self.event_service.attach_source(
-                event,
-                item.id,
-                relation_type=EventSourceRelation.ADDITIONAL,
-                is_primary=False,
-            )
-            if created_link:
-                attached += 1
-            cited += 1
+            attached += added
+            cited += counted
 
         self.session.flush()
         if result.unresolved:
@@ -397,6 +576,46 @@ class VerificationService:
         else:
             claim.status = clamp_supported_status(claim, result.status)
         return attached, cited
+
+    def _attach_evidence(
+        self,
+        event: Event,
+        claim: Claim,
+        by_ref: dict[int, _PacketSource],
+        source_ref: int,
+        evidence_type: EvidenceType,
+        row: VerificationResult | CheapEvidenceJudgement | Any,
+    ) -> tuple[int, int]:
+        src = by_ref.get(source_ref)
+        if src is None:
+            return 0, 0
+        item = self._materialize_cited(src)
+        if item is None:
+            return 0, 0
+        excerpt = (getattr(row, "excerpt", None) or "").strip() or None
+        if excerpt and not excerpt_in_source(
+            excerpt, item.clean_text, item.excerpt, item.title, src.snippet
+        ):
+            return 0, 0
+        if any(existing.source_item_id == item.id for existing in claim.evidence):
+            return 0, 1
+        evidence = ClaimEvidence(
+            claim_id=claim.id,
+            source_item_id=item.id,
+            evidence_type=evidence_type,
+            excerpt=excerpt,
+            source_url=item.url,
+            confidence=getattr(row, "confidence", None),
+        )
+        self.session.add(evidence)
+        claim.evidence.append(evidence)
+        _, created_link = self.event_service.attach_source(
+            event,
+            item.id,
+            relation_type=EventSourceRelation.ADDITIONAL,
+            is_primary=False,
+        )
+        return (1 if created_link else 0), 1
 
     def _materialize_cited(self, src: _PacketSource) -> SourceItem | None:
         if src.item is not None:
@@ -407,8 +626,8 @@ class VerificationService:
         if existing is not None:
             src.item = existing
             return existing
-        html = src.fetched_html or ""
-        text = src.fetched_text or src.snippet
+        html = postgres_safe_text(src.fetched_html or "") or ""
+        text = postgres_safe_text(src.fetched_text or src.snippet)
         if not html and not text:
             return None
         domain = url_domain(canonical)

@@ -55,6 +55,36 @@ Una cifra grande o central no es Claim solo por ser cifra. Evaluá si hay valor 
 
 Preferí pocos claims HIGH o MEDIUM útiles a muchos LOW.
 
+Claims materiales y atómicos:
+
+Cada Claim representa normalmente una única proposición material que pueda verificarse o contradecirse de forma independiente. Si una frase mezcla varias afirmaciones importantes que requieren evidencia distinta, separalas.
+
+Incorrecto (un solo Claim compuesto): Cristina Kirchner designó a Natalia Laura Federman, ciudadana británica, en un cargo de alta sensibilidad.
+
+Mejor: Cristina Kirchner designó a Natalia Laura Federman como Directora Nacional de Derechos Humanos del Ministerio de Seguridad.
+
+Y, si es material para la historia: Natalia Laura Federman tenía ciudadanía británica al momento de su designación.
+
+No combines nacionalidad, cargo y caracterización editorial en el mismo Claim. No conserves automáticamente caracterizaciones editoriales (“cargo de alta sensibilidad”, “polémica medida”).
+
+Acusaciones materiales:
+
+Las acusaciones importantes SÍ deben generar Claims. Ejemplo: Natalia Laura Federman tuvo acceso total a información estratégica de las Fuerzas Armadas. Extraela como `hecho` HIGH. No asumas que es verdadera: Verification la resolverá.
+
+Caracterizaciones vagas:
+
+No persistas normalmente frases como “La designación generó profundas críticas desde sectores militares y afines” cuando no identifican quién critica, son caracterización editorial, no son centrales o no aportan una afirmación material útil.
+
+Evitá salvo sujeto concreto y centralidad editorial: “profundas críticas”; “fuerte rechazo”; “cargo sensible”; “polémica medida”; “sectores afines”.
+
+Acción judicial ≠ veracidad de la acusación:
+
+Manténé estrictamente separados “X presentó una denuncia contra Y por delito Z” y “Y cometió delito Z”. Demostrar que una denuncia existió NO demuestra que lo denunciado sea verdadero. No extraigas como hecho la autoría del delito si la fuente solo informa una denuncia, acusación o imputación.
+
+Dato oficial ≠ proyección o estimación privada:
+
+Una cifra de un organismo oficial (IPC de INDEC, resolución tarifaria, decreto) es un Claim distinto de una estimación, proyección o expectativa de consultoras. No conviertas “la inflación de agosto será 1,4%” en un hecho confirmado si se trata de una estimación. El `canonical_text` debe dejar explícito que es estimación, proyección o dato oficial, según corresponda.
+
 Cada claim debe tener evidencia rastreable a un `source_ref` de la lista. El `excerpt` tiene que ser una cita corta que aparezca en el snippet de esa fuente; no inventes frases ni parafrasees.
 
 No uses HTML. No pidas ni completes páginas enteras.

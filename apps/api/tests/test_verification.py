@@ -21,7 +21,17 @@ from app.models import Claim, ClaimEvidence, EventSource, PipelineRun, SourceIte
 from app.providers.base import SearchHit
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM, RecordingFetcher
 from app.schemas import EventCreate, SourceCreate, SourceItemCreate
-from app.schemas.verification import VerificationEvidence, VerificationResult
+from app.schemas.verification import (
+    CheapClaimEvidenceAssessment,
+    CheapEvidenceJudgement,
+    EvidenceJudgementType,
+    VerificationEvidence,
+    VerificationPlan,
+    VerificationResult,
+    VerificationSubject,
+    VerificationTarget,
+    TemporalScope,
+)
 from app.services.claim_service import CLAIM_STAGE
 from app.services.event_service import EventService
 from app.services.source_item_service import SourceItemService
@@ -92,6 +102,7 @@ def _claim(session: Session, event, *, text: str, claim_type: str, importance: C
         object_text=overrides.get("object_text"),
         normalized_value=overrides.get("normalized_value"),
         unit=overrides.get("unit"),
+        occurred_at=overrides.get("occurred_at"),
     )
     session.add(row)
     session.flush()
@@ -134,10 +145,20 @@ def _sol(**overrides) -> VerificationResult:
     return VerificationResult(**payload)
 
 
-def _service(session: Session, llm: FakeStructuredLLM, search: FakeSearchProvider, fetcher: RecordingFetcher | None = None):
+def _service(
+    session: Session,
+    llm: FakeStructuredLLM,
+    search: FakeSearchProvider,
+    fetcher: RecordingFetcher | None = None,
+    *,
+    planner: FakeStructuredLLM | None = None,
+    assessor: FakeStructuredLLM | None = None,
+):
     return VerificationService(
         session,
         llm=llm,
+        planner_llm=planner,
+        assessor_llm=assessor,
         search=search,
         fetcher=fetcher or RecordingFetcher(),
     )
@@ -621,3 +642,161 @@ def test_admin_verify_conflict_when_running(db_session: Session, monkeypatch) ->
         response = client.post(f"/api/v1/admin/events/{event.id}/verify")
     assert response.status_code == 409
     assert queued == []
+
+
+def test_historical_claim_search_omits_pd_even_if_event_is_today(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Designación", content_hash="h1"
+    )
+    event = _event(db_session, item, started_at=datetime.now(timezone.utc))
+    claim = _claim(
+        db_session,
+        event,
+        text="Natalia Laura Federman fue designada Directora Nacional de Derechos Humanos",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.UNCERTAIN,
+        occurred_at=datetime(2011, 6, 9, tzinfo=timezone.utc),
+    )
+    llm = FakeStructuredLLM(
+        {"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True, reason="faltan fuentes")}
+    )
+    search = FakeSearchProvider([])
+    result = _service(db_session, llm, search).verify(event.id, trigger="admin")
+    assert result["verified"] == 1
+    assert search.queries
+    assert all(query.freshness is None for query in search.queries)
+    assert result["freshness"][str(claim.id)] is None
+    assert result["temporal_scope"][str(claim.id)] == TemporalScope.HISTORICAL.value
+    assert any("2011" in query.text for query in search.queries)
+
+
+def test_official_site_query_falls_back_to_general_search(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Designación", content_hash="h1"
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Se publicó la designación en el Boletín Oficial",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.UNCERTAIN,
+        occurred_at=datetime(2011, 6, 9, tzinfo=timezone.utc),
+    )
+    general_url = "https://diario.test/nota"
+    hits_by_query: dict[str, list[SearchHit]] = {}
+    search = FakeSearchProvider(hits_by_query)
+    llm = FakeStructuredLLM(
+        {"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True, reason="sin primaria")}
+    )
+    from app.services.evidence_source_registry import preferred_domains
+    from app.services.verification_plan import build_verification_queries, heuristic_plan
+
+    plan = heuristic_plan(claim)
+    domains = preferred_domains(plan.jurisdiction, plan.verification_target.value, plan.subject.value)
+    queries = build_verification_queries(claim, plan, domains, limit=3)
+    for query in queries:
+        if "site:" in query:
+            hits_by_query[query] = []
+        else:
+            hits_by_query[query] = [SearchHit(title="Nota", url=general_url, snippet="mencionan la designación")]
+    result = _service(db_session, llm, search).verify(event.id, trigger="admin")
+    assert any("site:boletinoficial.gob.ar" in query.text for query in search.queries)
+    assert any("site:" not in query.text for query in search.queries)
+    assert result["queries"][str(claim.id)]
+    assert any("site:" not in query for query in result["queries"][str(claim.id)])
+
+
+def test_cheap_assessment_can_skip_sol_when_primary_supports(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/base",
+        title="Base",
+        body="La designación se publicó.",
+        content_hash="h1",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Se designó a la funcionaria en el Ministerio de Seguridad",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    _evidence(db_session, claim, item, excerpt="La designación se publicó")
+    official = "https://www.boletinoficial.gob.ar/detalle/x"
+    page = "<article><p>Dase por designada en el Ministerio de Seguridad.</p></article>"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=2,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="Dase por designada",
+                        reason="el boletín nombra el cargo",
+                    )
+                ],
+                ambiguous=False,
+                reason="registro oficial",
+            )
+        }
+    )
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SUPPORTED)})
+    search = FakeSearchProvider(
+        [SearchHit(title="Decreto", url=official, snippet="Dase por designada en el Ministerio de Seguridad.")]
+    )
+    result = _service(
+        db_session, sol, search, RecordingFetcher({official: page}), assessor=assessor
+    ).verify(event.id, trigger="admin")
+    assert result["escalated"][str(claim.id)] is False
+    assert "VerificationResult" not in sol.calls
+    db_session.refresh(claim)
+    assert claim.status in {ClaimStatus.SUPPORTED, ClaimStatus.SINGLE_SOURCE}
+
+
+def test_official_hit_does_not_promote_without_semantic_support(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="El ministro habló", content_hash="h1"
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="El ministro anunció que el decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.MEDIUM,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    official = "https://boletinoficial.gob.ar/otra"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.DOES_NOT_ESTABLISH,
+                        excerpt=None,
+                        reason="no sostiene el anuncio",
+                    )
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SUPPORTED)})
+    search = FakeSearchProvider(
+        [SearchHit(title="Boletín", url=official, snippet="Otra norma distinta")]
+    )
+    _service(db_session, sol, search, assessor=assessor).verify(event.id, trigger="admin")
+    db_session.refresh(claim)
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    assert "VerificationResult" not in sol.calls

@@ -238,3 +238,23 @@ def test_enrich_content_does_not_replace_body_with_title(db_session: Session) ->
 
     assert updated is False
     assert item.clean_text == summary
+
+
+def test_ingest_strips_nul_bytes_from_text_fields(db_session: Session) -> None:
+    source = _source(db_session)
+    item = SourceItemService(db_session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url="https://www.indec.gob.ar/uploads/ipc.pdf",
+            canonical_url="https://www.indec.gob.ar/uploads/ipc.pdf",
+            content_hash="h-nul",
+            title="IPC",
+            raw_text="%PDF-1.7\x00trailer",
+            clean_text="El IPC subió 2,1%\x00",
+            excerpt="El IPC subió 2,1%\x00",
+        )
+    ).item
+    db_session.flush()
+    assert "\x00" not in (item.raw_text or "")
+    assert item.clean_text == "El IPC subió 2,1%"
+    assert item.excerpt == "El IPC subió 2,1%"

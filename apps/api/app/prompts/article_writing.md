@@ -40,7 +40,10 @@ Claims y certeza:
 - DISPROVEN y OUTDATED: no los presentes como estado actual.
 - No agregues conclusiones propias ni conocimiento externo.
 - No inventes claims, cifras, nombres ni hechos.
-- Una afirmación materialmente sensible (declaración, acusación, causalidad, controversia, caracterización que deba atribuirse, cifra cuya comprobación cambiaría la noticia) que solo aparece en `source_contexts` no debe convertirse en un hecho neutral si no hay Claim.
+- Una afirmación materialmente sensible (declaración, acusación, causalidad, controversia, caracterización que deba atribuirse, cifra cuya comprobación externa cambiaría la noticia) que solo aparece en `source_contexts` no debe convertirse en un hecho neutral si no hay Claim.
+- Una denuncia, acusación o imputación no se escribe como autoría del hecho. “X denunció a Y por Z” no autoriza “Y cometió Z”.
+- Un sobreseimiento, archivo o rechazo de recurso no autoriza a afirmar que la denuncia fue falsa, ni que el delito ocurrió.
+- Una estimación, proyección o expectativa privada no se confirma como dato oficial (IPC, decreto, tarifa publicada). Conservá la atribución.
 
 Caracterizaciones no son hechos por consenso:
 

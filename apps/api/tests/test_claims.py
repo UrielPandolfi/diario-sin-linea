@@ -996,4 +996,10 @@ def test_extraction_prompt_covers_selective_claim_philosophy() -> None:
     assert "$108,2 millones" in prompt
     assert "derivables matemáticamente" in prompt
     assert "`[]` es un resultado válido" in prompt or "es un resultado válido" in prompt
+    assert "única proposición material" in prompt
+    assert "profundas críticas" in prompt
+    assert "Y cometió delito Z" in prompt
+    assert "estimación, proyección o dato oficial" in prompt
+    assert "tuvo acceso total a información estratégica" in prompt
+    assert "No combines nacionalidad" in prompt
 

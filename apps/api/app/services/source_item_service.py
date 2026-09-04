@@ -5,7 +5,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.source_content import has_extracted_body, is_extracted_body
-from app.core.text import content_fingerprint
+from app.core.text import content_fingerprint, postgres_safe_text
 from app.domain.enums import SourceItemStatus
 from app.models import SourceItem
 from app.repositories import SourceItemRepository
@@ -32,6 +32,15 @@ class SourceItemService:
         self.repo = SourceItemRepository(session)
 
     def ingest(self, data: SourceItemCreate) -> IngestOutcome:
+        data = data.model_copy(
+            update={
+                "title": postgres_safe_text(data.title),
+                "raw_text": postgres_safe_text(data.raw_text),
+                "clean_text": postgres_safe_text(data.clean_text),
+                "excerpt": postgres_safe_text(data.excerpt),
+                "author": postgres_safe_text(data.author),
+            }
+        )
         existing = self._find_publication(data)
         if existing is not None:
             updated = self._refresh_content(existing, data)
@@ -63,6 +72,11 @@ class SourceItemService:
         author: str | None = None,
         published_at: datetime | None = None,
     ) -> bool:
+        title = postgres_safe_text(title)
+        raw_text = postgres_safe_text(raw_text)
+        clean_text = postgres_safe_text(clean_text)
+        excerpt = postgres_safe_text(excerpt)
+        author = postgres_safe_text(author)
         changed = False
         if not _is_blank(url) and url != item.url:
             item.url = url
@@ -128,11 +142,11 @@ class SourceItemService:
         item.url = data.url
         item.canonical_url = data.canonical_url or item.canonical_url
         item.external_id = data.external_id or item.external_id
-        item.title = data.title
-        item.raw_text = data.raw_text
-        item.clean_text = data.clean_text
-        item.excerpt = data.excerpt
-        item.author = data.author
+        item.title = postgres_safe_text(data.title)
+        item.raw_text = postgres_safe_text(data.raw_text)
+        item.clean_text = postgres_safe_text(data.clean_text)
+        item.excerpt = postgres_safe_text(data.excerpt)
+        item.author = postgres_safe_text(data.author)
         item.published_at = data.published_at
         item.processing_status = SourceItemStatus.PENDING
         return True

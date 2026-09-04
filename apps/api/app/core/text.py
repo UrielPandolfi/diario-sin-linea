@@ -73,3 +73,11 @@ def usable_text(*candidates: str | None) -> str:
         if text and not is_placeholder_text(text):
             return text
     return ""
+
+
+def postgres_safe_text(value: str | None) -> str | None:
+    """Postgres text/varchar reject NUL bytes (e.g. fetched PDFs decoded as text)."""
+    if value is None:
+        return None
+    cleaned = value.replace("\x00", "")
+    return cleaned if cleaned else None

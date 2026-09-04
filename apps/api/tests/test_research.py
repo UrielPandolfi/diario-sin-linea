@@ -482,7 +482,7 @@ def test_admin_research_conflict_when_running(db_session: Session, monkeypatch) 
     assert queued == []
 
 
-def test_brave_always_sends_freshness(monkeypatch) -> None:
+def test_brave_omits_freshness_when_unspecified(monkeypatch) -> None:
     captured: dict = {}
 
     class FakeResponse:
@@ -511,8 +511,12 @@ def test_brave_always_sends_freshness(monkeypatch) -> None:
     from app.providers.brave import BraveSearchProvider
 
     hits = BraveSearchProvider(api_key="k").search(SearchQuery(text="q", count=3))
-    assert captured["params"]["freshness"] == "pw"
+    assert "freshness" not in captured["params"]
     assert hits[0].url == "https://a.test/n"
+
+    captured.clear()
+    BraveSearchProvider(api_key="k").search(SearchQuery(text="q", count=3, freshness="pw"))
+    assert captured["params"]["freshness"] == "pw"
 
 
 def test_code_queries_use_headline_locality_and_date(db_session: Session) -> None:

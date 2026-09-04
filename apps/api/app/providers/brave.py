@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 
 from app.providers.base import SearchHit, SearchQuery
@@ -12,9 +14,11 @@ class BraveSearchProvider:
         freshness = query.freshness
         if not freshness and query.since and query.until:
             freshness = f"{query.since.date()}to{query.until.date()}"
-        if not freshness:
-            freshness = "pw"
-        params["freshness"] = freshness
+        elif not freshness and query.since:
+            end = query.until.date() if query.until else datetime.now(timezone.utc).date()
+            freshness = f"{query.since.date()}to{end}"
+        if freshness:
+            params["freshness"] = freshness
         with httpx.Client(timeout=20.0) as client:
             response = client.get(
                 "https://api.search.brave.com/res/v1/web/search",

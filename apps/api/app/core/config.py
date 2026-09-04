@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     max_standard_event_sources: int = 4
     max_escalated_event_sources: int = 8
     max_verification_claims_per_event: int = 5
-    max_verification_queries_per_claim: int = 2
+    max_verification_queries_per_claim: int = 3
     max_verification_results_per_query: int = 3
     max_writing_claims_per_event: int = 40
     max_writing_sources_per_event: int = 20

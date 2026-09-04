@@ -4,7 +4,8 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from app.core.text import normalize_name
-from app.domain.enums import ClaimImportance, ClaimStatus
+from app.core.urls import url_domain
+from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType
 from app.models import Claim
 
 CANONICAL_TYPES = frozenset({"hecho", "estado", "declaracion", "cifra", "documento"})
@@ -33,6 +34,30 @@ def canonicalize_claim_type(raw: str | None) -> str:
     return token
 
 
+def independent_support_count(claim: Claim) -> int:
+    tokens: set[str] = set()
+    for row in getattr(claim, "evidence", None) or []:
+        if getattr(row, "evidence_type", None) != EvidenceType.SUPPORTS:
+            continue
+        item = getattr(row, "source_item", None)
+        domain = ""
+        if item is not None:
+            source = getattr(item, "source", None)
+            if source is not None and getattr(source, "domain", None):
+                domain = source.domain
+            if not domain:
+                domain = url_domain(getattr(item, "canonical_url", None) or getattr(item, "url", "") or "")
+        if not domain:
+            domain = url_domain(getattr(row, "source_url", None) or "")
+        if domain:
+            tokens.add(domain.lower())
+    return len(tokens)
+
+
+def is_well_supported(claim: Claim) -> bool:
+    return claim.status == ClaimStatus.SUPPORTED and independent_support_count(claim) >= 2
+
+
 def is_vetoed(claim: Claim) -> bool:
     if claim.status in VETO_STATUSES:
         return True
@@ -48,11 +73,14 @@ def is_vetoed(claim: Claim) -> bool:
 
 def policy_selects(claim: Claim) -> bool:
     kind = canonicalize_claim_type(claim.claim_type)
+    well = is_well_supported(claim)
     if kind == "declaracion":
-        return True
-    if kind in HARD_TYPES and claim.importance == ClaimImportance.HIGH and claim.status in HARD_STATUSES:
+        return not well
+    if kind in HARD_TYPES and claim.importance == ClaimImportance.HIGH:
         return True
     if claim.importance == ClaimImportance.HIGH and claim.status == ClaimStatus.SINGLE_SOURCE:
+        return True
+    if claim.importance == ClaimImportance.HIGH and kind == "hecho":
         return True
     return False
 

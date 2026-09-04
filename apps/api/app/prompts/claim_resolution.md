@@ -17,6 +17,11 @@ Reglas por assertion:
 - SUPPORTS y CONTRADICTS sobre la misma assertion → CONFLICTING.
 - UNCERTAIN si la evidencia de esa assertion no alcanza.
 
+No trates como la misma assertion ni como CONFLICTING automático:
+
+- la existencia de una denuncia, imputación o acusación versus la veracidad de lo denunciado;
+- un dato oficial (IPC, decreto, fallo) versus una proyección, estimación privada o hipótesis de parte.
+
 Devolvé JSON:
 
 - items: lista de
