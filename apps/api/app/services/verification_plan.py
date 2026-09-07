@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from app.core.clock import utc_now
@@ -20,11 +21,68 @@ from app.services.evidence_source_registry import is_preferred_domain
 from app.services.verification_policy import canonicalize_claim_type, independent_support_count
 
 _YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
 _DATED_SCOPES = {
     TemporalScope.HISTORICAL,
     TemporalScope.EXACT_DATE,
     TemporalScope.EXACT_PERIOD,
 }
+_TARIFF_TOKENS = (
+    "tarifa",
+    "factura",
+    "boleta",
+    "bonificación",
+    "bonificacion",
+    "electricidad",
+    "gas natural",
+    "agua potable",
+    "servicio de agua",
+    "cloaca",
+    "servicio público",
+    "servicio publico",
+    "ente regulador",
+    "cuadro tarifario",
+    "aumento tarifario",
+    "revisión tarifaria",
+    "revision tarifaria",
+    "enre",
+    "enargas",
+    "eras",
+    "aysa",
+    "edenor",
+    "edesur",
+    "metrogas",
+    "camuzzi",
+)
+_JUDICIAL_ACT_MARKERS = (
+    "denuncia penal",
+    "presentó una denuncia",
+    "presento una denuncia",
+    "presentó denuncia",
+    "presento denuncia",
+    "radicó una denuncia",
+    "radico una denuncia",
+    "formuló una denuncia",
+    "formulo una denuncia",
+    "demanda judicial",
+    "recurso de casación",
+    "recurso de casacion",
+    "recurso extraordinario",
+    "sobreseimiento",
+    "sobreseyó",
+    "sobreseyo",
+    "sentencia",
+    "fallo judicial",
+    "procesamiento",
+    "desestimó el recurso",
+    "desestimo el recurso",
+    "suprema corte",
+    "corte suprema",
+    "casación",
+    "casacion",
+)
+_BELOW_MARKERS = ("por debajo", "menor que", "inferior a", "menos de", "menos que")
+_ABOVE_MARKERS = ("por encima", "mayor que", "superior a", "más de", "mas de", "más que")
 
 
 def year_hint_from_claim(claim: Claim) -> int | None:
@@ -54,6 +112,23 @@ def temporal_scope_for_claim(claim: Claim, year_hint: int | None, *, now: dateti
     return TemporalScope.TIMELESS
 
 
+def normalize_temporal_scope(plan: VerificationPlan, *, now: datetime | None = None) -> VerificationPlan:
+    clock = now or utc_now()
+    scope = plan.temporal_scope
+    hint = plan.year_hint
+    if hint is not None and hint >= clock.year and scope == TemporalScope.HISTORICAL:
+        scope = TemporalScope.RECENT
+    return plan.model_copy(update={"temporal_scope": scope})
+
+
+def _looks_judicial_act(text: str) -> bool:
+    return any(marker in text for marker in _JUDICIAL_ACT_MARKERS)
+
+
+def _looks_regulated_tariff(text: str) -> bool:
+    return any(token in text for token in _TARIFF_TOKENS)
+
+
 def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> VerificationPlan:
     settings = get_settings()
     country = (jurisdiction or settings.editorial_country_code or "AR").strip().upper() or "AR"
@@ -64,21 +139,19 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
     subject = VerificationSubject.GENERAL
     primary = False
     corroboration = False
-    if kind == "documento":
+    text = (claim.canonical_text or "").lower()
+    if _looks_judicial_act(text):
+        target = VerificationTarget.JUDICIAL_RECORD
+        subject = VerificationSubject.JUDICIAL_CASE
+        primary = True
+    elif kind == "documento":
         target = VerificationTarget.OFFICIAL_RECORD
         subject = VerificationSubject.LAW_OR_DECREE
         primary = True
     elif kind == "cifra":
-        text = (claim.canonical_text or "").lower()
-        looks_stat = any(
-            token in text for token in ("ipc", "indec", "desempleo", "pobreza", "inflación", "inflacion")
-        )
-        looks_tariff = any(
-            token in text for token in ("tarifa", "factura", "bonificación", "bonificacion")
-        )
-        if looks_tariff and not looks_stat:
-            target = VerificationTarget.OFFICIAL_LAW
-            subject = VerificationSubject.LAW_OR_DECREE
+        if _looks_regulated_tariff(text):
+            target = VerificationTarget.OFFICIAL_RECORD
+            subject = VerificationSubject.REGULATED_TARIFF
         else:
             target = VerificationTarget.OFFICIAL_STATISTICS
             subject = VerificationSubject.STATISTICS
@@ -87,33 +160,40 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
         target = VerificationTarget.PRIMARY_STATEMENT
         subject = VerificationSubject.PUBLIC_STATEMENT
     elif kind == "hecho" and claim.importance == ClaimImportance.HIGH:
-        text = (claim.canonical_text or "").lower()
-        if any(
-            token in text
-            for token in ("sobreseimiento", "sobreseyó", "sobreseyo", "casación", "casacion")
-        ):
-            target = VerificationTarget.JUDICIAL_RECORD
-            subject = VerificationSubject.JUDICIAL_CASE
-            primary = True
-        elif claim.status in {ClaimStatus.SINGLE_SOURCE, ClaimStatus.UNCERTAIN, ClaimStatus.CONFLICTING}:
+        if claim.status in {ClaimStatus.SINGLE_SOURCE, ClaimStatus.UNCERTAIN, ClaimStatus.CONFLICTING}:
             subject = VerificationSubject.ACCUSATION
             target = VerificationTarget.INDEPENDENT_CORROBORATION
             corroboration = True
-    return VerificationPlan(
-        verification_target=target,
-        temporal_scope=scope,
-        subject=subject,
-        jurisdiction=country,
-        primary_source_required=primary,
-        independent_corroboration_required=corroboration,
-        year_hint=year_hint,
-        search_terms=[],
+    return normalize_temporal_scope(
+        VerificationPlan(
+            verification_target=target,
+            temporal_scope=scope,
+            subject=subject,
+            jurisdiction=country,
+            primary_source_required=primary,
+            independent_corroboration_required=corroboration,
+            year_hint=year_hint,
+            search_terms=[],
+        )
     )
 
 
-def refine_plan(planned: VerificationPlan, fallback: VerificationPlan) -> VerificationPlan:
-    """Keep LLM structure, but don't copy the Event's recency onto an undated/historical Claim."""
-    year_hint = planned.year_hint if planned.year_hint is not None else fallback.year_hint
+def _choose_year_hint(planned: VerificationPlan, fallback: VerificationPlan, *, now: datetime) -> int | None:
+    planned_year = planned.year_hint
+    fallback_year = fallback.year_hint
+    if planned_year is None:
+        return fallback_year
+    if fallback_year is None:
+        return planned_year
+    if planned_year >= now.year and fallback_year < now.year:
+        return fallback_year
+    return planned_year
+
+
+def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: datetime | None = None) -> VerificationPlan:
+    """Keep LLM structure, but correct impossible temporal/target combinations in code."""
+    clock = now or utc_now()
+    year_hint = _choose_year_hint(planned, fallback, now=clock)
     scope = planned.temporal_scope
     if fallback.temporal_scope == TemporalScope.HISTORICAL and scope in {
         TemporalScope.CURRENT,
@@ -128,31 +208,95 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan) -> Verifi
         scope = TemporalScope.TIMELESS
     target = planned.verification_target
     subject = planned.subject
-    if (
-        fallback.verification_target == VerificationTarget.OFFICIAL_LAW
-        and planned.verification_target == VerificationTarget.OFFICIAL_STATISTICS
-    ):
+    if fallback.subject == VerificationSubject.REGULATED_TARIFF:
+        subject = fallback.subject
+        if planned.verification_target == VerificationTarget.OFFICIAL_STATISTICS:
+            target = fallback.verification_target
+        elif planned.verification_target in {
+            VerificationTarget.OFFICIAL_RECORD,
+            VerificationTarget.OFFICIAL_LAW,
+        }:
+            target = planned.verification_target
+        else:
+            target = fallback.verification_target
+    if fallback.verification_target == VerificationTarget.JUDICIAL_RECORD:
         target = fallback.verification_target
         subject = fallback.subject
-    if (
-        fallback.verification_target == VerificationTarget.JUDICIAL_RECORD
-        and planned.verification_target
-        in {VerificationTarget.OFFICIAL_RECORD, VerificationTarget.GENERAL_WEB}
-    ):
-        target = fallback.verification_target
-        subject = fallback.subject
-    return planned.model_copy(
-        update={
-            "year_hint": year_hint,
-            "temporal_scope": scope,
-            "verification_target": target,
-            "subject": subject,
-            "independent_corroboration_required": (
-                planned.independent_corroboration_required or fallback.independent_corroboration_required
-            ),
-            "primary_source_required": planned.primary_source_required or fallback.primary_source_required,
-        }
+    return normalize_temporal_scope(
+        planned.model_copy(
+            update={
+                "year_hint": year_hint,
+                "temporal_scope": scope,
+                "verification_target": target,
+                "subject": subject,
+                "independent_corroboration_required": (
+                    planned.independent_corroboration_required or fallback.independent_corroboration_required
+                ),
+                "primary_source_required": planned.primary_source_required or fallback.primary_source_required,
+            }
+        ),
+        now=clock,
     )
+
+
+def is_numeric_comparison_claim(claim: Claim) -> bool:
+    text = (claim.canonical_text or "").casefold()
+    return any(marker in text for marker in _BELOW_MARKERS) or any(
+        marker in text for marker in _ABOVE_MARKERS
+    )
+
+
+def _parse_magnitudes(text: str) -> list[float]:
+    values: list[float] = []
+    for raw in _NUMBER_RE.findall(text or ""):
+        if re.fullmatch(r"(?:19|20)\d{2}", raw):
+            continue
+        values.append(float(raw.replace(",", ".")))
+    return values
+
+
+def _claim_magnitudes(claim: Claim) -> list[float]:
+    values = _parse_magnitudes(claim.canonical_text or "")
+    raw = getattr(claim, "normalized_value", None)
+    if raw:
+        try:
+            parsed = float(str(raw).replace(",", "."))
+        except ValueError:
+            parsed = None
+        if parsed is not None and parsed not in values:
+            values.append(parsed)
+    return values
+
+
+def try_resolve_numeric_comparison(
+    claim: Claim,
+    siblings: Sequence[Claim] | None = None,
+) -> ClaimStatus | None:
+    text = (claim.canonical_text or "").casefold()
+    if any(marker in text for marker in _BELOW_MARKERS):
+        direction = "lt"
+    elif any(marker in text for marker in _ABOVE_MARKERS):
+        direction = "gt"
+    else:
+        return None
+    own = _claim_magnitudes(claim)
+    if not own:
+        return None
+    extras: list[float] = []
+    for sibling in siblings or []:
+        if getattr(sibling, "id", None) == getattr(claim, "id", None):
+            continue
+        if canonicalize_claim_type(getattr(sibling, "claim_type", None)) != "cifra":
+            continue
+        if getattr(sibling, "status", None) != ClaimStatus.SUPPORTED:
+            continue
+        extras.extend(_claim_magnitudes(sibling))
+    threshold = own[-1]
+    left = [value for value in extras if value != threshold]
+    if not left:
+        return None
+    matched = all(value < threshold for value in left) if direction == "lt" else all(value > threshold for value in left)
+    return ClaimStatus.SUPPORTED if matched else ClaimStatus.DISPROVEN
 
 
 def freshness_for_plan(plan: VerificationPlan) -> str | None:
@@ -285,3 +429,22 @@ def needs_sol_after_assessment(
             return True
         return False
     return False
+
+
+def apply_primary_requirement(
+    claim: Claim,
+    status: ClaimStatus,
+    plan: VerificationPlan,
+    *,
+    primary_supports: bool,
+) -> ClaimStatus:
+    count = independent_support_count(claim)
+    if status != ClaimStatus.SUPPORTED:
+        return status
+    if plan.primary_source_required and not primary_supports:
+        return ClaimStatus.SINGLE_SOURCE if count >= 1 else ClaimStatus.UNCERTAIN
+    if count >= 2:
+        return ClaimStatus.SUPPORTED
+    if count == 1:
+        return ClaimStatus.SINGLE_SOURCE
+    return ClaimStatus.UNCERTAIN

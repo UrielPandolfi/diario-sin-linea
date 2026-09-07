@@ -16,11 +16,14 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-API_ROOT = ROOT / "apps" / "api"
+_HOST_API = ROOT / "apps" / "api"
+API_ROOT = _HOST_API if (_HOST_API / "app").is_dir() else ROOT
 FIXTURES = API_ROOT / "tests" / "fixtures" / "editorial_cases"
 OUT_DIR = ROOT / ".editorial-evals"
 
 sys.path.insert(0, str(API_ROOT))
+
+EVAL_SLUG_PREFIX = "editorial-eval-"
 
 CASE_FILES = (
     "01_federman.json",
@@ -51,13 +54,139 @@ def _parse_dt(value: str | None) -> datetime | None:
     return datetime.fromisoformat(value)
 
 
+def _eval_trigger(case_id: str) -> str:
+    return f"editorial_eval:{case_id}"
+
+
+def _eval_slug(case_id: str) -> str:
+    return f"{EVAL_SLUG_PREFIX}{case_id}"
+
+
+def _json_str(column, key: str):
+    return column[key].as_string()
+
+
+def _purge_eval_case(session, case: dict) -> None:
+    """Remove prior rows for this eval case only. Never touches monitored RSS sources or their events."""
+    from sqlalchemy import delete, func, select
+
+    from app.models import Event, EventSource, LlmUsage, PipelineRun, Source, SourceItem
+
+    case_id = case["id"]
+    trigger = _eval_trigger(case_id)
+    slug = _eval_slug(case_id)
+    fixture_url = case["url"]
+
+    event_ids: set = set()
+    event_ids.update(session.scalars(select(Event.id).where(Event.slug == slug)))
+    event_ids.update(
+        eid
+        for eid in session.scalars(
+            select(PipelineRun.event_id).where(
+                _json_str(PipelineRun.metadata_json, "trigger") == trigger,
+                PipelineRun.event_id.is_not(None),
+            )
+        )
+        if eid is not None
+    )
+    event_ids.update(
+        session.scalars(
+            select(Event.id)
+            .join(EventSource, EventSource.event_id == Event.id)
+            .join(SourceItem, SourceItem.id == EventSource.source_item_id)
+            .join(Source, Source.id == SourceItem.source_id)
+            .where(
+                SourceItem.canonical_url == fixture_url,
+                Source.is_monitored.is_(False),
+            )
+        )
+    )
+
+    tagged_sources = list(
+        session.scalars(
+            select(Source).where(
+                _json_str(Source.metadata_json, "editorial_eval") == case_id,
+                Source.is_monitored.is_(False),
+            )
+        )
+    )
+    tagged_items = list(
+        session.scalars(
+            select(SourceItem).where(_json_str(SourceItem.metadata_json, "editorial_eval") == case_id)
+        )
+    )
+
+    attached_item_ids: set = {item.id for item in tagged_items}
+    eval_source_ids: set = {source.id for source in tagged_sources}
+    if event_ids:
+        for link in session.scalars(select(EventSource).where(EventSource.event_id.in_(event_ids))):
+            attached_item_ids.add(link.source_item_id)
+            item = session.get(SourceItem, link.source_item_id)
+            if item is None:
+                continue
+            source = session.get(Source, item.source_id)
+            if source is not None and not source.is_monitored:
+                eval_source_ids.add(source.id)
+
+    run_ids = set(
+        session.scalars(
+            select(PipelineRun.id).where(_json_str(PipelineRun.metadata_json, "trigger") == trigger)
+        )
+    )
+    if event_ids:
+        run_ids.update(session.scalars(select(PipelineRun.id).where(PipelineRun.event_id.in_(event_ids))))
+
+    if run_ids:
+        session.execute(delete(LlmUsage).where(LlmUsage.pipeline_run_id.in_(run_ids)))
+    if event_ids:
+        session.execute(delete(LlmUsage).where(LlmUsage.event_id.in_(event_ids)))
+        session.execute(delete(PipelineRun).where(PipelineRun.event_id.in_(event_ids)))
+    session.execute(delete(PipelineRun).where(_json_str(PipelineRun.metadata_json, "trigger") == trigger))
+    if event_ids:
+        session.execute(delete(Event).where(Event.id.in_(event_ids)))
+    session.flush()
+
+    for item_id in attached_item_ids:
+        item = session.get(SourceItem, item_id)
+        if item is None:
+            continue
+        source = session.get(Source, item.source_id)
+        if source is not None and source.is_monitored:
+            continue
+        linked = session.scalar(
+            select(func.count()).select_from(EventSource).where(EventSource.source_item_id == item.id)
+        )
+        if linked:
+            continue
+        session.delete(item)
+    session.flush()
+
+    for source_id in eval_source_ids:
+        source = session.get(Source, source_id)
+        if source is None or source.is_monitored:
+            continue
+        remaining = session.scalar(
+            select(func.count()).select_from(SourceItem).where(SourceItem.source_id == source.id)
+        )
+        if remaining:
+            continue
+        session.delete(source)
+
+    session.commit()
+    session.expire_all()
+
+
 def _seed_case(session, case: dict):
+    from sqlalchemy.orm.attributes import flag_modified
+
     from app.core.text import content_fingerprint
     from app.domain.enums import IngestionMethod
     from app.schemas import EventCreate, SourceCreate, SourceItemCreate
     from app.services.event_service import EventService
     from app.services.source_item_service import SourceItemService
     from app.services.source_service import SourceService
+
+    _purge_eval_case(session, case)
 
     domain = case.get("source_domain") or urlparse(case["url"]).netloc
     source = SourceService(session).create(
@@ -70,6 +199,9 @@ def _seed_case(session, case: dict):
             is_enabled=True,
         )
     )
+    source.metadata_json = {"editorial_eval": case["id"]}
+    flag_modified(source, "metadata_json")
+    session.flush()
     body = case["body"]
     published = _parse_dt(case.get("published_at"))
     item = SourceItemService(session).ingest(
@@ -84,6 +216,9 @@ def _seed_case(session, case: dict):
             published_at=published,
         )
     ).item
+    item.metadata_json = {**(item.metadata_json or {}), "editorial_eval": case["id"]}
+    flag_modified(item, "metadata_json")
+    session.flush()
     event = EventService(session).create(
         EventCreate(
             title_internal=case["title"],
@@ -93,6 +228,7 @@ def _seed_case(session, case: dict):
             province=case.get("province"),
             locality=case.get("locality"),
             short_summary=case.get("short_summary"),
+            slug=_eval_slug(case["id"]),
         )
     )
     session.commit()
@@ -158,7 +294,8 @@ def _report_case(*, case, mode, event, claims_before, claims_after, verify, rese
     plans = (verify or {}).get("plans") or {}
     queries = (verify or {}).get("queries") or {}
     temporal = (verify or {}).get("temporal_scope") or {}
-    primary = (verify or {}).get("primary_found") or {}
+    primary_found = (verify or {}).get("primary_source_found") or (verify or {}).get("primary_found") or {}
+    primary_supports = (verify or {}).get("primary_source_supports_claim") or {}
     escalated = (verify or {}).get("escalated") or {}
     claim_reports = []
     for claim in claims_after:
@@ -176,7 +313,9 @@ def _report_case(*, case, mode, event, claims_before, claims_after, verify, rese
                 "temporal_scope": temporal.get(cid),
                 "queries": queries.get(cid) or [],
                 "sources_found": _sources_for_claim(claim),
-                "primary_found": primary.get(cid),
+                "primary_source_found": primary_found.get(cid),
+                "primary_source_supports_claim": primary_supports.get(cid),
+                "primary_found": primary_found.get(cid),
                 "status_final": claim.status.value,
                 "escalated": escalated.get(cid),
             }
@@ -188,10 +327,12 @@ def _report_case(*, case, mode, event, claims_before, claims_after, verify, rese
         "source": case["source_name"],
         "url": case["url"],
         "event_id": str(event.id),
+        "article_id": str(article.id) if article is not None else None,
         "research": research,
         "verification": {
             "verified": (verify or {}).get("verified"),
             "skipped_search": (verify or {}).get("skipped_search"),
+            "skipped_policy": (verify or {}).get("skipped_policy"),
             "error": (verify or {}).get("error"),
         },
         "claims": claim_reports,
@@ -222,14 +363,41 @@ def _print_report(report: dict) -> None:
         print(f"  temporal_scope: {claim['temporal_scope']}")
         print(f"  queries: {claim['queries']}")
         print(f"  fuentes encontradas: {json.dumps(claim['sources_found'], ensure_ascii=False)}")
-        print(f"  fuente primaria encontrada: {claim['primary_found']}")
+        print(f"  fuente primaria encontrada: {claim.get('primary_source_found', claim.get('primary_found'))}")
+        print(f"  primaria sostiene el claim: {claim.get('primary_source_supports_claim')}")
         print(f"  status final: {claim['status_final']}")
         print(f"  escaló a Sol: {claim['escalated']}")
+    skipped_policy = ((report.get("verification") or {}).get("skipped_policy")) or []
+    if skipped_policy:
+        print("\nVerification policy skip:", json.dumps(skipped_policy, ensure_ascii=False))
     print("\nheadline:", report["headline"])
     print("summary:", report["summary"])
     print("body:\n", report["body"] or "")
     if report.get("audit"):
         print("audit passed:", (report["audit"] or {}).get("passed"))
+
+
+def _print_case_footer(report: dict, out: Path) -> None:
+    print("-------- EVAL CASE --------")
+    print(f"case id:     {report.get('id')}")
+    print(f"event id:    {report.get('event_id') or 'none'}")
+    print(f"article id:  {report.get('article_id') or 'none'}")
+    print("Claims finales:")
+    claims = report.get("claims") or []
+    if not claims:
+        print("  (ninguno)")
+    for index, claim in enumerate(claims, start=1):
+        status = claim.get("status_final") or claim.get("status") or "?"
+        print(f"  {index}. [{status}] {claim.get('canonical_text')}")
+    if report.get("error"):
+        print(f"error:       {report['error']}")
+    print(f"JSON:        {out}")
+    print("---------------------------")
+
+
+def _write_reports(out: Path, *, mode: str, reports: list[dict]) -> None:
+    payload = {"mode": mode, "generated_at": datetime.now().isoformat(), "cases": reports}
+    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def run_case(session, case: dict, *, mode: str) -> dict:
@@ -243,7 +411,7 @@ def run_case(session, case: dict, *, mode: str) -> dict:
     research = None
     writing = None
     audit = None
-    trigger = f"editorial_eval:{case['id']}"
+    trigger = _eval_trigger(case["id"])
 
     if mode == "full-editorial":
         research = ResearchService(session).research(event.id, trigger=trigger)
@@ -334,6 +502,7 @@ def main() -> int:
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    out = OUT_DIR / f"{stamp}-{args.mode}.json"
     reports = []
     session = SessionLocal()
     try:
@@ -343,25 +512,27 @@ def main() -> int:
             try:
                 report = run_case(session, case, mode=args.mode)
                 reports.append(report)
+                _write_reports(out, mode=args.mode, reports=reports)
                 _print_report(report)
+                _print_case_footer(report, out)
             except Exception as exc:
                 session.rollback()
                 print(f"ERROR en caso {case.get('id')}: {exc}", file=sys.stderr)
-                reports.append(
-                    {
-                        "id": case.get("id"),
-                        "mode": args.mode,
-                        "title": case.get("title"),
-                        "error": str(exc),
-                        "claims": [],
-                    }
-                )
+                report = {
+                    "id": case.get("id"),
+                    "mode": args.mode,
+                    "title": case.get("title"),
+                    "event_id": None,
+                    "article_id": None,
+                    "error": str(exc),
+                    "claims": [],
+                }
+                reports.append(report)
+                _write_reports(out, mode=args.mode, reports=reports)
+                _print_case_footer(report, out)
     finally:
         session.close()
 
-    payload = {"mode": args.mode, "generated_at": datetime.now().isoformat(), "cases": reports}
-    out = OUT_DIR / f"{stamp}-{args.mode}.json"
-    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\nJSON guardado en {out}")
     if any(row.get("error") for row in reports) or len(reports) < len(CASE_FILES):
         return 1

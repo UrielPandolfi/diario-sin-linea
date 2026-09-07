@@ -983,7 +983,7 @@ def test_extraction_prompt_includes_material_after_1500_chars(db_session: Sessio
 
 def test_extraction_prompt_covers_selective_claim_philosophy() -> None:
     prompt = load_prompt("claim_extraction.md")
-    assert "SINGLE_SOURCE" not in prompt
+    assert "aunque vaya a quedar SINGLE_SOURCE" in prompt
     assert "¿Qué gana el lector" in prompt
     assert "una sola fuente cuya falsedad o confirmación cambiaría sustancialmente la noticia" in prompt
     assert "oportunidad histórica" in prompt
@@ -996,10 +996,10 @@ def test_extraction_prompt_covers_selective_claim_philosophy() -> None:
     assert "$108,2 millones" in prompt
     assert "derivables matemáticamente" in prompt
     assert "`[]` es un resultado válido" in prompt or "es un resultado válido" in prompt
-    assert "única proposición material" in prompt
+    assert "una proposición material" in prompt
     assert "profundas críticas" in prompt
     assert "Y cometió delito Z" in prompt
     assert "estimación, proyección o dato oficial" in prompt
     assert "tuvo acceso total a información estratégica" in prompt
-    assert "No combines nacionalidad" in prompt
+    assert "No combines designación" in prompt
 

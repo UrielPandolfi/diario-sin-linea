@@ -47,7 +47,7 @@ def _claim(**overrides):
 
 def test_prompt_requires_atomic_material_claims() -> None:
     prompt = load_prompt("claim_extraction.md")
-    assert "única proposición material" in prompt
+    assert "una proposición material" in prompt
     assert "profundas críticas" in prompt
     assert "Y cometió delito Z" in prompt
     assert "estimación, proyección o dato oficial" in prompt
@@ -55,10 +55,22 @@ def test_prompt_requires_atomic_material_claims() -> None:
 
 def test_extraction_keeps_accusation_discards_vague_and_splits_compound() -> None:
     prompt = load_prompt("claim_extraction.md")
+    folded = prompt.casefold()
     assert "tuvo acceso total a información estratégica" in prompt
     assert "cargo de alta sensibilidad" in prompt
     assert "sectores afines" in prompt
-    assert "separalas" in prompt or "separalas." in prompt
+    assert "separalas" in folded
+    assert "decisión judicial" in folded
+    assert "detalles probatorios secundarios" in folded
+    assert "comparación se resuelve después por código" in folded
+
+
+def test_writing_and_audit_block_unattributed_single_source() -> None:
+    writing = load_prompt("article_writing.md")
+    audit = load_prompt("article_audit.md")
+    assert "NUNCA se convierte en hecho afirmado por Sin Línea" in writing
+    assert "Según [fuente], en 2009 fue nombrada subsecretaria" in writing
+    assert "Si el draft lo afirma como hecho de Sin Línea, reportá ATTRIBUTION" in audit
 
 
 def test_denuncia_is_not_guilt_in_resolution_and_assessment_prompts() -> None:
@@ -89,6 +101,16 @@ def test_registry_prioritizes_indec_boletin_and_mendoza_courts() -> None:
     assert "csjn.gov.ar" in judicial
 
 
+def test_registry_includes_regulated_tariff_domains() -> None:
+    domains = preferred_domains("AR", "OFFICIAL_RECORD", "REGULATED_TARIFF")
+    assert "energia.gob.ar" in domains
+    assert "enre.gob.ar" in domains
+    assert "enargas.gob.ar" in domains
+    assert "eras.gob.ar" in domains
+    assert "aysa.com.ar" in domains
+    assert "indec.gob.ar" not in domains
+
+
 def test_heuristic_plan_maps_types_and_historical_year() -> None:
     cifra = _claim(claim_type="cifra", canonical_text="El IPC de julio fue 2,1%")
     plan = heuristic_plan(cifra)
@@ -98,8 +120,24 @@ def test_heuristic_plan_maps_types_and_historical_year() -> None:
 
     tariff = _claim(claim_type="cifra", canonical_text="Las facturas de electricidad aumentarán 1,75%")
     tariff_plan = heuristic_plan(tariff)
-    assert tariff_plan.verification_target == VerificationTarget.OFFICIAL_LAW
-    assert tariff_plan.subject == VerificationSubject.LAW_OR_DECREE
+    assert tariff_plan.verification_target == VerificationTarget.OFFICIAL_RECORD
+    assert tariff_plan.subject == VerificationSubject.REGULATED_TARIFF
+
+    aysa = _claim(claim_type="cifra", canonical_text="AySA aumentará 0,8% en agosto")
+    aysa_plan = heuristic_plan(aysa)
+    assert aysa_plan.verification_target == VerificationTarget.OFFICIAL_RECORD
+    assert aysa_plan.subject == VerificationSubject.REGULATED_TARIFF
+
+    denuncia = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        canonical_text="Víctor Eduardo Vital presentó una denuncia penal contra Natalia Laura Federman",
+    )
+    denuncia_plan = heuristic_plan(denuncia)
+    assert denuncia_plan.verification_target == VerificationTarget.JUDICIAL_RECORD
+    assert denuncia_plan.subject == VerificationSubject.JUDICIAL_CASE
+    assert denuncia_plan.primary_source_required is True
 
     ruling = _claim(
         claim_type="hecho",
@@ -189,6 +227,13 @@ def test_policy_skips_well_supported_declaration_not_high_stat() -> None:
         canonical_text="Tuvo acceso total a información estratégica",
     )
     assert policy_selects(accusation) is True
+    well_hecho = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        evidence=declaration.evidence,
+    )
+    assert policy_selects(well_hecho) is False
 
 
 def test_select_claims_still_vetoes_mundane() -> None:
@@ -309,8 +354,8 @@ def test_refine_plan_does_not_copy_event_recency_onto_historical_claim() -> None
 
 def test_refine_plan_reroutes_tariff_stats_and_court_records() -> None:
     fallback_tariff = VerificationPlan(
-        verification_target=VerificationTarget.OFFICIAL_LAW,
-        subject=VerificationSubject.LAW_OR_DECREE,
+        verification_target=VerificationTarget.OFFICIAL_RECORD,
+        subject=VerificationSubject.REGULATED_TARIFF,
         temporal_scope=TemporalScope.RECENT,
         primary_source_required=True,
     )
@@ -321,7 +366,8 @@ def test_refine_plan_reroutes_tariff_stats_and_court_records() -> None:
         search_terms=["1,75%"],
     )
     refined_tariff = refine_plan(planned_tariff, fallback_tariff)
-    assert refined_tariff.verification_target == VerificationTarget.OFFICIAL_LAW
+    assert refined_tariff.verification_target == VerificationTarget.OFFICIAL_RECORD
+    assert refined_tariff.subject == VerificationSubject.REGULATED_TARIFF
     assert refined_tariff.search_terms == ["1,75%"]
 
     fallback_court = VerificationPlan(
@@ -332,12 +378,22 @@ def test_refine_plan_reroutes_tariff_stats_and_court_records() -> None:
     )
     planned_court = VerificationPlan(
         verification_target=VerificationTarget.OFFICIAL_RECORD,
-        subject=VerificationSubject.GENERAL,
+        subject=VerificationSubject.ACCUSATION,
         temporal_scope=TemporalScope.CURRENT,
     )
     refined_court = refine_plan(planned_court, fallback_court)
     assert refined_court.verification_target == VerificationTarget.JUDICIAL_RECORD
     assert refined_court.subject == VerificationSubject.JUDICIAL_CASE
+
+    planned_accusation = VerificationPlan(
+        verification_target=VerificationTarget.JUDICIAL_RECORD,
+        subject=VerificationSubject.ACCUSATION,
+        temporal_scope=TemporalScope.HISTORICAL,
+        year_hint=2012,
+    )
+    refined_accusation = refine_plan(planned_accusation, fallback_court)
+    assert refined_accusation.verification_target == VerificationTarget.JUDICIAL_RECORD
+    assert refined_accusation.subject == VerificationSubject.JUDICIAL_CASE
 
 
 def test_refine_plan_makes_undated_claim_timeless() -> None:
@@ -345,4 +401,121 @@ def test_refine_plan_makes_undated_claim_timeless() -> None:
     planned = VerificationPlan(temporal_scope=TemporalScope.RECENT, year_hint=None)
     refined = refine_plan(planned, fallback)
     assert refined.temporal_scope == TemporalScope.TIMELESS
+
+
+def test_current_year_hint_cannot_stay_historical() -> None:
+    from app.services.verification_plan import normalize_temporal_scope
+
+    now = datetime(2026, 9, 6, tzinfo=timezone.utc)
+    planned = VerificationPlan(
+        verification_target=VerificationTarget.JUDICIAL_RECORD,
+        temporal_scope=TemporalScope.HISTORICAL,
+        subject=VerificationSubject.JUDICIAL_CASE,
+        year_hint=2026,
+    )
+    fallback = VerificationPlan(
+        verification_target=VerificationTarget.JUDICIAL_RECORD,
+        temporal_scope=TemporalScope.TIMELESS,
+        subject=VerificationSubject.JUDICIAL_CASE,
+        year_hint=2026,
+    )
+    refined = refine_plan(planned, fallback, now=now)
+    assert refined.temporal_scope == TemporalScope.RECENT
+    assert refined.year_hint == 2026
+    normalized = normalize_temporal_scope(
+        VerificationPlan(temporal_scope=TemporalScope.HISTORICAL, year_hint=2026),
+        now=now,
+    )
+    assert normalized.temporal_scope == TemporalScope.RECENT
+
+
+def test_numeric_comparison_uses_supported_siblings() -> None:
+    from app.services.verification_plan import try_resolve_numeric_comparison
+
+    comparison = _claim(
+        claim_type="hecho",
+        canonical_text="El incremento de electricidad y gas será por debajo del 2,1% que informó INDEC",
+    )
+    electricity = _claim(
+        id=uuid4(),
+        claim_type="cifra",
+        status=ClaimStatus.SUPPORTED,
+        canonical_text="La electricidad aumentará 1,75%",
+        normalized_value="1.75",
+    )
+    gas = _claim(
+        id=uuid4(),
+        claim_type="cifra",
+        status=ClaimStatus.SUPPORTED,
+        canonical_text="El gas aumentará 1,40%",
+        normalized_value="1.40",
+    )
+    assert try_resolve_numeric_comparison(comparison, [comparison, electricity, gas]) == ClaimStatus.SUPPORTED
+    electricity.status = ClaimStatus.SINGLE_SOURCE
+    gas.status = ClaimStatus.SINGLE_SOURCE
+    assert try_resolve_numeric_comparison(comparison, [comparison, electricity, gas]) is None
+
+
+def test_primary_required_blocks_supported_without_primary() -> None:
+    from app.services.verification_plan import apply_primary_requirement
+
+    claim = _claim(
+        status=ClaimStatus.SINGLE_SOURCE,
+        evidence=[
+            SimpleNamespace(
+                evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://medio.test/n"
+            ),
+            SimpleNamespace(
+                evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://otro.test/n"
+            ),
+        ],
+    )
+    plan = VerificationPlan(
+        verification_target=VerificationTarget.JUDICIAL_RECORD,
+        subject=VerificationSubject.JUDICIAL_CASE,
+        primary_source_required=True,
+    )
+    assert (
+        apply_primary_requirement(claim, ClaimStatus.SUPPORTED, plan, primary_supports=False)
+        == ClaimStatus.SINGLE_SOURCE
+    )
+    assert (
+        apply_primary_requirement(claim, ClaimStatus.SUPPORTED, plan, primary_supports=True)
+        == ClaimStatus.SUPPORTED
+    )
+
+
+def test_reprints_and_blogs_are_not_independent_corroboration() -> None:
+    from app.services.verification_policy import independent_support_count
+
+    excerpt = "la funcionaria británica accedió a información estratégica de las fuerzas armadas argentinas"
+    first = SimpleNamespace(
+        evidence_type=EvidenceType.SUPPORTS,
+        excerpt=excerpt,
+        source_item=None,
+        source_url="https://laderecha.test/nota",
+    )
+    reprint = SimpleNamespace(
+        evidence_type=EvidenceType.SUPPORTS,
+        excerpt=excerpt,
+        source_item=None,
+        source_url="https://otrodiario.test/copia",
+    )
+    blog = SimpleNamespace(
+        evidence_type=EvidenceType.SUPPORTS,
+        excerpt="texto distinto en un blog personal sobre el mismo tema de la denuncia",
+        source_item=None,
+        source_url="https://algo.blogspot.com/post",
+    )
+    claim = _claim(evidence=[first, reprint, blog])
+    assert independent_support_count(claim) == 1
+
+
+def test_postgres_safe_json_strips_nul() -> None:
+    from app.core.text import postgres_safe_json
+
+    payload = {"reason": "actualizaci\u0000ón", "nested": [{"excerpt": "IPC 2,1%\x00"}]}
+    cleaned = postgres_safe_json(payload)
+    assert "\x00" not in cleaned["reason"]
+    assert "\x00" not in cleaned["nested"][0]["excerpt"]
 

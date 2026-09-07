@@ -57,19 +57,35 @@ Preferí pocos claims HIGH o MEDIUM útiles a muchos LOW.
 
 Claims materiales y atómicos:
 
-Cada Claim representa normalmente una única proposición material que pueda verificarse o contradecirse de forma independiente. Si una frase mezcla varias afirmaciones importantes que requieren evidencia distinta, separalas.
+Cada Claim representa exactamente una proposición material que pueda verificarse o contradecirse de forma independiente. Si una oración mezcla afirmaciones que requieren evidencia distinta, SEPARALAS. No dejes un Claim “ómnibus”.
 
-Incorrecto (un solo Claim compuesto): Cristina Kirchner designó a Natalia Laura Federman, ciudadana británica, en un cargo de alta sensibilidad.
+Incorrecto (un solo Claim compuesto): Cristina Fernández de Kirchner firmó la designación de Natalia Laura Federman, una ciudadana británica, en un cargo de alta sensibilidad.
+
+Eso mezcla tres cosas: el acto de designar, la nacionalidad y una caracterización editorial. Deben ser claims distintos, o descartarse la caracterización.
 
 Mejor: Cristina Kirchner designó a Natalia Laura Federman como Directora Nacional de Derechos Humanos del Ministerio de Seguridad.
 
-Y, si es material para la historia: Natalia Laura Federman tenía ciudadanía británica al momento de su designación.
+Y, si es material: Natalia Laura Federman tenía ciudadanía británica al momento de su designación.
 
-No combines nacionalidad, cargo y caracterización editorial en el mismo Claim. No conserves automáticamente caracterizaciones editoriales (“cargo de alta sensibilidad”, “polémica medida”).
+No combines designación + atributo personal (nacionalidad, parentesco) + caracterización editorial. El `canonical_text` de una designación debe nombrar el cargo concreto (subsecretaria, directora nacional, etc.), nunca una caracterización. Prohibido en canonical_text: “cargo de alta sensibilidad”, “alta sensibilidad”, “polémica medida”, “cargos clave”. Si el original mezcla esas frases, extraé solo el acto de designar y, aparte, la nacionalidad si es material.
 
 Acusaciones materiales:
 
-Las acusaciones importantes SÍ deben generar Claims. Ejemplo: Natalia Laura Federman tuvo acceso total a información estratégica de las Fuerzas Armadas. Extraela como `hecho` HIGH. No asumas que es verdadera: Verification la resolverá.
+Una acusación sensible y central de la nota DEBE extraerse como Claim aunque vaya a quedar SINGLE_SOURCE. No la omitas, no la subsumas en un Claim compuesto y no la reemplaces por una caracterización.
+
+Si la nota afirma que alguien tuvo acceso a información estratégica, militar, clasificada o de las Fuerzas Armadas, extraé ESA acusación como Claim HIGH propio. Omitirla es un error.
+
+Ejemplo: Natalia Laura Federman tuvo acceso total a información estratégica de las Fuerzas Armadas. Extraela como `hecho` HIGH. No asumas que es verdadera: Verification la resolverá.
+
+Noticias judiciales:
+
+Priorizá proposiciones en este orden: 1) la decisión judicial; 2) el estado procesal (sobreseimiento, condena, procesamiento, rechazo de recurso); 3) la consecuencia jurídica (firmeza, vía de impugnación restante); 4) acusaciones o hechos materiales del caso si siguen siendo centrales.
+
+Detalles probatorios secundarios (informes médicos, pericias, “lesiones inespecíficas”, testimonios de contexto, cronología accesoria) tienen menor prioridad. No los extraigas como Claim HIGH si ya hay decisión, estado procesal o consecuencia jurídica. Si los extraés, usá LOW.
+
+Comparaciones derivadas:
+
+No extraigas como Claim una comparación aritmética (“A quedó por debajo de B”) si A y B son cifras que ya extraés por separado. Extraé el dato oficial (p. ej. la variación del IPC informada por el organismo) y cada cifra operativa. La comparación se resuelve después por código, no por un modelo.
 
 Caracterizaciones vagas:
 

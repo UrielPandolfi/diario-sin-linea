@@ -81,3 +81,16 @@ def postgres_safe_text(value: str | None) -> str | None:
         return None
     cleaned = value.replace("\x00", "")
     return cleaned if cleaned else None
+
+
+def postgres_safe_json(value):
+    """Strip NUL bytes from nested JSON so jsonb columns can persist."""
+    if isinstance(value, str):
+        return value.replace("\x00", "")
+    if isinstance(value, dict):
+        return {key: postgres_safe_json(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [postgres_safe_json(item) for item in value]
+    if isinstance(value, tuple):
+        return [postgres_safe_json(item) for item in value]
+    return value

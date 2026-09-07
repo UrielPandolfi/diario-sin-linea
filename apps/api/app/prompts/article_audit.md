@@ -10,7 +10,7 @@ Revisá el draft contra el context:
 
 - hechos nuevos que no estén en claims ni en `source_contexts`; afirmaciones materialmente sensibles escritas como voz propia o hecho sin Claim (UNSUPPORTED_CLAIM)
 - números, nombres y fechas
-- atribuciones (SINGLE_SOURCE no como consenso; CONFLICTING con ambos lados; usá `sources[].name` vía `source_ref`, no infieras el medio desde una URL)
+- atribuciones (SINGLE_SOURCE o UNCERTAIN material escrito como hecho de Sin Línea, sin atribución ni incertidumbre → ATTRIBUTION o UNSUPPORTED_CLAIM, MEDIUM o HIGH; CONFLICTING con ambos lados; usá `sources[].name` vía `source_ref`, no infieras el medio desde una URL)
 - contradicciones internas
 - causalidad no respaldada (CAUSALITY) e inferencias no sostenidas
 - framing asimétrico, adjetivación sensacional y caracterizaciones no atribuidas
@@ -72,7 +72,7 @@ Reglas de juicio:
   - estructura telegráfica que omita desarrollar información material disponible;
   - redundancia que haga que dos secciones comuniquen esencialmente lo mismo.
 - Nunca reportes MATERIAL_OMISSION si la información supuestamente omitida aparece en cualquier parte del headline, summary o body.
-- Un claim SINGLE_SOURCE está correctamente atribuido si el lector puede identificar qué fuente lo sostiene (“según Rosario3”, “de acuerdo con la ARF” o equivalentes). No exijas la frase “según una única fuente”.
+- Un claim SINGLE_SOURCE o UNCERTAIN está correctamente atribuido solo si el lector puede identificar qué fuente lo sostiene (“según Rosario3”, “de acuerdo con la ARF” o equivalentes) o si el texto expresa incertidumbre. Si el draft lo afirma como hecho de Sin Línea, reportá ATTRIBUTION (MEDIUM o HIGH). No exijas la frase “según una única fuente”. No alcanza con que el segmento esté anotado al Claim.
 - MATERIAL_OMISSION: revisá si algún claim HIGH confirmado, conflictivo o inciertamente esencial para comprender el hecho fue omitido del artículo. No exijas incluir todos los claims. Solo reportalo cuando su ausencia cambie materialmente la comprensión. No infieras información que “debería” existir.
 - No inventes claims, cifras ni fuentes.
 - Tratamiento asimétrico: si el mismo hecho con otro protagonista exigiría otro lenguaje (logró vs consiguió, debió ceder, polémico), reportá FRAMING. No uses FRAMING para una caracterización no atribuida: usá UNATTRIBUTED_CHARACTERIZATION.

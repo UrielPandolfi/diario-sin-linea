@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.text import content_fingerprint, excerpt_in_source, postgres_safe_text
+from app.core.text import content_fingerprint, excerpt_in_source, postgres_safe_json, postgres_safe_text
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import (
@@ -51,20 +51,24 @@ from app.schemas.verification import (
     VerificationPlan,
     VerificationResult,
 )
-from app.services.claim_service import CLAIM_STAGE, clamp_supported_status
+from app.services.claim_service import CLAIM_STAGE
 from app.services.event_service import EventService
 from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
 from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_plan import (
+    apply_primary_requirement,
     assessment_has_support,
     build_verification_queries,
+    claim_has_preferred_evidence,
     heuristic_plan,
+    is_numeric_comparison_claim,
     needs_sol_after_assessment,
     refine_plan,
     search_window_for,
     skip_directed_search,
+    try_resolve_numeric_comparison,
 )
 from app.services.verification_policy import canonicalize_claim_type, select_claims
 
@@ -151,10 +155,10 @@ class VerificationService:
                 event_id=event.id,
                 pipeline_run_id=run.id,
             ):
-                result = self._run(event)
+                result = postgres_safe_json(self._run(event))
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
-            run.metadata_json = {**(run.metadata_json or {}), **result}
+            run.metadata_json = postgres_safe_json({**(run.metadata_json or {}), **result})
             event.status = original_status
             self.session.flush()
             return {"skipped": False, "event_id": str(event.id), **result}
@@ -240,6 +244,8 @@ class VerificationService:
             "temporal_scope": {},
             "freshness": {},
             "primary_found": {},
+            "primary_source_found": {},
+            "primary_source_supports_claim": {},
             "escalated": {},
             "assessments": {},
             "skipped_search": [],
@@ -254,8 +260,12 @@ class VerificationService:
 
         search = self.search or get_search_provider()
         sol_prompt = load_prompt("verification.md")
+        ordered = sorted(
+            selected,
+            key=lambda row: 1 if is_numeric_comparison_claim(row.claim) else 0,
+        )
 
-        for row in selected:
+        for row in ordered:
             claim = row.claim
             status_before = claim.status
             claim_id = str(claim.id)
@@ -268,10 +278,23 @@ class VerificationService:
             )
             payload["plans"][claim_id] = plan.model_dump(mode="json")
             payload["temporal_scope"][claim_id] = plan.temporal_scope.value
-            if skip_directed_search(claim, plan, preferred):
+            comparison_status = try_resolve_numeric_comparison(claim, list(event.claims))
+            if comparison_status is not None:
+                claim.status = comparison_status
                 payload["skipped_search"].append(claim_id)
                 payload["escalated"][claim_id] = False
                 payload["primary_found"][claim_id] = False
+                payload["primary_source_found"][claim_id] = False
+                payload["primary_source_supports_claim"][claim_id] = False
+                payload["verified"] += 1
+                continue
+            if skip_directed_search(claim, plan, preferred):
+                found = claim_has_preferred_evidence(claim, preferred)
+                payload["skipped_search"].append(claim_id)
+                payload["escalated"][claim_id] = False
+                payload["primary_found"][claim_id] = found
+                payload["primary_source_found"][claim_id] = found
+                payload["primary_source_supports_claim"][claim_id] = found
                 continue
 
             queries = build_verification_queries(
@@ -287,16 +310,20 @@ class VerificationService:
             packet, fetched = self._packet_for(claim, hits)
             payload["fetched"] += fetched
             assessment = self._assess(event, claim, packet, plan)
+            primary_found = any(is_preferred_domain(src.url, preferred) for src in packet)
+            primary_supports = False
             if assessment is not None:
                 payload["assessments"][claim_id] = assessment.model_dump(mode="json")
-                attached, cited, primary_support = self._apply_judgements(event, claim, packet, assessment, preferred)
+                attached, cited, primary_supports = self._apply_judgements(
+                    event, claim, packet, assessment, preferred
+                )
                 payload["attached"] += attached
                 payload["cited"] += cited
-            else:
-                primary_support = any(is_preferred_domain(src.url, preferred) for src in packet if src.hit is not None)
-            payload["primary_found"][claim_id] = bool(primary_support)
+            payload["primary_found"][claim_id] = bool(primary_found)
+            payload["primary_source_found"][claim_id] = bool(primary_found)
+            payload["primary_source_supports_claim"][claim_id] = bool(primary_supports)
             escalate = needs_sol_after_assessment(
-                claim, plan, assessment, primary_support=bool(primary_support)
+                claim, plan, assessment, primary_support=bool(primary_supports)
             )
             payload["escalated"][claim_id] = escalate
             payload["verified"] += 1
@@ -307,9 +334,12 @@ class VerificationService:
                     user_prompt=self._user_prompt(event, claim, packet, plan),
                     schema=VerificationResult,
                 )
-                attached, cited = self._apply_result(event, claim, packet, result)
+                attached, cited, primary_supports = self._apply_result(
+                    event, claim, packet, result, plan, preferred, bool(primary_supports)
+                )
                 payload["attached"] += attached
                 payload["cited"] += cited
+                payload["primary_source_supports_claim"][claim_id] = bool(primary_supports)
                 payload["sol"].append(
                     {
                         "claim_id": claim_id,
@@ -322,7 +352,9 @@ class VerificationService:
                 )
                 continue
             if assessment is not None and assessment_has_support(assessment):
-                claim.status = clamp_supported_status(claim, ClaimStatus.SUPPORTED)
+                claim.status = apply_primary_requirement(
+                    claim, ClaimStatus.SUPPORTED, plan, primary_supports=bool(primary_supports)
+                )
             payload["sol"].append(
                 {
                     "claim_id": claim_id,
@@ -435,7 +467,9 @@ class VerificationService:
             canonical = canonicalize_url(item.canonical_url or item.url)
             if canonical:
                 seen.add(canonical)
-            snippet = (row.excerpt or item.excerpt or item.clean_text or item.title or "")[:SNIPPET_CHARS]
+            snippet = postgres_safe_text(
+                (row.excerpt or item.excerpt or item.clean_text or item.title or "")[:SNIPPET_CHARS]
+            ) or ""
             packet.append(
                 _PacketSource(ref=ref, url=item.url, title=item.title or "", snippet=snippet, item=item)
             )
@@ -451,9 +485,9 @@ class VerificationService:
             seen.add(canonical)
             existing = self.items.get_by_canonical_url(canonical) or self.items.get_by_canonical_url(hit.url)
             if existing is not None:
-                snippet = (existing.excerpt or existing.clean_text or hit.snippet or existing.title or "")[
-                    :SNIPPET_CHARS
-                ]
+                snippet = postgres_safe_text(
+                    (existing.excerpt or existing.clean_text or hit.snippet or existing.title or "")[:SNIPPET_CHARS]
+                ) or ""
                 packet.append(
                     _PacketSource(
                         ref=ref,
@@ -475,7 +509,7 @@ class VerificationService:
                     ref=ref,
                     url=hit.url,
                     title=hit.title,
-                    snippet=snippet,
+                    snippet=postgres_safe_text(snippet) or "",
                     hit=hit,
                     fetched_html=html,
                     fetched_text=text,
@@ -558,7 +592,10 @@ class VerificationService:
         claim: Claim,
         packet: list[_PacketSource],
         result: VerificationResult,
-    ) -> tuple[int, int]:
+        plan: VerificationPlan,
+        preferred: list[str],
+        primary_supports: bool,
+    ) -> tuple[int, int, bool]:
         by_ref = {src.ref: src for src in packet}
         attached = 0
         cited = 0
@@ -568,14 +605,24 @@ class VerificationService:
             )
             attached += added
             cited += counted
+            src = by_ref.get(row.source_ref)
+            if (
+                counted
+                and row.evidence_type == EvidenceType.SUPPORTS
+                and src is not None
+                and is_preferred_domain(src.url, preferred)
+            ):
+                primary_supports = True
 
         self.session.flush()
         if result.unresolved:
             if result.status in {ClaimStatus.CONFLICTING, ClaimStatus.UNCERTAIN}:
                 claim.status = result.status
         else:
-            claim.status = clamp_supported_status(claim, result.status)
-        return attached, cited
+            claim.status = apply_primary_requirement(
+                claim, result.status, plan, primary_supports=primary_supports
+            )
+        return attached, cited, primary_supports
 
     def _attach_evidence(
         self,

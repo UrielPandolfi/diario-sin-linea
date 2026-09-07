@@ -13,6 +13,7 @@ Reglas por assertion:
 
 - SUPPORTED solo si hay SUPPORTS de al menos dos medios independientes (dominios distintos) y no hay CONTRADICTS sobre la misma assertion.
 - Varias notas del mismo medio cuentan como una sola confirmación → SINGLE_SOURCE, no SUPPORTED.
+- Sitios que reproducen esencialmente la misma versión (republicación, mismo texto, blogs personales) no son corroboración independiente.
 - Una sola fuente independiente con SUPPORTS y sin CONTRADICTS → SINGLE_SOURCE.
 - SUPPORTS y CONTRADICTS sobre la misma assertion → CONFLICTING.
 - UNCERTAIN si la evidencia de esa assertion no alcanza.

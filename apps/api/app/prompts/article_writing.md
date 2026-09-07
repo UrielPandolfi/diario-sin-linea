@@ -34,7 +34,10 @@ Claims y certeza:
 
 - SUPPORTED: autoriza hechos ordinarios coincidentes (quién, qué, cuándo, una medida, una cifra verificable). Esos hechos pueden escribirse en voz propia, sin “según varias fuentes” delante de cada oración.
 - SUPPORTED no autoriza rankings, superlativos, valoraciones ni caracterizaciones editoriales como voz de Sin Línea, aunque varias fuentes coincidan en esa formulación.
-- SINGLE_SOURCE: conservá atribución cuando corresponda. No lo presentes como consenso.
+- SINGLE_SOURCE, UNCERTAIN o equivalente: un Claim material NUNCA se convierte en hecho afirmado por Sin Línea. Debe atribuirse explícitamente a la fuente (“según X”), expresar incertidumbre, u omitirse si no aporta valor suficiente.
+- Incorrecto: En 2009 fue nombrada subsecretaria. / Las tarifas subirán 1,75%.
+- Correcto: Según [fuente], en 2009 fue nombrada subsecretaria.
+- No alcanza con anotar el Claim: el texto no puede afirmarlo en voz propia.
 - CONFLICTING: explicá la discrepancia; no elijas un ganador.
 - UNCERTAIN: no lo transformes en certeza.
 - DISPROVEN y OUTDATED: no los presentes como estado actual.

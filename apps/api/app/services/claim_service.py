@@ -36,6 +36,7 @@ from app.schemas.claims import (
     ExtractedClaim,
     ExtractedEvidence,
 )
+from app.services.verification_policy import independent_support_count
 
 CLAIM_STAGE = "claim_resolution"
 
@@ -661,10 +662,10 @@ class ClaimService:
         types = {row.evidence_type for row in claim.evidence}
         if EvidenceType.SUPPORTS in types and EvidenceType.CONTRADICTS in types:
             return ClaimStatus.CONFLICTING
-        tokens = _independent_support_tokens(claim)
-        if len(tokens) >= 2:
+        count = independent_support_count(claim)
+        if count >= 2:
             return ClaimStatus.SUPPORTED
-        if len(tokens) == 1:
+        if count == 1:
             return ClaimStatus.SINGLE_SOURCE
         return ClaimStatus.UNCERTAIN
 
@@ -675,10 +676,10 @@ class ClaimService:
 def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
     if status != ClaimStatus.SUPPORTED:
         return status
-    tokens = _independent_support_tokens(claim)
-    if len(tokens) >= 2:
+    count = independent_support_count(claim)
+    if count >= 2:
         return ClaimStatus.SUPPORTED
-    if len(tokens) == 1:
+    if count == 1:
         return ClaimStatus.SINGLE_SOURCE
     return ClaimStatus.UNCERTAIN
 

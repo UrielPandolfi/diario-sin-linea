@@ -265,10 +265,24 @@ class AuditService:
                 "body_blocks": article.body_blocks,
             },
         }
+        weak = [
+            f"{claim.ref} ({claim.status.value}): {claim.canonical_text}"
+            for claim in (*article_context.single_source_claims, *article_context.uncertain_claims)
+        ]
+        reminder = ""
+        if weak:
+            reminder = (
+                "Claims SINGLE_SOURCE o UNCERTAIN: si el draft los afirma como hecho de Sin Línea "
+                "sin atribución explícita ni incertidumbre, reportá ATTRIBUTION.\n"
+                + "\n".join(weak)
+                + "\n\n"
+            )
         return (
             "Audita este draft contra el ArticleContext JSON. "
             "No reescribas el artículo; devolvé passed e issues. "
-            "Revisá también body_blocks y las annotations de claims.\n\n"
+            "Revisá también body_blocks y las annotations de claims.\n"
+            + reminder
+            + "\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 

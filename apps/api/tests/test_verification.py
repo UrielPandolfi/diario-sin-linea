@@ -800,3 +800,84 @@ def test_official_hit_does_not_promote_without_semantic_support(db_session: Sess
     db_session.refresh(claim)
     assert claim.status == ClaimStatus.SINGLE_SOURCE
     assert "VerificationResult" not in sol.calls
+
+
+def test_primary_found_is_independent_of_semantic_support(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Designación", content_hash="h1"
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Se publicó el decreto de designación",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.UNCERTAIN,
+        occurred_at=datetime(2011, 6, 9, tzinfo=timezone.utc),
+    )
+    official = "https://www.boletinoficial.gob.ar/detalle/otro"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.DOES_NOT_ESTABLISH,
+                        excerpt=None,
+                        reason="otra norma",
+                    )
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    sol = FakeStructuredLLM(
+        {"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True, reason="no sostiene")}
+    )
+    search = FakeSearchProvider(
+        [SearchHit(title="Boletín", url=official, snippet="Otra designación distinta")]
+    )
+    result = _service(db_session, sol, search, assessor=assessor).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    assert result["primary_source_found"][cid] is True
+    assert result["primary_source_supports_claim"][cid] is False
+
+
+def test_sol_cannot_mark_supported_without_required_primary(db_session: Session) -> None:
+    source_a = _source(db_session, name="A", domain="medio-a.test", feed_url="https://medio-a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="medio-b.test", feed_url="https://medio-b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://medio-a.test/nota",
+        title="A",
+        body="Vital presentó una denuncia penal.",
+        content_hash="ha",
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://medio-b.test/nota",
+        title="B",
+        body="Vital presentó una denuncia penal.",
+        content_hash="hb",
+    )
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(event, item_b.id, relation_type=EventSourceRelation.ADDITIONAL)
+    claim = _claim(
+        db_session,
+        event,
+        text="Víctor Eduardo Vital presentó una denuncia penal contra Natalia Laura Federman",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    _evidence(db_session, claim, item_a, excerpt="presentó una denuncia penal")
+    _evidence(db_session, claim, item_b, excerpt="presentó una denuncia penal")
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SUPPORTED, reason="varios medios")})
+    search = FakeSearchProvider([])
+    _service(db_session, sol, search).verify(event.id, trigger="admin")
+    db_session.refresh(claim)
+    assert claim.status != ClaimStatus.SUPPORTED

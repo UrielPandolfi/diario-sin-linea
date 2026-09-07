@@ -100,6 +100,12 @@ Postgres y Redis deben estar arriba (el `docker compose up` alcanza; en este rep
 docker compose exec api pytest
 ```
 
+Eval editorial (3 casos fixture; no pasa por RSS). Recrea el mismo Event de cada caso en corridas sucesivas:
+
+```bash
+docker compose exec api python scripts/run_editorial_eval.py --mode full-editorial
+```
+
 Frontend:
 
 ```bash

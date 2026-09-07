@@ -651,6 +651,7 @@ def test_audit_prompt_covers_unattributed_characterization_and_causality() -> No
     assert "el martes en Carolina del Norte" in prompt
     assert "$98,08 millones" in prompt
     assert "No exijas annotation de contexto ordinario" in prompt
+    assert "Si el draft lo afirma como hecho de Sin Línea, reportá ATTRIBUTION" in prompt
 
 
 def test_writing_prompt_covers_characterization_and_causality() -> None:
@@ -665,6 +666,7 @@ def test_writing_prompt_covers_characterization_and_causality() -> None:
     assert "Son respaldo suficiente para hechos ordinarios" in prompt
     assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
     assert "Párrafos o segmentos enteros con `claim_refs: []` son correctos" in prompt
+    assert "NUNCA se convierte en hecho afirmado por Sin Línea" in prompt
 
 
 def test_audit_schema_has_no_other_catchall() -> None:

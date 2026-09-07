@@ -232,10 +232,24 @@ class WritingService:
         )
 
     def _user_prompt(self, article_context) -> str:
+        weak = [
+            f"{claim.ref} ({claim.status.value}): {claim.canonical_text}"
+            for claim in (*article_context.single_source_claims, *article_context.uncertain_claims)
+        ]
+        reminder = ""
+        if weak:
+            reminder = (
+                "Claims SINGLE_SOURCE o UNCERTAIN: no los escribas como hecho de Sin Línea; "
+                "atribución explícita, incertidumbre, u omisión.\n"
+                + "\n".join(weak)
+                + "\n\n"
+            )
         return (
             "Redactá a partir de este ArticleContext JSON. "
             "El suceso a cubrir es event.working_title; no conviertas otro hecho del mismo día en el titular. "
             "No uses fuentes ni claims que no estén listados. "
-            "En body_blocks usá claim_refs C1/C2 del context, nunca UUIDs.\n\n"
+            "En body_blocks usá claim_refs C1/C2 del context, nunca UUIDs.\n"
+            + reminder
+            + "\n"
             + article_context.model_dump_json()
         )

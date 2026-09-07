@@ -12,7 +12,7 @@ Para cada fuente numerada, decidí la relación semántica:
 
 Reglas:
 
-- Un dominio oficial no basta. El texto tiene que sostener la proposición.
+- Un dominio oficial prueba procedencia (fuente primaria encontrada), no la relación semántica. El texto tiene que sostener la proposición para SUPPORTS.
 - Demostrar que existió una denuncia no establece que lo denunciado sea verdadero.
 - Una estimación privada no establece un dato oficial.
 - Un sobreseimiento no establece que la denuncia fuera falsa ni que el delito ocurrió.
