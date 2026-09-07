@@ -229,4 +229,6 @@ def test_ffaa_raise_pipeline_maps_claim_ref_and_exposes_uuid(db_session: Session
     assert payload["body_blocks"][1]["segments"][0]["claim_ids"] == [str(claim.id)]
     assert payload["claims"][0]["id"] == str(claim.id)
     assert payload["claims"][0]["canonical_text"]
+    assert payload["claims"][0]["editorial_labels"] == []
+    assert payload["claims"][0]["false_assertions"] == []
     assert "C1" not in str(payload["body_blocks"])

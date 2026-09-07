@@ -881,3 +881,239 @@ def test_sol_cannot_mark_supported_without_required_primary(db_session: Session)
     _service(db_session, sol, search).verify(event.id, trigger="admin")
     db_session.refresh(claim)
     assert claim.status != ClaimStatus.SUPPORTED
+
+
+def test_strong_verification_disproves_incompatible_sibling(db_session: Session) -> None:
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session, source_a.id, url="https://a.test/n", title="A", body="El decreto elimina X", content_hash="ha"
+    )
+    item_b = _item(
+        db_session, source_b.id, url="https://b.test/n", title="B", body="El decreto no elimina X", content_hash="hb"
+    )
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(event, item_b.id, relation_type=EventSourceRelation.ADDITIONAL)
+    loser = _claim(
+        db_session,
+        event,
+        text="El decreto elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        subject="decreto",
+        predicate="elimina",
+        object_text="X",
+        normalized_value="si",
+    )
+    winner = _claim(
+        db_session,
+        event,
+        text="El decreto no elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        subject="decreto",
+        predicate="elimina",
+        object_text="no X",
+        normalized_value="no",
+    )
+    _evidence(db_session, loser, item_a, excerpt="El decreto elimina X")
+    _evidence(db_session, winner, item_b, excerpt="El decreto no elimina X")
+    db_session.flush()
+    payload = {
+        "selected": [{"claim_id": str(winner.id), "reasons": ["policy:documento"]}],
+        "skipped_search": [],
+        "primary_source_supports_claim": {str(winner.id): True},
+        "sol": [
+            {
+                "claim_id": str(winner.id),
+                "status_after": "SUPPORTED",
+                "unresolved": False,
+            }
+        ],
+    }
+    service = VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))
+    service._reconcile_verified_competitors([loser, winner], payload)
+    assert winner.status == ClaimStatus.SUPPORTED
+    assert loser.status == ClaimStatus.DISPROVEN
+
+
+def test_strong_verification_does_not_disprove_temporal_update(db_session: Session) -> None:
+    at_15 = datetime(2026, 8, 24, 15, 0, tzinfo=timezone.utc)
+    at_17 = datetime(2026, 8, 24, 17, 0, tzinfo=timezone.utc)
+    source = _source(db_session)
+    item = _item(db_session, source.id, url="https://ejemplo.test/n", title="N", body="heridos", content_hash="h1")
+    event = _event(db_session, item)
+    earlier = _claim(
+        db_session,
+        event,
+        text="Se registraron 4 heridos",
+        claim_type="cifra",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        subject="accidente",
+        predicate="cantidad_heridos",
+        object_text="4",
+        normalized_value="4",
+        unit="personas",
+        occurred_at=at_15,
+    )
+    later = _claim(
+        db_session,
+        event,
+        text="Se confirmaron 6 heridos",
+        claim_type="cifra",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        subject="accidente",
+        predicate="cantidad_heridos",
+        object_text="6",
+        normalized_value="6",
+        unit="personas",
+        occurred_at=at_17,
+    )
+    _evidence(db_session, earlier, item, excerpt="4 heridos")
+    _evidence(db_session, later, item, excerpt="6 heridos")
+    payload = {
+        "selected": [{"claim_id": str(later.id), "reasons": ["policy:cifra"]}],
+        "skipped_search": [],
+        "primary_source_supports_claim": {str(later.id): True},
+        "sol": [{"claim_id": str(later.id), "status_after": "SUPPORTED", "unresolved": False}],
+    }
+    VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [earlier, later], payload
+    )
+    assert earlier.status == ClaimStatus.SUPPORTED
+    assert later.status == ClaimStatus.SUPPORTED
+
+
+def test_winner_without_primary_does_not_disprove_sibling(db_session: Session) -> None:
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(db_session, source_a.id, url="https://a.test/n", title="A", body="elimina", content_hash="ha")
+    item_b = _item(db_session, source_b.id, url="https://b.test/n", title="B", body="no elimina", content_hash="hb")
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(event, item_b.id, relation_type=EventSourceRelation.ADDITIONAL)
+    loser = _claim(
+        db_session,
+        event,
+        text="El decreto elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        subject="decreto",
+        predicate="elimina",
+        object_text="X",
+        normalized_value="si",
+    )
+    winner = _claim(
+        db_session,
+        event,
+        text="El decreto no elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        subject="decreto",
+        predicate="elimina",
+        object_text="no X",
+        normalized_value="no",
+    )
+    _evidence(db_session, loser, item_a, excerpt="elimina")
+    _evidence(db_session, winner, item_b, excerpt="no elimina")
+    payload = {
+        "selected": [{"claim_id": str(winner.id), "reasons": ["policy:documento"]}],
+        "skipped_search": [],
+        "primary_source_supports_claim": {str(winner.id): False},
+        "sol": [{"claim_id": str(winner.id), "status_after": "SUPPORTED", "unresolved": False}],
+    }
+    VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [loser, winner], payload
+    )
+    assert loser.status == ClaimStatus.SUPPORTED
+
+
+def test_canonical_text_fallback_does_not_auto_disprove(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(db_session, source.id, url="https://ejemplo.test/n", title="N", body="texto", content_hash="h1")
+    event = _event(db_session, item)
+    loser = _claim(
+        db_session,
+        event,
+        text="El decreto elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    winner = _claim(
+        db_session,
+        event,
+        text="El decreto no elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    _evidence(db_session, loser, item, excerpt="elimina")
+    _evidence(db_session, winner, item, excerpt="no elimina")
+    payload = {
+        "selected": [{"claim_id": str(winner.id), "reasons": ["policy:documento"]}],
+        "skipped_search": [],
+        "primary_source_supports_claim": {str(winner.id): True},
+        "sol": [{"claim_id": str(winner.id), "status_after": "SUPPORTED", "unresolved": False}],
+    }
+    VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [loser, winner], payload
+    )
+    assert loser.status == ClaimStatus.SUPPORTED
+
+
+def test_attach_upgrades_existing_mentions_to_supports(db_session: Session) -> None:
+    from app.services.verification_service import _PacketSource
+
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/n",
+        title="N",
+        body="El decreto no elimina X según el texto oficial.",
+        content_hash="h1",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="El decreto no elimina X",
+        claim_type="documento",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    row = _evidence(
+        db_session,
+        claim,
+        item,
+        excerpt="El decreto no elimina X",
+        evidence_type=EvidenceType.MENTIONS,
+    )
+    packet = _PacketSource(
+        ref=1,
+        url=item.url,
+        title=item.title or "",
+        snippet=item.clean_text or "",
+        item=item,
+    )
+    judgement = CheapEvidenceJudgement(
+        source_ref=1,
+        relation=EvidenceJudgementType.SUPPORTS,
+        excerpt="El decreto no elimina X",
+        confidence=0.9,
+    )
+    service = VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))
+    added, cited = service._attach_evidence(
+        event, claim, {1: packet}, 1, EvidenceType.SUPPORTS, judgement
+    )
+    assert added == 0
+    assert cited == 1
+    db_session.flush()
+    db_session.refresh(row)
+    assert row.evidence_type == EvidenceType.SUPPORTS

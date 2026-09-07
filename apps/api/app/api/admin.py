@@ -19,6 +19,8 @@ from app.repositories import (
     SourceItemRepository,
     SourceRepository,
 )
+from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
+from app.services.verification_outcome import latest_success_verification, parse_verification_run
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
@@ -90,8 +92,8 @@ def _item_out(item) -> dict:
     }
 
 
-def _claim_out(claim) -> dict:
-    return {
+def _claim_out(claim, editorial=None) -> dict:
+    payload = {
         "id": str(claim.id),
         "canonical_text": claim.canonical_text,
         "status": claim.status.value,
@@ -106,6 +108,14 @@ def _claim_out(claim) -> dict:
             for row in claim.evidence
         ],
     }
+    payload.update(editorial_public_payload(editorial))
+    return payload
+
+
+def _claims_out(event, db) -> list[dict]:
+    view = parse_verification_run(latest_success_verification(db, event.id))
+    editorials = labels_for_event_claims(list(event.claims), view)
+    return [_claim_out(claim, editorials.get(str(claim.id))) for claim in event.claims]
 
 
 def _article_out(article) -> dict:
@@ -333,7 +343,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             }
             for link in event.event_entities
         ],
-        "claims": [_claim_out(claim) for claim in event.claims],
+        "claims": _claims_out(event, db),
         "article": _article_out(article) if article is not None else None,
         "audit": _audit_out(runs),
         "token_usage": {

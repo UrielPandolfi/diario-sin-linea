@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -6,6 +6,7 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.domain.enums import (
@@ -30,6 +31,7 @@ from app.schemas.claims import (
 )
 from app.services.claim_service import CLAIM_STAGE, ClaimService
 from app.services.event_service import EventService
+from app.services.verification_service import VERIFICATION_STAGE
 
 
 def test_extracted_claim_coerces_numeric_normalized_value() -> None:
@@ -1002,4 +1004,427 @@ def test_extraction_prompt_covers_selective_claim_philosophy() -> None:
     assert "estimación, proyección o dato oficial" in prompt
     assert "tuvo acceso total a información estratégica" in prompt
     assert "No combines designación" in prompt
+
+
+def _strong_verification_run(session: Session, event, claim: Claim, **overrides) -> PipelineRun:
+    cid = str(claim.id)
+    skipped = overrides.get("skipped_search", False)
+    primary = overrides.get("primary", True)
+    unresolved = overrides.get("unresolved", False)
+    status_after = overrides.get("status_after", "SUPPORTED")
+    run = PipelineRun(
+        event_id=event.id,
+        stage=VERIFICATION_STAGE,
+        status=PipelineStatus.SUCCESS,
+        finished_at=overrides.get("finished_at") or utc_now(),
+        metadata_json={
+            "selected": [{"claim_id": cid, "reasons": ["policy:hecho"]}],
+            "skipped_search": [cid] if skipped else [],
+            "primary_source_supports_claim": {cid: primary},
+            "sol": [
+                {
+                    "claim_id": cid,
+                    "status_before": "SINGLE_SOURCE",
+                    "status_after": status_after,
+                    "unresolved": unresolved,
+                    "reason": "test",
+                }
+            ],
+        },
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
+def _two_source_event(session: Session):
+    source_a = _source(session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    body = "El choque dejó seis heridos. Fuentes oficiales desmintieron que hubiera heridos."
+    item_a = _item(session, source_a.id, url="https://a.test/n", title="A", body=body, content_hash="ha")
+    item_b = _item(session, source_b.id, url="https://b.test/n", title="B", body=body, content_hash="hb")
+    event = _event(session, item_a)
+    _attach(session, event, item_b)
+    return event, item_a, item_b
+
+
+def test_resolution_does_not_override_strong_verified_supported(db_session: Session) -> None:
+    event, _item_a, _item_b = _two_source_event(db_session)
+    first = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.8
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="dos")]
+        ),
+    )
+    _service(db_session, first).resolve(event.id, trigger="admin")
+    claim = _event_claims(db_session, event.id)[0]
+    assert claim.status == ClaimStatus.SUPPORTED
+    _strong_verification_run(db_session, event, claim)
+
+    second = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2,
+                            evidence_type=EvidenceType.CONTRADICTS,
+                            excerpt="desmintieron que hubiera heridos",
+                            confidence=0.8,
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.9, reason="mezcla")]
+        ),
+    )
+    _service(db_session, second).resolve(event.id, trigger="admin")
+    assert _event_claims(db_session, event.id)[0].status == ClaimStatus.SUPPORTED
+
+
+def test_resolution_does_not_override_strong_verified_disproven(db_session: Session) -> None:
+    event, _item_a, _item_b = _two_source_event(db_session)
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.8
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="dos")]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    claim = _event_claims(db_session, event.id)[0]
+    claim.status = ClaimStatus.DISPROVEN
+    db_session.flush()
+    _strong_verification_run(db_session, event, claim, status_after="DISPROVEN", primary=False)
+
+    again = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.8
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="dos")]
+        ),
+    )
+    _service(db_session, again).resolve(event.id, trigger="admin")
+    assert _event_claims(db_session, event.id)[0].status == ClaimStatus.DISPROVEN
+
+
+def test_resolution_reopens_when_new_evidence_arrives(db_session: Session) -> None:
+    event, _item_a, item_b = _two_source_event(db_session)
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SINGLE_SOURCE, confidence=0.9, reason="una")]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    claim = _event_claims(db_session, event.id)[0]
+    claim.status = ClaimStatus.SUPPORTED
+    db_session.flush()
+    run = _strong_verification_run(db_session, event, claim)
+    extra = ClaimEvidence(
+        claim_id=claim.id,
+        source_item_id=item_b.id,
+        evidence_type=EvidenceType.CONTRADICTS,
+        excerpt="desmintieron que hubiera heridos",
+        source_url=item_b.url,
+    )
+    db_session.add(extra)
+    db_session.flush()
+    extra.created_at = run.finished_at + timedelta(seconds=5)
+    db_session.flush()
+
+    again = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2,
+                            evidence_type=EvidenceType.CONTRADICTS,
+                            excerpt="desmintieron que hubiera heridos",
+                            confidence=0.8,
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.9, reason="mezcla")]
+        ),
+    )
+    _service(db_session, again).resolve(event.id, trigger="admin")
+    assert _event_claims(db_session, event.id)[0].status == ClaimStatus.CONFLICTING
+
+
+def test_locked_supported_can_become_outdated_after_later_update(db_session: Session) -> None:
+    at_15 = datetime(2026, 8, 24, 15, 0, tzinfo=timezone.utc)
+    at_17 = datetime(2026, 8, 24, 17, 0, tzinfo=timezone.utc)
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/15",
+        title="A",
+        body="A las 15:00 se registraron 4 heridos.",
+        content_hash="ha",
+        published_at=at_15,
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/17",
+        title="B",
+        body="A las 17:00 se confirmaron 6 heridos.",
+        content_hash="hb",
+        published_at=at_17,
+    )
+    event = _event(db_session, item_a)
+    _attach(db_session, event, item_b)
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Se registraron 4 heridos",
+                    normalized_value="4",
+                    object_text="4 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=at_15,
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+                _extracted(
+                    text="Se confirmaron 6 heridos",
+                    normalized_value="6",
+                    object_text="6 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=at_17,
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9
+                        )
+                    ],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SINGLE_SOURCE, confidence=0.8, reason="a"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.SINGLE_SOURCE, confidence=0.8, reason="b"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    by_value = {claim.normalized_value: claim for claim in _event_claims(db_session, event.id)}
+    earlier = by_value["4"]
+    earlier.status = ClaimStatus.SUPPORTED
+    db_session.flush()
+    _strong_verification_run(db_session, event, earlier)
+
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    again = {claim.normalized_value: claim.status for claim in _event_claims(db_session, event.id)}
+    assert again["4"] == ClaimStatus.OUTDATED
+    assert again["6"] == ClaimStatus.SINGLE_SOURCE
+
+
+def test_skipped_search_verification_does_not_lock_resolution(db_session: Session) -> None:
+    event, _item_a, _item_b = _two_source_event(db_session)
+    first = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.8
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="dos")]
+        ),
+    )
+    _service(db_session, first).resolve(event.id, trigger="admin")
+    claim = _event_claims(db_session, event.id)[0]
+    _strong_verification_run(db_session, event, claim, skipped_search=True)
+
+    second = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2,
+                            evidence_type=EvidenceType.CONTRADICTS,
+                            excerpt="desmintieron que hubiera heridos",
+                            confidence=0.8,
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.9, reason="mezcla")]
+        ),
+    )
+    _service(db_session, second).resolve(event.id, trigger="admin")
+    assert _event_claims(db_session, event.id)[0].status == ClaimStatus.CONFLICTING
+
+
+def test_supported_without_primary_does_not_lock_resolution(db_session: Session) -> None:
+    event, _item_a, _item_b = _two_source_event(db_session)
+    first = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.8
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="dos")]
+        ),
+    )
+    _service(db_session, first).resolve(event.id, trigger="admin")
+    claim = _event_claims(db_session, event.id)[0]
+    _strong_verification_run(db_session, event, claim, primary=False)
+
+    second = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Hubo seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="seis heridos", confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2,
+                            evidence_type=EvidenceType.CONTRADICTS,
+                            excerpt="desmintieron que hubiera heridos",
+                            confidence=0.8,
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.9, reason="mezcla")]
+        ),
+    )
+    _service(db_session, second).resolve(event.id, trigger="admin")
+    assert _event_claims(db_session, event.id)[0].status == ClaimStatus.CONFLICTING
 

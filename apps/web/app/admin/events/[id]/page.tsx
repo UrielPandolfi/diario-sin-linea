@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { editorialLabelCopy } from "@/features/article/claim-status";
 import { adminFetch, adminJson, formatDuration, formatTokens, formatWhen, type AdminEventDetail } from "@/lib/admin";
 
 export default function AdminEventDetailPage() {
@@ -374,6 +375,7 @@ export default function AdminEventDetailPage() {
                   <tr className="border-b border-border text-left text-secondary">
                     <th className="px-4 py-2 font-medium">Claim</th>
                     <th className="px-4 py-2 font-medium">Estado</th>
+                    <th className="px-4 py-2 font-medium">Etiquetas</th>
                     <th className="px-4 py-2 font-medium">Importancia</th>
                     <th className="px-4 py-2 font-medium">Fuentes</th>
                   </tr>
@@ -386,6 +388,9 @@ export default function AdminEventDetailPage() {
                     >
                       <td className="px-4 py-3 text-primary">{claim.canonical_text}</td>
                       <td className="px-4 py-3">{claim.status}</td>
+                      <td className="px-4 py-3 text-[11px] uppercase tracking-[0.12em] text-accent-petrol">
+                        {(claim.editorial_labels ?? []).map(editorialLabelCopy).join(" · ") || "—"}
+                      </td>
                       <td className="px-4 py-3">{claim.importance}</td>
                       <td className="px-4 py-3 text-xs">
                         {claim.evidence

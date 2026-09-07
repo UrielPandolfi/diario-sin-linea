@@ -9,8 +9,19 @@ const STATUS_LABELS: Record<string, string> = {
   OUTDATED: "Desactualizado",
 };
 
+const EDITORIAL_LABELS: Record<string, string> = {
+  CHECKED: "Chequeado",
+  DISCREPANCY: "Discrepancia",
+  DISPUTED: "En disputa",
+  FALSE_CLAIM: "Afirmación falsa",
+};
+
 export function claimStatusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
+}
+
+export function editorialLabelCopy(label: string): string {
+  return EDITORIAL_LABELS[label] ?? label;
 }
 
 export function claimsForIds(ids: string[], claims: ArticleClaim[] | undefined): ArticleClaim[] {

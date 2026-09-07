@@ -8,18 +8,20 @@ from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType, PipelineStatus
+from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType
 from app.models import (
     Article,
     ArticleVersion,
     Claim,
+    ClaimEvidence,
     Event,
     EventSource,
     EventUpdate,
-    PipelineRun,
     SourceItem,
 )
 from app.repositories import ArticleRepository, EventRepository
+from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
+from app.services.verification_outcome import latest_success_verification, parse_verification_run
 
 PUBLIC_CANDIDATE_CAP = 200
 DEFAULT_LIMIT = 20
@@ -105,39 +107,30 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
 
 
 def compact_public_claims(session: Session, event: Event) -> list[dict]:
+    run = latest_success_verification(session, event.id)
+    view = parse_verification_run(run)
+    editorials = labels_for_event_claims(list(event.claims), view)
     sol_by_id: dict[str, dict] = {}
-    run = session.scalars(
-        select(PipelineRun)
-        .where(
-            PipelineRun.event_id == event.id,
-            PipelineRun.stage == "verification",
-            PipelineRun.status == PipelineStatus.SUCCESS,
-        )
-        .order_by(PipelineRun.finished_at.desc())
-    ).first()
-    if run is not None:
-        for row in (run.metadata_json or {}).get("sol") or []:
-            if not isinstance(row, dict) or not row.get("claim_id"):
-                continue
-            sol_by_id[str(row["claim_id"])] = {
-                "status_after": row.get("status_after"),
-                "unresolved": row.get("unresolved"),
-                "reason": row.get("reason"),
-            }
+    for cid, sol in view.sol_by_id.items():
+        sol_by_id[cid] = {
+            "status_after": sol.get("status_after"),
+            "unresolved": sol.get("unresolved"),
+            "reason": sol.get("reason"),
+        }
     rows: list[dict] = []
     for claim in event.claims:
         source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
-        rows.append(
-            {
-                "id": str(claim.id),
-                "canonical_text": claim.canonical_text,
-                "status": claim.status.value,
-                "importance": claim.importance.value,
-                "source_count": len(source_ids),
-                "evidence_count": len(claim.evidence),
-                "verification": sol_by_id.get(str(claim.id)),
-            }
-        )
+        payload = {
+            "id": str(claim.id),
+            "canonical_text": claim.canonical_text,
+            "status": claim.status.value,
+            "importance": claim.importance.value,
+            "source_count": len(source_ids),
+            "evidence_count": len(claim.evidence),
+            "verification": sol_by_id.get(str(claim.id)),
+        }
+        payload.update(editorial_public_payload(editorials.get(str(claim.id))))
+        rows.append(payload)
     return rows
 
 
@@ -277,7 +270,10 @@ class FeedRankingService:
                 selectinload(Event.event_sources)
                 .selectinload(EventSource.source_item)
                 .selectinload(SourceItem.source),
-                selectinload(Event.claims).selectinload(Claim.evidence),
+                selectinload(Event.claims)
+                .selectinload(Claim.evidence)
+                .selectinload(ClaimEvidence.source_item)
+                .selectinload(SourceItem.source),
             )
             .where(Event.id == event_id)
         )

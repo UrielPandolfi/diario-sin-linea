@@ -8,6 +8,7 @@ from app.models import (
     Article,
     ArticleVersion,
     Claim,
+    ClaimEvidence,
     Entity,
     Event,
     EventEmbedding,
@@ -147,7 +148,10 @@ class EventRepository:
                 .selectinload(SourceItem.source),
                 selectinload(Event.event_entities),
                 selectinload(Event.updates),
-                selectinload(Event.claims).selectinload(Claim.evidence),
+                selectinload(Event.claims)
+                .selectinload(Claim.evidence)
+                .selectinload(ClaimEvidence.source_item)
+                .selectinload(SourceItem.source),
             )
             .where(Event.id == event_id)
         )

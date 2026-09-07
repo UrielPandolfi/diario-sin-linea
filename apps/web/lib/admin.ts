@@ -104,6 +104,13 @@ export type AdminEventDetail = AdminEvent & {
       excerpt: string | null;
       source_item_id: string;
     }[];
+    editorial_labels?: string[];
+    false_assertions?: {
+      source_item_id: string;
+      source_name: string;
+      source_url: string | null;
+      excerpt: string;
+    }[];
   }[];
   article: {
     id: string;

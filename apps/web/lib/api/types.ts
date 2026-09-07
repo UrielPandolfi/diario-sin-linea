@@ -28,6 +28,13 @@ export type ArticleBodyBlock = {
   segments: ArticleBodySegment[];
 };
 
+export type FalseAssertion = {
+  source_item_id: string;
+  source_name: string;
+  source_url: string | null;
+  excerpt: string;
+};
+
 export type ArticleClaim = {
   id: string;
   canonical_text: string;
@@ -35,6 +42,8 @@ export type ArticleClaim = {
   importance: string;
   source_count: number;
   evidence_count: number;
+  editorial_labels?: string[];
+  false_assertions?: FalseAssertion[];
   verification: {
     status_after: string | null;
     unresolved: boolean | null;

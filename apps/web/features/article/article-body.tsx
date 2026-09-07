@@ -1,6 +1,6 @@
 "use client";
 
-import { claimsForIds, claimStatusLabel } from "@/features/article/claim-status";
+import { claimsForIds, claimStatusLabel, editorialLabelCopy } from "@/features/article/claim-status";
 import type { ArticleBodyBlock, ArticleClaim } from "@/lib/api/types";
 import { useEffect, useId, useRef, useState } from "react";
 
@@ -178,10 +178,24 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
   if (claim.verification?.reason) {
     verificationBits.push(claim.verification.reason);
   }
+  const editorialLabels = claim.editorial_labels ?? [];
+  const falseAssertions = claim.false_assertions ?? [];
 
   return (
     <span className={divided ? "mt-3 block border-t border-border pt-3" : "block"}>
       <span className="block font-sans text-sm leading-snug text-primary">{claim.canonical_text}</span>
+      {editorialLabels.length > 0 ? (
+        <span className="mt-1.5 flex flex-wrap gap-1">
+          {editorialLabels.map((label) => (
+            <span
+              key={label}
+              className="border border-border px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-[0.12em] text-accent-petrol"
+            >
+              {editorialLabelCopy(label)}
+            </span>
+          ))}
+        </span>
+      ) : null}
       <span className="mt-1.5 block font-sans text-[11px] uppercase tracking-[0.12em] text-accent-petrol">
         {claimStatusLabel(claim.status)}
       </span>
@@ -190,6 +204,11 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
         {" · "}
         {claim.evidence_count} {claim.evidence_count === 1 ? "evidencia" : "evidencias"}
       </span>
+      {falseAssertions.map((row) => (
+        <span key={row.source_item_id} className="mt-1.5 block font-sans text-xs leading-snug text-secondary">
+          {row.source_name}: “{row.excerpt}”
+        </span>
+      ))}
       {verificationBits.length > 0 ? (
         <span className="mt-1.5 block font-sans text-xs leading-snug text-secondary">{verificationBits.join(" · ")}</span>
       ) : null}

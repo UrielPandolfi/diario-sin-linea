@@ -58,6 +58,13 @@ class EvidenceType(StrEnum):
     MENTIONS = "MENTIONS"
 
 
+class EditorialLabel(StrEnum):
+    CHECKED = "CHECKED"
+    DISCREPANCY = "DISCREPANCY"
+    DISPUTED = "DISPUTED"
+    FALSE_CLAIM = "FALSE_CLAIM"
+
+
 class EntityType(StrEnum):
     PERSON = "PERSON"
     ORGANIZATION = "ORGANIZATION"

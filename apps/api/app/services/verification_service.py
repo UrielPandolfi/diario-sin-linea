@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -51,7 +52,7 @@ from app.schemas.verification import (
     VerificationPlan,
     VerificationResult,
 )
-from app.services.claim_service import CLAIM_STAGE
+from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for, _EVIDENCE_RANK
 from app.services.event_service import EventService
 from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
 from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
@@ -70,9 +71,13 @@ from app.services.verification_plan import (
     skip_directed_search,
     try_resolve_numeric_comparison,
 )
+from app.services.verification_outcome import (
+    VERIFICATION_STAGE,
+    is_strong_verification,
+    view_from_mapping,
+)
 from app.services.verification_policy import canonicalize_claim_type, select_claims
 
-VERIFICATION_STAGE = "verification"
 SNIPPET_CHARS = 1500
 _PLANNER_ERRORS = (ProviderNotConfiguredError, ValidationError, ValueError, KeyError, RuntimeError)
 
@@ -367,7 +372,38 @@ class VerificationService:
                     "escalated": False,
                 }
             )
+        self._reconcile_verified_competitors(list(event.claims), payload)
         return payload
+
+    def _reconcile_verified_competitors(self, claims: list[Claim], payload: dict[str, Any]) -> None:
+        view = view_from_mapping(payload)
+        groups: dict[str, list[Claim]] = defaultdict(list)
+        for claim in claims:
+            groups[comparison_key_for(claim)].append(claim)
+        winners = [
+            claim
+            for claim in claims
+            if claim.status == ClaimStatus.SUPPORTED and is_strong_verification(claim.id, view)
+        ]
+        for winner in winners:
+            if not _has_structured_spo(winner):
+                continue
+            for sibling in groups[comparison_key_for(winner)]:
+                if sibling.id == winner.id:
+                    continue
+                if assertion_key_for(sibling) == assertion_key_for(winner):
+                    continue
+                if not _has_structured_spo(sibling):
+                    continue
+                if sibling.status == ClaimStatus.OUTDATED:
+                    continue
+                if sibling.status == ClaimStatus.SUPPORTED and is_strong_verification(sibling.id, view):
+                    continue
+                if not any(row.evidence_type == EvidenceType.SUPPORTS for row in sibling.evidence):
+                    continue
+                if not _same_temporal_context(winner, sibling):
+                    continue
+                sibling.status = ClaimStatus.DISPROVEN
 
     def _plan_for(self, claim: Claim, event: Event) -> VerificationPlan:
         fallback = heuristic_plan(claim, jurisdiction=self.settings.editorial_country_code)
@@ -647,7 +683,26 @@ class VerificationService:
             excerpt, item.clean_text, item.excerpt, item.title, src.snippet
         ):
             return 0, 0
-        if any(existing.source_item_id == item.id for existing in claim.evidence):
+        existing = next((ev for ev in claim.evidence if ev.source_item_id == item.id), None)
+        if existing is None:
+            existing = self.session.scalars(
+                select(ClaimEvidence).where(
+                    ClaimEvidence.claim_id == claim.id,
+                    ClaimEvidence.source_item_id == item.id,
+                )
+            ).first()
+            if existing is not None:
+                claim.evidence.append(existing)
+        if existing is not None:
+            if _EVIDENCE_RANK[evidence_type] >= _EVIDENCE_RANK[existing.evidence_type]:
+                existing.evidence_type = evidence_type
+            if excerpt and not existing.excerpt:
+                existing.excerpt = excerpt
+            confidence = getattr(row, "confidence", None)
+            if confidence is not None:
+                existing.confidence = confidence
+            if item.url:
+                existing.source_url = item.url
             return 0, 1
         evidence = ClaimEvidence(
             claim_id=claim.id,
@@ -713,3 +768,15 @@ class VerificationService:
                 is_enabled=True,
             )
         )
+
+
+def _has_structured_spo(claim: Claim) -> bool:
+    return bool((claim.subject or "").strip() and (claim.predicate or "").strip())
+
+
+def _same_temporal_context(left: Claim, right: Claim) -> bool:
+    if left.occurred_at is None and right.occurred_at is None:
+        return True
+    if left.occurred_at is None or right.occurred_at is None:
+        return False
+    return left.occurred_at == right.occurred_at

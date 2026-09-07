@@ -36,6 +36,11 @@ from app.schemas.claims import (
     ExtractedClaim,
     ExtractedEvidence,
 )
+from app.services.verification_outcome import (
+    is_verification_locked,
+    latest_success_verification,
+    parse_verification_run,
+)
 from app.services.verification_policy import independent_support_count
 
 CLAIM_STAGE = "claim_resolution"
@@ -355,7 +360,7 @@ class ClaimService:
                 )
                 resolution = _merge_resolution(resolution, override)
                 escalated_done = escalate_refs
-        needs = self._apply_resolution(claims, resolution)
+        needs = self._apply_resolution(claims, resolution, event_id=event.id)
         self.session.flush()
         return {
             "extracted": len(batch.claims),
@@ -610,11 +615,27 @@ class ClaimService:
                     )
         return "\n".join(lines)
 
-    def _apply_resolution(self, claims: list[Claim], batch: ClaimResolutionBatch) -> list[dict]:
+    def _apply_resolution(
+        self,
+        claims: list[Claim],
+        batch: ClaimResolutionBatch,
+        *,
+        event_id: UUID,
+    ) -> list[dict]:
+        verify_run = latest_success_verification(self.session, event_id)
+        view = parse_verification_run(verify_run)
+        groups: dict[str, list[Claim]] = defaultdict(list)
+        for claim in claims:
+            groups[comparison_key_for(claim)].append(claim)
         by_ref = {item.claim_ref: item for item in batch.items}
         needs: list[dict] = []
         for index, claim in enumerate(claims, start=1):
             item = by_ref.get(index)
+            members = groups[comparison_key_for(claim)]
+            if is_verification_locked(claim, members, view, verify_run):
+                if item is not None and item.needs_external_verification:
+                    needs.append({"claim_id": str(claim.id), "claim_ref": index})
+                continue
             status: ClaimStatus | None = item.status if item is not None else None
             if status is None:
                 status = self._heuristic_status(claim)
@@ -626,10 +647,10 @@ class ClaimService:
             if item is not None and item.needs_external_verification:
                 needs.append({"claim_id": str(claim.id), "claim_ref": index})
 
-        self._reconcile_competing_values(claims)
+        self._reconcile_competing_values(claims, verify_run=verify_run, view=view)
         return needs
 
-    def _reconcile_competing_values(self, claims: list[Claim]) -> None:
+    def _reconcile_competing_values(self, claims: list[Claim], *, verify_run, view) -> None:
         groups: dict[str, list[Claim]] = defaultdict(list)
         for claim in claims:
             groups[comparison_key_for(claim)].append(claim)
@@ -640,7 +661,9 @@ class ClaimService:
             clock = _competing_clock(members)
             if clock is None:
                 for claim in members:
-                    if claim.status not in {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}:
+                    if is_verification_locked(claim, members, view, verify_run):
+                        continue
+                    if claim.status not in _PROTECTED_STATUSES:
                         claim.status = ClaimStatus.UNCERTAIN
                 continue
             latest = max(clock.values())
@@ -651,10 +674,15 @@ class ClaimService:
             latest_keys = {assertion_key_for(claim) for claim in latest_members}
             if len(latest_keys) >= 2:
                 for claim in latest_members:
-                    if claim.status != ClaimStatus.DISPROVEN:
-                        claim.status = ClaimStatus.CONFLICTING
+                    if claim.status == ClaimStatus.DISPROVEN:
+                        continue
+                    if is_verification_locked(claim, members, view, verify_run):
+                        continue
+                    claim.status = ClaimStatus.CONFLICTING
                 continue
             for claim in latest_members:
+                if is_verification_locked(claim, members, view, verify_run):
+                    continue
                 if claim.status == ClaimStatus.CONFLICTING:
                     claim.status = self._clamp_supported(claim, self._heuristic_status(claim))
 
