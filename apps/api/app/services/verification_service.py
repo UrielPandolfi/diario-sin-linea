@@ -275,6 +275,8 @@ class VerificationService:
                 plan.verification_target.value,
                 plan.subject.value,
                 province=event.province,
+                judicial_forum=plan.judicial_forum.value,
+                claim_text=claim.canonical_text,
             )
             payload["plans"][claim_id] = plan.model_dump(mode="json")
             payload["temporal_scope"][claim_id] = plan.temporal_scope.value
@@ -408,7 +410,8 @@ class VerificationService:
             [
                 f"Suceso (contexto mínimo, no uses su fecha para la temporalidad del Claim): {event.title_internal}",
                 f"Detectado/inicio: {when}",
-                f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
+                f"Lugar del suceso (no lo uses para foro judicial si el Claim no lo menciona): "
+                f"{event.locality or ''} {event.province or ''}".strip(),
                 f"canonical_text={claim.canonical_text}",
                 f"claim_type={canonicalize_claim_type(claim.claim_type)}",
                 f"importance={claim.importance.value} status={claim.status.value}",

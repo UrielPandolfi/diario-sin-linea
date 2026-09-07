@@ -62,7 +62,10 @@ def test_extraction_keeps_accusation_discards_vague_and_splits_compound() -> Non
     assert "separalas" in folded
     assert "decisión judicial" in folded
     assert "detalles probatorios secundarios" in folded
-    assert "comparación se resuelve después por código" in folded
+    assert "comparación matemática la resuelve código" in folded
+    assert "benchmark factual" in folded
+    assess = load_prompt("claim_evidence_assessment.md").casefold()
+    assert "proposición material completa" in assess
 
 
 def test_writing_and_audit_block_unattributed_single_source() -> None:
@@ -96,19 +99,45 @@ def test_registry_prioritizes_indec_boletin_and_mendoza_courts() -> None:
     assert stats[0] == "indec.gob.ar"
     appointments = preferred_domains("AR", "OFFICIAL_RECORD", "GOVERNMENT_APPOINTMENT")
     assert "boletinoficial.gob.ar" in appointments
-    judicial = preferred_domains("AR", "JUDICIAL_RECORD", "JUDICIAL_CASE", province="Mendoza")
+    judicial = preferred_domains(
+        "AR",
+        "JUDICIAL_RECORD",
+        "JUDICIAL_CASE",
+        province="Mendoza",
+        judicial_forum="PROVINCIAL",
+        claim_text="La Suprema Corte de Mendoza sobreseyó a los acusados",
+    )
     assert judicial[0] == "jus.mendoza.gov.ar"
     assert "csjn.gov.ar" in judicial
 
 
 def test_registry_includes_regulated_tariff_domains() -> None:
     domains = preferred_domains("AR", "OFFICIAL_RECORD", "REGULATED_TARIFF")
+    assert domains[0] in {"energia.gob.ar", "enre.gob.ar", "enargas.gob.ar"}
     assert "energia.gob.ar" in domains
     assert "enre.gob.ar" in domains
     assert "enargas.gob.ar" in domains
     assert "eras.gob.ar" in domains
     assert "aysa.com.ar" in domains
     assert "indec.gob.ar" not in domains
+    electricity = preferred_domains(
+        "AR",
+        "OFFICIAL_RECORD",
+        "REGULATED_TARIFF",
+        claim_text="Las facturas de electricidad aumentarán 1,75%",
+    )
+    assert electricity[0] == "energia.gob.ar"
+    assert electricity[1] == "enre.gob.ar"
+    assert "aysa.com.ar" not in electricity
+    water = preferred_domains(
+        "AR",
+        "OFFICIAL_RECORD",
+        "REGULATED_TARIFF",
+        claim_text="AySA comunicó una actualización de 2,37% para agua y cloaca",
+    )
+    assert water[0] == "eras.gob.ar"
+    assert "aysa.com.ar" in water
+    assert "enre.gob.ar" not in water
 
 
 def test_heuristic_plan_maps_types_and_historical_year() -> None:
@@ -231,9 +260,18 @@ def test_policy_skips_well_supported_declaration_not_high_stat() -> None:
         claim_type="hecho",
         importance=ClaimImportance.HIGH,
         status=ClaimStatus.SUPPORTED,
+        canonical_text="El incendio dejó seis heridos",
         evidence=declaration.evidence,
     )
     assert policy_selects(well_hecho) is False
+    ruling = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        canonical_text="La Suprema Corte de Mendoza sobreseyó a los acusados",
+        evidence=declaration.evidence,
+    )
+    assert policy_selects(ruling) is True
 
 
 def test_select_claims_still_vetoes_mundane() -> None:
@@ -483,6 +521,14 @@ def test_primary_required_blocks_supported_without_primary() -> None:
         apply_primary_requirement(claim, ClaimStatus.SUPPORTED, plan, primary_supports=True)
         == ClaimStatus.SUPPORTED
     )
+    already = _claim(
+        status=ClaimStatus.SUPPORTED,
+        evidence=claim.evidence,
+    )
+    assert (
+        apply_primary_requirement(already, ClaimStatus.SUPPORTED, plan, primary_supports=False)
+        == ClaimStatus.SUPPORTED
+    )
 
 
 def test_reprints_and_blogs_are_not_independent_corroboration() -> None:
@@ -518,4 +564,96 @@ def test_postgres_safe_json_strips_nul() -> None:
     cleaned = postgres_safe_json(payload)
     assert "\x00" not in cleaned["reason"]
     assert "\x00" not in cleaned["nested"][0]["excerpt"]
+
+
+def test_federal_judicial_queries_do_not_use_event_province() -> None:
+    from app.schemas.verification import JudicialForum
+
+    federal = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        canonical_text=(
+            "Víctor Eduardo Vital presentó una denuncia penal ante el Juzgado Federal "
+            "de 1° Instancia de la Provincia de San Luis"
+        ),
+    )
+    plan = heuristic_plan(federal)
+    assert plan.verification_target == VerificationTarget.JUDICIAL_RECORD
+    assert plan.judicial_forum == JudicialForum.FEDERAL
+    domains = preferred_domains(
+        "AR",
+        plan.verification_target.value,
+        plan.subject.value,
+        province="Buenos Aires",
+        judicial_forum=plan.judicial_forum.value,
+        claim_text=federal.canonical_text,
+    )
+    assert "scba.gov.ar" not in domains
+    assert "pjn.gov.ar" in domains
+    assert "justicia.sanluis.gov.ar" not in domains
+
+    unknown = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        canonical_text="Víctor Eduardo Vital presentó una denuncia penal contra funcionarios",
+    )
+    unknown_plan = heuristic_plan(unknown)
+    assert unknown_plan.judicial_forum == JudicialForum.UNKNOWN
+    unknown_domains = preferred_domains(
+        "AR",
+        unknown_plan.verification_target.value,
+        unknown_plan.subject.value,
+        province="Buenos Aires",
+        judicial_forum=unknown_plan.judicial_forum.value,
+        claim_text=unknown.canonical_text,
+    )
+    assert "scba.gov.ar" not in unknown_domains
+    assert "pjn.gov.ar" in unknown_domains
+
+
+def test_well_supported_documentary_searches_primary_without_sol() -> None:
+    from app.schemas.verification import JudicialForum
+
+    evidence = [
+        SimpleNamespace(
+            evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://a.test/n"
+        ),
+        SimpleNamespace(
+            evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://b.test/n"
+        ),
+    ]
+    claim = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+        canonical_text="La Suprema Corte de Mendoza sobreseyó a Hugo Auradou y Oscar Jegou",
+        evidence=evidence,
+    )
+    plan = heuristic_plan(claim)
+    assert plan.verification_target == VerificationTarget.JUDICIAL_RECORD
+    assert plan.judicial_forum == JudicialForum.PROVINCIAL
+    assert plan.primary_source_required is True
+    preferred = preferred_domains(
+        "AR",
+        plan.verification_target.value,
+        plan.subject.value,
+        province="Mendoza",
+        judicial_forum=plan.judicial_forum.value,
+        claim_text=claim.canonical_text,
+    )
+    assert preferred[0] == "jus.mendoza.gov.ar"
+    assert skip_directed_search(claim, plan, preferred) is False
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.DOES_NOT_ESTABLISH,
+                reason="no es el fallo",
+            )
+        ],
+        ambiguous=False,
+    )
+    assert needs_sol_after_assessment(claim, plan, assessment, primary_support=False) is False
 

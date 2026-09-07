@@ -13,6 +13,7 @@ Para cada fuente numerada, decidí la relación semántica:
 Reglas:
 
 - Un dominio oficial prueba procedencia (fuente primaria encontrada), no la relación semántica. El texto tiene que sostener la proposición para SUPPORTS.
+- SUPPORTS exige la proposición material completa del Claim. Si el texto solo confirma una parte (el acto, un nombre, una cifra) y no otra parte material (una caracterización, un atributo, un cargo valorativo), usá QUALIFIES o DOES_NOT_ESTABLISH, no SUPPORTS.
 - Demostrar que existió una denuncia no establece que lo denunciado sea verdadero.
 - Una estimación privada no establece un dato oficial.
 - Un sobreseimiento no establece que la denuncia fuera falsa ni que el delito ocurrió.

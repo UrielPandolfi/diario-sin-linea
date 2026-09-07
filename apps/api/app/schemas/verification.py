@@ -40,6 +40,12 @@ class VerificationSubject(StrEnum):
     ACCUSATION = "ACCUSATION"
 
 
+class JudicialForum(StrEnum):
+    FEDERAL = "FEDERAL"
+    PROVINCIAL = "PROVINCIAL"
+    UNKNOWN = "UNKNOWN"
+
+
 class EvidenceJudgementType(StrEnum):
     SUPPORTS = "SUPPORTS"
     CONTRADICTS = "CONTRADICTS"
@@ -60,6 +66,7 @@ class VerificationPlan(BaseModel):
     verification_target: VerificationTarget = VerificationTarget.GENERAL_WEB
     temporal_scope: TemporalScope = TemporalScope.TIMELESS
     subject: VerificationSubject = VerificationSubject.GENERAL
+    judicial_forum: JudicialForum = JudicialForum.UNKNOWN
     jurisdiction: str = "AR"
     primary_source_required: bool = False
     independent_corroboration_required: bool = False

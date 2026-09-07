@@ -67,7 +67,7 @@ Mejor: Cristina Kirchner designó a Natalia Laura Federman como Directora Nacion
 
 Y, si es material: Natalia Laura Federman tenía ciudadanía británica al momento de su designación.
 
-No combines designación + atributo personal (nacionalidad, parentesco) + caracterización editorial. El `canonical_text` de una designación debe nombrar el cargo concreto (subsecretaria, directora nacional, etc.), nunca una caracterización. Prohibido en canonical_text: “cargo de alta sensibilidad”, “alta sensibilidad”, “polémica medida”, “cargos clave”. Si el original mezcla esas frases, extraé solo el acto de designar y, aparte, la nacionalidad si es material.
+No combines designación + atributo personal (nacionalidad, parentesco) + caracterización editorial. El `canonical_text` de una designación debe nombrar el cargo concreto (subsecretaria, directora nacional, etc.), nunca una caracterización. Prohibido en canonical_text: “cargo de alta sensibilidad”, “alta sensibilidad”, “polémica medida”, “cargos clave”, “cargo sensible”. Si el original mezcla esas frases, extraé solo el acto de designar (con el cargo nominal) y, aparte, la nacionalidad si es material. Un Claim que mezcla acto verificable + caracterización no puede confirmarse después con un documento que solo prueba el acto.
 
 Acusaciones materiales:
 
@@ -83,9 +83,13 @@ Priorizá proposiciones en este orden: 1) la decisión judicial; 2) el estado pr
 
 Detalles probatorios secundarios (informes médicos, pericias, “lesiones inespecíficas”, testimonios de contexto, cronología accesoria) tienen menor prioridad. No los extraigas como Claim HIGH si ya hay decisión, estado procesal o consecuencia jurídica. Si los extraés, usá LOW.
 
-Comparaciones derivadas:
+Comparaciones y benchmarks:
 
-No extraigas como Claim una comparación aritmética (“A quedó por debajo de B”) si A y B son cifras que ya extraés por separado. Extraé el dato oficial (p. ej. la variación del IPC informada por el organismo) y cada cifra operativa. La comparación se resuelve después por código, no por un modelo.
+Si la tesis central de la nota depende de una comparación objetiva (por debajo de, por encima de, mayor que, menor que, inferior a, superior a), extraé como Claim independiente el benchmark factual cuando sea material (p. ej. la variación del IPC informada por INDEC). Extraé también cada magnitud comparada que sea operativa.
+
+No extraigas comparaciones triviales ni uses un Claim para que un modelo compruebe una desigualdad. Ejemplo conceptual: A = variación de electricidad; B = variación de gas; C = IPC oficial. Extraé A, B y C. Si A, B y C quedan SUPPORTED, la comparación matemática la resuelve código, no un LLM.
+
+Si igual emitís un Claim de comparación (“A quedó por debajo de C”), sus componentes deben existir como Claims separados.
 
 Caracterizaciones vagas:
 

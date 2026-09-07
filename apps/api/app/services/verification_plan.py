@@ -11,14 +11,15 @@ from app.models import Claim
 from app.schemas.verification import (
     CheapClaimEvidenceAssessment,
     EvidenceJudgementType,
+    JudicialForum,
     SearchWindow,
     TemporalScope,
     VerificationPlan,
     VerificationSubject,
     VerificationTarget,
 )
-from app.services.evidence_source_registry import is_preferred_domain
-from app.services.verification_policy import canonicalize_claim_type, independent_support_count
+from app.services.evidence_source_registry import infer_judicial_forum, is_preferred_domain
+from app.services.verification_policy import canonicalize_claim_type, independent_support_count, is_well_supported
 
 _YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
@@ -139,11 +140,16 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
     subject = VerificationSubject.GENERAL
     primary = False
     corroboration = False
+    forum = JudicialForum.UNKNOWN
     text = (claim.canonical_text or "").lower()
     if _looks_judicial_act(text):
         target = VerificationTarget.JUDICIAL_RECORD
         subject = VerificationSubject.JUDICIAL_CASE
         primary = True
+        try:
+            forum = JudicialForum(infer_judicial_forum(claim.canonical_text))
+        except ValueError:
+            forum = JudicialForum.UNKNOWN
     elif kind == "documento":
         target = VerificationTarget.OFFICIAL_RECORD
         subject = VerificationSubject.LAW_OR_DECREE
@@ -174,6 +180,7 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
             independent_corroboration_required=corroboration,
             year_hint=year_hint,
             search_terms=[],
+            judicial_forum=forum,
         )
     )
 
@@ -208,6 +215,7 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: d
         scope = TemporalScope.TIMELESS
     target = planned.verification_target
     subject = planned.subject
+    forum = planned.judicial_forum
     if fallback.subject == VerificationSubject.REGULATED_TARIFF:
         subject = fallback.subject
         if planned.verification_target == VerificationTarget.OFFICIAL_STATISTICS:
@@ -222,6 +230,10 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: d
     if fallback.verification_target == VerificationTarget.JUDICIAL_RECORD:
         target = fallback.verification_target
         subject = fallback.subject
+        if fallback.judicial_forum != JudicialForum.UNKNOWN:
+            forum = fallback.judicial_forum
+        elif planned.judicial_forum == JudicialForum.UNKNOWN:
+            forum = fallback.judicial_forum
     return normalize_temporal_scope(
         planned.model_copy(
             update={
@@ -229,6 +241,7 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: d
                 "temporal_scope": scope,
                 "verification_target": target,
                 "subject": subject,
+                "judicial_forum": forum,
                 "independent_corroboration_required": (
                     planned.independent_corroboration_required or fallback.independent_corroboration_required
                 ),
@@ -419,6 +432,8 @@ def needs_sol_after_assessment(
         return True
     supports = assessment_has_support(assessment)
     if plan.primary_source_required and not primary_support:
+        if is_well_supported(claim):
+            return False
         return True
     if plan.independent_corroboration_required and independent_support_count(claim) < 2:
         return True
@@ -442,6 +457,8 @@ def apply_primary_requirement(
     if status != ClaimStatus.SUPPORTED:
         return status
     if plan.primary_source_required and not primary_supports:
+        if claim.status == ClaimStatus.SUPPORTED and count >= 2:
+            return ClaimStatus.SUPPORTED
         return ClaimStatus.SINGLE_SOURCE if count >= 1 else ClaimStatus.UNCERTAIN
     if count >= 2:
         return ClaimStatus.SUPPORTED

@@ -22,6 +22,38 @@ PRIORITY_TYPES = frozenset({"declaracion", "cifra", "documento"})
 VETO_STATUSES = frozenset({ClaimStatus.OUTDATED, ClaimStatus.DISPROVEN})
 MUNDANE_STATUSES = frozenset({ClaimStatus.SUPPORTED, ClaimStatus.SINGLE_SOURCE})
 HARD_STATUSES = frozenset({ClaimStatus.SINGLE_SOURCE, ClaimStatus.UNCERTAIN, ClaimStatus.CONFLICTING})
+_DOCUMENTARY_MARKERS = (
+    "decreto",
+    "designó",
+    "designe",
+    "designacion",
+    "designación",
+    "nombramiento",
+    "resolución",
+    "resolucion",
+    "sentencia",
+    "fallo judicial",
+    "sobreseimiento",
+    "sobreseyó",
+    "sobreseyo",
+    "presupuesto",
+    "boletín",
+    "boletin",
+    "indec",
+    "juzgado",
+    "camara federal",
+    "cámara federal",
+    "suprema corte",
+    "corte suprema",
+    "casación",
+    "casacion",
+    "procesamiento",
+    "ley ",
+    "padrón",
+    "padron",
+    "resultado electoral",
+    "documento administrativo",
+)
 _WEAK_INDEPENDENT_HOSTS = (
     "blogspot.com",
     "blogger.com",
@@ -98,6 +130,14 @@ def independent_support_count(claim: Claim) -> int:
     return count
 
 
+def is_documentary_claim(claim: Claim) -> bool:
+    kind = canonicalize_claim_type(claim.claim_type)
+    if kind in HARD_TYPES:
+        return True
+    text = (claim.canonical_text or "").casefold()
+    return any(marker in text for marker in _DOCUMENTARY_MARKERS)
+
+
 def is_well_supported(claim: Claim) -> bool:
     return claim.status == ClaimStatus.SUPPORTED and independent_support_count(claim) >= 2
 
@@ -125,6 +165,8 @@ def policy_selects(claim: Claim) -> bool:
     if claim.importance == ClaimImportance.HIGH and claim.status == ClaimStatus.SINGLE_SOURCE:
         return True
     if claim.importance == ClaimImportance.HIGH and kind == "hecho":
+        if is_documentary_claim(claim):
+            return True
         return not well
     return False
 
