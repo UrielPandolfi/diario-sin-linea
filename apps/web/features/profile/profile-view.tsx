@@ -3,6 +3,7 @@
 import { LocalitySelector } from "@/features/locality/locality-selector";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { clearLocalityCookie, readLocalityCookie } from "@/lib/locality";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -40,6 +41,13 @@ export function ProfileView() {
       <section className="mt-8 space-y-3 border-t border-border pt-6">
         <h2 className="font-heading text-sm text-primary">Apariencia</h2>
         <ThemeToggle />
+      </section>
+
+      <section className="mt-8 space-y-2 border-t border-border pt-6">
+        <h2 className="font-heading text-sm text-primary">Sobre Sin Línea</h2>
+        <Link href="/como-funciona" className="inline-block font-sans text-sm">
+          Cómo funciona
+        </Link>
       </section>
 
       <section className="mt-8 space-y-2 border-t border-border pt-6">

@@ -5,6 +5,7 @@ import { navIsActive, NAV_ITEMS, type NavItem } from "@/lib/nav";
 import {
   Bell,
   Bookmark,
+  CircleHelp,
   House,
   MapPin,
   Radio,
@@ -58,6 +59,25 @@ export function Sidebar() {
               </Link>
             );
           })}
+        </nav>
+        <nav aria-label="Acerca de" className="mt-auto">
+          <Link
+            href="/como-funciona"
+            aria-current={navIsActive("/como-funciona", pathname) ? "page" : undefined}
+            title="Cómo funciona"
+            className={`flex items-center gap-3 px-2 py-2.5 font-sans text-sm transition-colors ${
+              navIsActive("/como-funciona", pathname)
+                ? "bg-hover text-primary"
+                : "text-secondary hover:bg-hover hover:text-primary"
+            }`}
+          >
+            <CircleHelp
+              className="h-[18px] w-[18px] shrink-0"
+              strokeWidth={navIsActive("/como-funciona", pathname) ? 2.2 : 1.75}
+              aria-hidden
+            />
+            <span className="hidden lg:inline">Cómo funciona</span>
+          </Link>
         </nav>
       </div>
     </aside>

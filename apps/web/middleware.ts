@@ -6,6 +6,7 @@ const LOCALITY_COOKIE = "sl_locality";
 const OPEN_WITHOUT_LOCALITY = [
   /^\/entrar\/?$/,
   /^\/onboarding\/?$/,
+  /^\/como-funciona\/?$/,
   /^\/noticias(\/|$)/,
   /^\/admin(\/|$)/,
   /^\/api(\/|$)/,
