@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Annotated
 from uuid import UUID, uuid4
 
@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from app.api.deps import DbSession, require_admin, require_admin_origin
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.core.source_content import has_extracted_body
+from app.core.source_content import body_source_from_item, has_extracted_body
 from app.domain.enums import IngestionMethod
 from app.repositories import (
     ArticleRepository,
@@ -22,6 +22,16 @@ from app.repositories import (
 )
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.verification_outcome import latest_success_verification, parse_verification_run
+from app.services.cost_service import aggregate_usage_costs, event_direct_cost
+from app.services.publication_outcome import (
+    CODE_LABELS,
+    OUTCOME_LABELS,
+    item_publication_payload,
+    outcome_from_detection_run,
+    pipeline_run_payload,
+    summarize_detection_outcomes,
+    writing_no_material_change,
+)
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
@@ -86,6 +96,7 @@ def _source_out(source) -> dict:
 
 
 def _item_out(item) -> dict:
+    meta = getattr(item, "metadata_json", None) or {}
     return {
         "id": str(item.id),
         "source_id": str(item.source_id),
@@ -96,6 +107,40 @@ def _item_out(item) -> dict:
         "detected_at": _iso(item.detected_at),
         "processing_status": item.processing_status.value,
         "has_extracted_body": has_extracted_body(item),
+        "body_source": body_source_from_item(item),
+        "fetch_ok": meta.get("fetch_ok") if isinstance(meta, dict) else None,
+    }
+
+
+def _publication_rows(db, items) -> list[dict]:
+    ids = [item.id for item in items]
+    latest = PipelineRunRepository(db).latest_detection_for_items(ids)
+    linked = EventRepository(db).event_ids_for_items(ids)
+    rows: list[dict] = []
+    for item in items:
+        source = getattr(item, "source", None)
+        payload = item_publication_payload(
+            item,
+            latest_run=latest.get(item.id),
+            linked_event_ids=[str(eid) for eid in linked.get(item.id, [])],
+            source_name=source.name if source is not None else None,
+        )
+        payload["has_extracted_body"] = has_extracted_body(item)
+        rows.append(payload)
+    return rows
+
+
+def _open_failure_out(run) -> dict:
+    return {
+        "id": str(run.id),
+        "stage": run.stage,
+        "status": run.status.value,
+        "error_message": run.error_message,
+        "event_id": str(run.event_id) if run.event_id else None,
+        "source_item_id": str(run.source_item_id) if run.source_item_id else None,
+        "started_at": _iso(run.started_at),
+        "finished_at": _iso(run.finished_at),
+        "attempt": run.attempt,
     }
 
 
@@ -207,6 +252,11 @@ def stats(db: DbSession) -> dict:
     pipeline = PipelineRunRepository(db)
     usage = LlmUsageRepository(db)
     token_totals = usage.totals_since(since)
+    detection_runs = pipeline.list_detection_in_range(since=since, limit=2000)
+    detection_counts = pipeline.detection_counts_in_range(since=since)
+    outcomes = [outcome_from_detection_run(run) for run in detection_runs]
+    writing_runs = pipeline.list_stage_in_range("writing", since=since, limit=2000)
+    open_fails = pipeline.open_failures()
     return {
         "monitored_sources": SourceRepository(db).count_monitored(),
         "source_items_24h": SourceItemRepository(db).count_since(since),
@@ -218,6 +268,17 @@ def stats(db: DbSession) -> dict:
         "tokens_24h": token_totals,
         "tokens_by_role_24h": usage.totals_by_role_since(since),
         "last_failed_error": pipeline.latest_failed_error(),
+        "open_failure_count": len(open_fails),
+        "open_failures": [_open_failure_out(run) for run in open_fails[:20]],
+        "detection_24h": {
+            "timestamp_field": "coalesce(pipeline_runs.finished_at, pipeline_runs.started_at)",
+            "timestamp_label": "corrida finalizada",
+            **detection_counts,
+            "by_outcome": summarize_detection_outcomes(outcomes),
+        },
+        "sources_added_24h": EventRepository(db).count_links_added_since(since),
+        "no_material_change_24h": sum(1 for run in writing_runs if writing_no_material_change(run)),
+        "costs_24h": aggregate_usage_costs(db, since=since),
     }
 
 
@@ -261,8 +322,124 @@ def enqueue_poll(source_id: UUID, db: DbSession) -> dict:
 
 @router.get("/source-items", dependencies=[Depends(require_admin)])
 def list_items(db: DbSession, source_id: UUID | None = None, limit: int = 50) -> list[dict]:
-    items = SourceItemRepository(db).list_recent(source_id=source_id, limit=min(limit, 100))
-    return [_item_out(item) for item in items]
+    items, _total = SourceItemRepository(db).list_admin(source_id=source_id, limit=min(limit, 100), offset=0)
+    return _publication_rows(db, items)
+
+
+@router.get("/publications", dependencies=[Depends(require_admin)])
+def list_publications(
+    db: DbSession,
+    source_id: UUID | None = None,
+    unlinked: bool = False,
+    outcome: str | None = None,
+    code: str | None = None,
+    detected_from: datetime | None = None,
+    detected_to: datetime | None = None,
+    published_from: datetime | None = None,
+    published_to: datetime | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> dict:
+    filter_outcome = bool(outcome or code)
+    fetch_limit = 500 if filter_outcome else limit
+    fetch_offset = 0 if filter_outcome else offset
+    items, raw_total = SourceItemRepository(db).list_admin(
+        source_id=source_id,
+        unlinked=unlinked,
+        detected_from=detected_from,
+        detected_to=detected_to,
+        published_from=published_from,
+        published_to=published_to,
+        limit=fetch_limit,
+        offset=fetch_offset,
+    )
+    rows = _publication_rows(db, items)
+    if outcome:
+        rows = [row for row in rows if row.get("outcome") == outcome]
+    if code:
+        rows = [row for row in rows if row.get("code") == code]
+    if filter_outcome:
+        total = len(rows)
+        page = rows[offset : offset + limit]
+        truncated = raw_total > fetch_limit
+    else:
+        total = raw_total
+        page = rows
+        truncated = False
+    using_published = published_from is not None or published_to is not None
+    return {
+        "items": page,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "truncated": truncated,
+        "timestamp_field": "source_items.published_at" if using_published else "source_items.detected_at",
+        "timestamp_label": "publicado por el medio" if using_published else "detectado en el sistema",
+        "outcome_labels": OUTCOME_LABELS,
+        "code_labels": CODE_LABELS,
+    }
+
+
+@router.get("/source-items/{item_id}", dependencies=[Depends(require_admin)])
+def get_source_item(item_id: UUID, db: DbSession) -> dict:
+    item = SourceItemRepository(db).get_with_source(item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Publicación no encontrada")
+    row = _publication_rows(db, [item])[0]
+    linked = EventRepository(db).event_ids_for_items([item.id]).get(item.id, [])
+    linked_ids = [str(eid) for eid in linked]
+    runs = PipelineRunRepository(db).list_for_item(item.id, limit=50)
+    return {
+        **row,
+        "pipeline_runs": [pipeline_run_payload(run, linked_event_ids=linked_ids) for run in runs],
+    }
+
+
+@router.get("/detection-runs", dependencies=[Depends(require_admin)])
+def list_detection_runs(
+    db: DbSession,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    outcome: str | None = None,
+    offset: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+) -> dict:
+    start = since or (utc_now() - timedelta(hours=24))
+    pipeline = PipelineRunRepository(db)
+    runs = pipeline.list_detection_in_range(since=start, until=until, limit=2000)
+    counts = pipeline.detection_counts_in_range(since=start, until=until)
+    item_ids = [run.source_item_id for run in runs if run.source_item_id is not None]
+    linked = EventRepository(db).event_ids_for_items(item_ids)
+    outcomes = []
+    payloads = []
+    for run in runs:
+        event_ids = [str(eid) for eid in linked.get(run.source_item_id, [])] if run.source_item_id else []
+        mapped = outcome_from_detection_run(run, linked_event_ids=event_ids)
+        outcomes.append(mapped)
+        payloads.append(pipeline_run_payload(run, linked_event_ids=event_ids))
+    if outcome:
+        payloads = [row for row in payloads if (row.get("detection") or {}).get("outcome") == outcome]
+    return {
+        "timestamp_field": "coalesce(pipeline_runs.finished_at, pipeline_runs.started_at)",
+        "timestamp_label": "corrida finalizada",
+        "since": start.isoformat(),
+        "until": until.isoformat() if until else None,
+        **counts,
+        "by_outcome": summarize_detection_outcomes(outcomes),
+        "runs": payloads[offset : offset + limit],
+        "returned": min(len(payloads) - offset, limit) if offset < len(payloads) else 0,
+        "filtered_total": len(payloads),
+    }
+
+
+@router.get("/costs", dependencies=[Depends(require_admin)])
+def list_costs(
+    db: DbSession,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> dict:
+    start = since or (utc_now() - timedelta(hours=24))
+    return aggregate_usage_costs(db, since=start, until=until)
 
 
 @router.post(
@@ -334,6 +511,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
     usage = LlmUsageRepository(db)
     latest = runs[0] if runs else None
     token_totals = usage.totals_for_event(event_id)
+    no_material = any(writing_no_material_change(run) for run in runs)
     return {
         **_event_out(
             event,
@@ -344,6 +522,8 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
         "country_code": event.country_code,
         "neighborhood": event.neighborhood,
         "address_text": event.address_text,
+        "no_material_change": no_material,
+        "cost": event_direct_cost(db, event_id),
         "sources": [
             {
                 "relation_type": link.relation_type.value,
@@ -372,16 +552,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             "by_role_stage": usage.totals_by_role_for_event(event_id),
         },
         "pipeline_runs": [
-            {
-                "id": str(run.id),
-                "stage": run.stage,
-                "status": run.status.value,
-                "attempt": run.attempt,
-                "error_message": run.error_message,
-                "started_at": _iso(run.started_at),
-                "finished_at": _iso(run.finished_at),
-                "metadata_json": run.metadata_json or {},
-            }
+            pipeline_run_payload(run)
             for run in runs
         ],
     }

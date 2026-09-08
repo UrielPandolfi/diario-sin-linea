@@ -13,7 +13,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.text import normalize_name, usable_text
-from app.core.usage_context import update_usage_context, usage_scope
+from app.core.usage_context import attribution_scope, update_usage_context, usage_scope
 from app.domain.enums import EventSourceRelation, PipelineStatus, SourceItemStatus
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
 from app.models.event import EMBEDDING_DIMENSIONS
@@ -36,6 +36,8 @@ from app.services.editorial_gate import (
     should_filter_sports,
 )
 from app.services.event_service import EventService
+from app.services.cost_service import ATTRIBUTION_EMBEDDING_BACKFILL
+from app.services.usage_recorder import seal_created_event_usages
 
 # Reextraer con Luna solo si ultra falla el schema o la ubicación es poco confiable/contradictoria.
 _EXTRACT_FALLBACK_ERRORS = (ValidationError, ValueError, KeyError, RuntimeError)
@@ -150,7 +152,8 @@ class DetectionService:
                         },
                     )
                 event, created, reason = self._resolve_event(item, candidate)
-                update_usage_context(event_id=event.id)
+                if created:
+                    update_usage_context(event_id=event.id)
                 self._persist_entities(event, candidate)
                 self._store_embedding(event, candidate)
                 item.processing_status = SourceItemStatus.PROCESSED
@@ -159,6 +162,13 @@ class DetectionService:
                 run.finished_at = utc_now()
                 run.metadata_json = {**extract_meta, "reason": reason, "created": created}
                 self.session.flush()
+                if created:
+                    seal_created_event_usages(
+                        run.id,
+                        event.id,
+                        source_item_id=item.id,
+                        not_before=run.started_at,
+                    )
                 return {"event_id": str(event.id), "created": created, "reason": reason}
         except ProviderNotConfiguredError as exc:
             return self._fail(item.id, attempt, str(exc))
@@ -408,7 +418,8 @@ class DetectionService:
                 f"{event.event_type}. {event.title_internal}. {event.short_summary or ''}"
                 for event in missing
             ]
-            vectors = embedder.embed(texts)
+            with attribution_scope(ATTRIBUTION_EMBEDDING_BACKFILL):
+                vectors = embedder.embed(texts)
             for event, vector in zip(missing, vectors, strict=True):
                 self.events.upsert_embedding(event.id, vector, embedder.model)
                 cached.append((event, vector))

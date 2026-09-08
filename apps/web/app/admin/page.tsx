@@ -4,7 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   adminJson,
+  formatCoverage,
   formatTokens,
+  formatUsd,
   formatWhen,
   type AdminSource,
   type AdminSourceItem,
@@ -128,8 +130,24 @@ export default function AdminDashboardPage() {
       </section>
       {stats?.last_failed_error ? (
         <p className="font-sans text-sm text-accent-ochre">
-          Último error de pipeline: {stats.last_failed_error}
+          Último error histórico: {stats.last_failed_error}
         </p>
+      ) : null}
+      {(stats?.open_failure_count ?? 0) > 0 ? (
+        <section className="border border-border bg-surface p-4">
+          <p className="font-sans text-xs uppercase tracking-[0.12em] text-secondary">
+            Fallos abiertos (último run de objeto+etapa no superado)
+          </p>
+          <p className="mt-2 font-heading text-2xl text-primary">{stats?.open_failure_count}</p>
+          <ul className="mt-3 space-y-1">
+            {stats?.open_failures?.slice(0, 5).map((row) => (
+              <li key={row.id} className="font-sans text-sm text-primary">
+                {row.stage} · {row.status}
+                {row.error_message ? ` · ${row.error_message}` : ""}
+              </li>
+            ))}
+          </ul>
+        </section>
       ) : null}
 
       <section className="grid gap-3 lg:grid-cols-3">
@@ -179,6 +197,15 @@ export default function AdminDashboardPage() {
             {formatTokens(stats?.tokens_24h?.prompt_tokens)} · completion{" "}
             {formatTokens(stats?.tokens_24h?.completion_tokens)}
           </p>
+          {stats?.costs_24h ? (
+            <p className="mt-2 font-sans text-xs text-secondary">
+              Subtotal conocido {formatUsd(stats.costs_24h.subtotal_known_usd)} ·{" "}
+              {formatCoverage(stats.costs_24h.coverage)}
+              {stats.costs_24h.coverage.subtotal_is_total_spend
+                ? ""
+                : " · no es el gasto total"}
+            </p>
+          ) : null}
           {(stats?.tokens_by_role_24h?.length ?? 0) > 0 ? (
             <ul className="mt-3 space-y-1 border-t border-border pt-3">
               {stats?.tokens_by_role_24h?.map((row) => (
@@ -193,6 +220,33 @@ export default function AdminDashboardPage() {
           ) : null}
         </div>
       </section>
+
+      {stats?.detection_24h ? (
+        <section className="border border-border bg-surface">
+          <div className="flex items-center justify-between border-b border-border px-4 py-3">
+            <div>
+              <h2 className="font-heading text-lg text-primary">Detecciones (24 h)</h2>
+              <p className="font-sans text-xs text-secondary">
+                {stats.detection_24h.timestamp_label} · intentos {stats.detection_24h.attempts} ·
+                fuentes únicas {stats.detection_24h.unique_items}
+              </p>
+            </div>
+            <Link href="/admin/publications?view=period" className="font-sans text-sm text-secondary">
+              Ver ejecuciones
+            </Link>
+          </div>
+          <ul className="divide-y divide-border">
+            {Object.entries(stats.detection_24h.by_outcome).map(([key, bucket]) => (
+              <li key={key} className="flex justify-between px-4 py-2 font-sans text-sm text-primary">
+                <Link href={`/admin/publications?view=period&outcome=${key}`} className="text-accent-blue">
+                  {bucket.outcome_label}
+                </Link>
+                <span>{bucket.count}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {(stats?.runs_by_stage_status_24h?.length ?? 0) > 0 ? (
         <section className="border border-border bg-surface">
@@ -218,8 +272,8 @@ export default function AdminDashboardPage() {
       <section className="border border-border bg-surface">
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h2 className="font-heading text-lg text-primary">Ítems recientes</h2>
-          <Link href="/admin/sources" className="font-sans text-sm text-secondary">
-            Fuentes
+          <Link href="/admin/publications" className="font-sans text-sm text-secondary">
+            Publicaciones
           </Link>
         </div>
         {items.length === 0 ? (
@@ -228,9 +282,11 @@ export default function AdminDashboardPage() {
           <ul className="divide-y divide-border">
             {items.map((item) => (
               <li key={item.id} className="px-4 py-3">
-                <p className="font-sans text-primary">{item.title || item.canonical_url || item.url}</p>
+                <Link href={`/admin/publications/${item.id}`} className="font-sans text-primary">
+                  {item.title || item.canonical_url || item.url}
+                </Link>
                 <p className="mt-1 font-sans text-xs text-secondary">
-                  {item.processing_status} · {formatWhen(item.detected_at)}
+                  {item.outcome_label || item.processing_status} · {formatWhen(item.detected_at)}
                 </p>
               </li>
             ))}

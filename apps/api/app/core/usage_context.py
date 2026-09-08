@@ -15,6 +15,7 @@ class UsageContext:
     event_id: UUID | None = None
     source_item_id: UUID | None = None
     pipeline_run_id: UUID | None = None
+    attribution_kind: str | None = None
 
 
 _CTX: ContextVar[UsageContext] = ContextVar("llm_usage_context", default=UsageContext())
@@ -53,6 +54,7 @@ def usage_scope(
     pipeline_run_id: UUID | None = None,
     model_role: str | None = None,
     provider: str | None = None,
+    attribution_kind: str | None = None,
 ) -> Iterator[None]:
     token = _CTX.set(
         UsageContext(
@@ -62,9 +64,19 @@ def usage_scope(
             pipeline_run_id=pipeline_run_id,
             model_role=model_role,
             provider=provider,
+            attribution_kind=attribution_kind,
         )
     )
     try:
         yield
     finally:
         _CTX.reset(token)
+
+
+@contextmanager
+def attribution_scope(attribution_kind: str) -> Iterator[None]:
+    token = update_usage_context(attribution_kind=attribution_kind)
+    try:
+        yield
+    finally:
+        reset_usage_context(token)

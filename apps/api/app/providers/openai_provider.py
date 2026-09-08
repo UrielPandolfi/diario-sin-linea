@@ -81,15 +81,19 @@ class OpenAIStructuredProvider:
                 if effort:
                     create_kwargs["reasoning_effort"] = effort
                 response, duration_ms = self._create_completion(create_kwargs)
-                from app.services.usage_recorder import extract_openai_usage, record_llm_usage
+                from app.services.usage_recorder import extract_openai_usage_details, record_llm_usage
 
-                prompt, completion, total = extract_openai_usage(response)
+                details = extract_openai_usage_details(response)
                 record_llm_usage(
                     provider=self.provider_name,
                     model=self.model,
-                    prompt_tokens=prompt,
-                    completion_tokens=completion,
-                    total_tokens=total,
+                    prompt_tokens=details.prompt_tokens,
+                    completion_tokens=details.completion_tokens,
+                    total_tokens=details.total_tokens,
+                    cache_read_tokens=details.cache_read_tokens,
+                    cache_write_tokens=details.cache_write_tokens,
+                    model_reported=details.model_reported,
+                    usage_reported=details.usage_reported,
                     duration_ms=duration_ms,
                 )
                 content = response.choices[0].message.content or "{}"
@@ -108,6 +112,8 @@ class OpenAIStructuredProvider:
         try:
             response = self.client.chat.completions.create(**create_kwargs)
         except BadRequestError as exc:
+            failed_ms = int((time.perf_counter() - started) * 1000)
+            self._record_failed_attempt(duration_ms=failed_ms)
             message = str(exc).casefold()
             stripped = False
             for key in ("reasoning_effort", "temperature"):
@@ -130,6 +136,20 @@ class OpenAIStructuredProvider:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return response, duration_ms
 
+    def _record_failed_attempt(self, *, duration_ms: int) -> None:
+        from app.services.usage_recorder import record_llm_usage
+
+        record_llm_usage(
+            provider=self.provider_name,
+            model=self.model,
+            prompt_tokens=0,
+            completion_tokens=0,
+            total_tokens=0,
+            duration_ms=duration_ms,
+            usage_reported=False,
+            failed=True,
+        )
+
 
 class OpenAIEmbeddingProvider:
     def __init__(self, *, api_key: str, model: str, provider_name: str = "openai"):
@@ -141,15 +161,19 @@ class OpenAIEmbeddingProvider:
         started = time.perf_counter()
         response = self.client.embeddings.create(model=self.model, input=texts)
         duration_ms = int((time.perf_counter() - started) * 1000)
-        from app.services.usage_recorder import extract_openai_usage, record_llm_usage
+        from app.services.usage_recorder import extract_openai_usage_details, record_llm_usage
 
-        prompt, completion, total = extract_openai_usage(response)
+        details = extract_openai_usage_details(response)
         record_llm_usage(
             provider=self.provider_name,
             model=self.model,
-            prompt_tokens=prompt,
-            completion_tokens=completion,
-            total_tokens=total,
+            prompt_tokens=details.prompt_tokens,
+            completion_tokens=details.completion_tokens,
+            total_tokens=details.total_tokens,
+            cache_read_tokens=details.cache_read_tokens,
+            cache_write_tokens=details.cache_write_tokens,
+            model_reported=details.model_reported,
+            usage_reported=details.usage_reported,
             duration_ms=duration_ms,
         )
         return [item.embedding for item in response.data]

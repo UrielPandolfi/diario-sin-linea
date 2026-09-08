@@ -123,7 +123,8 @@ def test_pydantic_retry_includes_schema_errors(monkeypatch) -> None:
 
 
 def test_json_schema_falls_back_to_json_object(monkeypatch) -> None:
-    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    recorded: list[dict] = []
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **kwargs: recorded.append(kwargs))
     formats: list[str] = []
 
     class Completions:
@@ -155,3 +156,8 @@ def test_json_schema_falls_back_to_json_object(monkeypatch) -> None:
     result = provider.generate_structured(system_prompt="s", user_prompt="u", schema=_Tiny)
     assert result.x == 2
     assert formats == ["json_schema", "json_object"]
+    assert len(recorded) == 2
+    assert recorded[0]["failed"] is True
+    assert recorded[0]["usage_reported"] is False
+    assert recorded[1].get("failed") is not True
+    assert recorded[1]["prompt_tokens"] == 1

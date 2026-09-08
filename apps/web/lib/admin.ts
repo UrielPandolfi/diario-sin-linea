@@ -9,6 +9,71 @@ export type AdminTokenByRole = AdminTokenTotals & {
   model_role: string;
 };
 
+export type AdminCostCoverage = {
+  calculated_calls: number;
+  partial_calls: number;
+  unknown_calls: number;
+  total_calls: number;
+  calculated_ratio: number;
+  complete: boolean;
+  label: string;
+  subtotal_known_usd: number;
+  subtotal_is_total_spend: boolean;
+};
+
+export type AdminCostSummary = {
+  timestamp_field?: string;
+  timestamp_label?: string;
+  since?: string;
+  until?: string | null;
+  calls: number;
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+  subtotal_known_usd: number;
+  coverage: AdminCostCoverage;
+  by_attribution_kind?: Record<
+    string,
+    { calls: number; known_usd: number; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  >;
+  reconciliation?: {
+    global_known_usd: number;
+    attributed_to_event: number;
+    attributed_to_item_only: number;
+    unattributed: number;
+    embedding_backfill: number;
+    parts_sum_usd: number;
+    matches_global: boolean;
+  };
+};
+
+export type AdminDetectionPeriod = {
+  timestamp_field: string;
+  timestamp_label: string;
+  attempts: number;
+  unique_items: number;
+  by_outcome: Record<
+    string,
+    {
+      count: number;
+      outcome_label: string;
+      codes: { code: string; count: number; code_label: string }[];
+    }
+  >;
+};
+
+export type AdminOpenFailure = {
+  id: string;
+  stage: string;
+  status: string;
+  error_message: string | null;
+  event_id: string | null;
+  source_item_id: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  attempt: number;
+};
+
 export type AdminStats = {
   monitored_sources: number;
   source_items_24h: number;
@@ -20,6 +85,12 @@ export type AdminStats = {
   tokens_24h?: AdminTokenTotals;
   tokens_by_role_24h?: AdminTokenByRole[];
   last_failed_error?: string | null;
+  open_failure_count?: number;
+  open_failures?: AdminOpenFailure[];
+  detection_24h?: AdminDetectionPeriod;
+  sources_added_24h?: Record<string, number>;
+  no_material_change_24h?: number;
+  costs_24h?: AdminCostSummary;
 };
 
 export type AdminSource = {
@@ -41,13 +112,69 @@ export type AdminSource = {
 export type AdminSourceItem = {
   id: string;
   source_id: string;
+  source_name?: string | null;
   url: string;
   canonical_url: string | null;
   title: string | null;
   published_at: string | null;
   detected_at: string | null;
   processing_status: string;
-  has_extracted_body: boolean;
+  has_extracted_body?: boolean;
+  body_source?: string;
+  fetch_ok?: boolean | null;
+  outcome?: string;
+  outcome_label?: string;
+  code?: string;
+  code_label?: string;
+  event_ids?: string[];
+  run_id?: string | null;
+  attempt?: number | null;
+  trigger?: string | null;
+};
+
+export type AdminPipelineRun = {
+  id: string;
+  stage: string;
+  status: string;
+  attempt: number;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  event_id?: string | null;
+  source_item_id?: string | null;
+  trigger?: string | null;
+  metadata_json?: Record<string, unknown>;
+  no_material_change?: boolean;
+  detection?: {
+    outcome: string;
+    outcome_label: string;
+    code: string;
+    code_label: string;
+    event_ids: string[];
+  } | null;
+};
+
+export type AdminPublicationDetail = AdminSourceItem & {
+  pipeline_runs: AdminPipelineRun[];
+};
+
+export type AdminPublicationsPage = {
+  items: AdminSourceItem[];
+  total: number;
+  offset: number;
+  limit: number;
+  truncated: boolean;
+  timestamp_field: string;
+  timestamp_label: string;
+  outcome_labels: Record<string, string>;
+  code_labels: Record<string, string>;
+};
+
+export type AdminDetectionRunsPage = AdminDetectionPeriod & {
+  since: string;
+  until: string | null;
+  runs: AdminPipelineRun[];
+  filtered_total: number;
 };
 
 export type AdminEvent = {
@@ -69,6 +196,18 @@ export type AdminEventDetail = AdminEvent & {
   country_code: string | null;
   neighborhood: string | null;
   address_text: string | null;
+  no_material_change?: boolean;
+  cost?: {
+    direct_only: boolean;
+    backfill_excluded: boolean;
+    calls: number;
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+    duration_ms_sum: number | null;
+    subtotal_known_usd: number;
+    coverage: AdminCostCoverage;
+  };
   sources: {
     relation_type: string;
     is_primary: boolean;
@@ -80,16 +219,7 @@ export type AdminEventDetail = AdminEvent & {
     entity_type: string | null;
     role: string;
   }[];
-  pipeline_runs: {
-    id: string;
-    stage: string;
-    status: string;
-    attempt: number;
-    error_message: string | null;
-    started_at: string | null;
-    finished_at: string | null;
-    metadata_json?: Record<string, unknown>;
-  }[];
+  pipeline_runs: AdminPipelineRun[];
   token_usage?: AdminTokenTotals & {
     by_role_stage: (AdminTokenTotals & { model_role: string; stage: string })[];
   };
@@ -201,6 +331,37 @@ export function formatTokens(value: number | null | undefined): string {
   if (value == null) return "—";
   return value.toLocaleString("es-AR");
 }
+
+export function formatUsd(value: number | null | undefined): string {
+  if (value == null) return "—";
+  return value.toLocaleString("es-AR", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 4,
+  });
+}
+
+export function formatCoverage(coverage: AdminCostCoverage | undefined): string {
+  if (!coverage) return "—";
+  const pct = Math.round((coverage.calculated_ratio || 0) * 100);
+  if (coverage.complete) return `cobertura ${pct}% (completo)`;
+  return `cobertura ${pct}% (${coverage.label})`;
+}
+
+export const BODY_SOURCE_LABELS: Record<string, string> = {
+  extracted_html: "HTML extraído",
+  rss_summary: "Summary del RSS",
+  search_snippet: "Snippet de búsqueda",
+  title_only: "Solo título",
+  unknown: "Sin evidencia de procedencia",
+};
+
+export const ATTRIBUTION_LABELS: Record<string, string> = {
+  direct: "Directo a suceso",
+  item: "Solo publicación",
+  unattributed: "Sin atribuir",
+  embedding_backfill: "Embeddings de índice (backfill)",
+};
 
 export const EVENT_STATUS_LABELS: Record<string, string> = {
   DETECTED: "Detectado",

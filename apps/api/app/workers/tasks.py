@@ -1,5 +1,6 @@
 from datetime import timedelta
 from uuid import UUID, uuid4
+import logging
 
 import httpx
 
@@ -21,6 +22,8 @@ from app.services.writing_service import WritingService
 from app.services.publish_service import PublishService
 from app.repositories import ArticleRepository
 from app.workers.celery_app import celery_app
+
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -61,6 +64,35 @@ def _enqueue_next_for_quota(poll_id: str, exclude_item_id: str) -> None:
                 return
             _enqueue_detection(item.id, poll_id, fill_quota=True)
             return
+    finally:
+        session.close()
+
+
+def _record_detection_quota_skip(source_item_id: str, poll_id: str | None) -> None:
+    from app.core.clock import utc_now
+    from app.domain.enums import PipelineStatus
+    from app.models import PipelineRun
+
+    session = SessionLocal()
+    try:
+        session.add(
+            PipelineRun(
+                source_item_id=UUID(source_item_id),
+                stage="event_detection",
+                status=PipelineStatus.SUCCESS,
+                attempt=1,
+                finished_at=utc_now(),
+                metadata_json={
+                    "reason": "max_new_events_per_poll",
+                    "pipeline_skipped": True,
+                    "poll_id": poll_id,
+                },
+            )
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
     finally:
         session.close()
 
@@ -141,6 +173,10 @@ def detect_event(
 ) -> dict:
     # Retries already reserved a slot on the first attempt.
     if self.request.retries == 0 and not allow_new_event_pipeline(poll_id):
+        try:
+            _record_detection_quota_skip(source_item_id, poll_id)
+        except Exception:
+            logger.exception("quota skip persist failed")
         return {
             "created": False,
             "detection_skipped": True,

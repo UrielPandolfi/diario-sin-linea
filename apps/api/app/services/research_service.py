@@ -13,7 +13,14 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.source_content import has_extracted_body, is_extracted_body
+from app.core.source_content import (
+    BODY_SOURCE_EXTRACTED_HTML,
+    BODY_SOURCE_SEARCH_SNIPPET,
+    BODY_SOURCE_TITLE_ONLY,
+    has_extracted_body,
+    is_extracted_body,
+    merge_item_metadata,
+)
 from app.core.text import content_fingerprint, is_placeholder_text, normalize_name, token_set, usable_text
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
@@ -712,6 +719,18 @@ class ResearchService:
                 excerpt=(hit.snippet or text or "")[:500] or None,
             )
         )
+        if is_extracted_body(extracted, hit.title):
+            body_source = BODY_SOURCE_EXTRACTED_HTML
+        elif is_extracted_body(hit.snippet, hit.title):
+            body_source = BODY_SOURCE_SEARCH_SNIPPET
+        else:
+            body_source = BODY_SOURCE_TITLE_ONLY
+        if outcome.created or outcome.updated:
+            merge_item_metadata(
+                outcome.item,
+                body_source=body_source,
+                fetch_ok=True,
+            )
         return outcome.item
 
     def _hydrate_linked_without_body(
@@ -771,6 +790,7 @@ class ResearchService:
             clean_text=extracted,
             excerpt=(extracted[:500] if extracted else None) or snippet,
         )
+        merge_item_metadata(item, body_source=BODY_SOURCE_EXTRACTED_HTML, fetch_ok=True)
         return has_extracted_body(item)
 
     def _fetch_page(

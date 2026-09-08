@@ -91,6 +91,9 @@ def test_rss_poll_creates_item_with_content_hash(db_session: Session) -> None:
     assert row.clean_text == EXTRACTED
     assert row.processing_status == SourceItemStatus.PENDING.value
     assert source.last_success_at is not None
+    meta = db_session.execute(text("SELECT metadata_json FROM source_items")).scalar_one()
+    assert meta["body_source"] == "extracted_html"
+    assert meta["fetch_ok"] is True
 
 
 def test_second_poll_is_idempotent(db_session: Session) -> None:
@@ -167,6 +170,10 @@ def test_article_fetch_failure_still_persists_item(db_session: Session) -> None:
     assert result.created == 1
     title = db_session.execute(text("SELECT title FROM source_items")).scalar_one()
     assert title == "Choque en Pellegrini"
+    meta = db_session.execute(text("SELECT metadata_json FROM source_items")).scalar_one()
+    assert meta["body_source"] == "rss_summary"
+    assert meta["fetch_ok"] is False
+    assert meta.get("fetch_error")
 
 
 def test_html_without_discovery_strategy_is_not_supported(db_session: Session) -> None:

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { EditorialReviseForm, HoldOverrideForm } from "@/features/admin/editorial-revise-form";
 import { editorialLabelCopy } from "@/features/article/claim-status";
-import { adminFetch, adminJson, formatDuration, formatTokens, formatWhen, type AdminEventDetail } from "@/lib/admin";
+import { adminFetch, adminJson, BODY_SOURCE_LABELS, formatCoverage, formatDuration, formatTokens, formatUsd, formatWhen, labelLookup, type AdminEventDetail } from "@/lib/admin";
 
 export default function AdminEventDetailPage() {
   const params = useParams<{ id: string }>();
@@ -239,6 +239,11 @@ export default function AdminEventDetailPage() {
             {event.neighborhood ? ` · ${event.neighborhood}` : ""}
           </p>
         ) : null}
+        {event?.no_material_change ? (
+          <p className="mt-2 font-sans text-sm text-secondary">
+            Última redacción: sin cambio material (a nivel suceso, no de una fuente).
+          </p>
+        ) : null}
         {event ? (
           <div className="mt-4 flex flex-wrap gap-2">
             <button
@@ -333,11 +338,16 @@ export default function AdminEventDetailPage() {
                       {link.is_primary ? " · primaria" : ""}
                       {link.source_item ? ` · ${link.source_item.processing_status}` : ""}
                       {link.source_item
-                        ? link.source_item.has_extracted_body
-                          ? " · Contenido"
-                          : " · Sin cuerpo"
+                        ? ` · ${labelLookup(BODY_SOURCE_LABELS, link.source_item.body_source)}`
                         : ""}
                     </p>
+                    {link.source_item ? (
+                      <p className="mt-1 font-sans text-xs">
+                        <Link href={`/admin/publications/${link.source_item.id}`} className="text-accent-blue">
+                          Ver publicación
+                        </Link>
+                      </p>
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -482,7 +492,7 @@ export default function AdminEventDetailPage() {
 
           <section className="border border-border bg-surface">
             <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
-              Tokens
+              Tokens y costo directo
             </h2>
             {event.token_usage && event.token_usage.calls > 0 ? (
               <div className="space-y-3 px-4 py-4">
@@ -492,6 +502,17 @@ export default function AdminEventDetailPage() {
                   {formatTokens(event.token_usage.completion_tokens)} ·{" "}
                   {event.token_usage.calls} llamadas
                 </p>
+                {event.cost ? (
+                  <p className="font-sans text-sm text-secondary">
+                    Costo directo {formatUsd(event.cost.subtotal_known_usd)} ·{" "}
+                    {formatCoverage(event.cost.coverage)}
+                    {event.cost.coverage.subtotal_is_total_spend ? "" : " · no es el gasto total"}
+                    . El backfill de embeddings de otros sucesos no entra en este total.
+                    {event.cost.duration_ms_sum != null
+                      ? ` · ${event.cost.duration_ms_sum} ms LLM`
+                      : ""}
+                  </p>
+                ) : null}
                 <ul className="divide-y divide-border border border-border">
                   {event.token_usage.by_role_stage.map((row) => (
                     <li
@@ -527,6 +548,7 @@ export default function AdminEventDetailPage() {
                   <li key={run.id} className="px-4 py-3">
                     <p className="font-sans text-primary">
                       {run.stage} · {run.status}
+                      {run.no_material_change ? " · sin cambio material" : ""}
                     </p>
                     <p className="mt-1 font-sans text-xs text-secondary">
                       intento {run.attempt} · {formatWhen(run.started_at)}

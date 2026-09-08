@@ -76,16 +76,20 @@ class AnthropicJsonProvider:
                     ),
                     messages=[{"role": "user", "content": user_content}],
                 )
-                from app.services.usage_recorder import extract_anthropic_usage, record_llm_usage
+                from app.services.usage_recorder import extract_anthropic_usage_details, record_llm_usage
 
                 duration_ms = int((time.perf_counter() - started) * 1000)
-                prompt, completion, total = extract_anthropic_usage(response)
+                details = extract_anthropic_usage_details(response)
                 record_llm_usage(
                     provider="anthropic",
                     model=self.model,
-                    prompt_tokens=prompt,
-                    completion_tokens=completion,
-                    total_tokens=total,
+                    prompt_tokens=details.prompt_tokens,
+                    completion_tokens=details.completion_tokens,
+                    total_tokens=details.total_tokens,
+                    cache_read_tokens=details.cache_read_tokens,
+                    cache_write_tokens=details.cache_write_tokens,
+                    model_reported=details.model_reported,
+                    usage_reported=details.usage_reported,
                     duration_ms=duration_ms,
                 )
                 content = "".join(

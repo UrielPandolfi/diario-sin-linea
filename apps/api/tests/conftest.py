@@ -24,7 +24,12 @@ def db_session(apply_migrations: None) -> Generator[Session, None, None]:
     try:
         yield session
         session.rollback()
-        table_names = ", ".join(table.name for table in reversed(Base.metadata.sorted_tables))
+        skip = {"llm_price_books", "llm_price_rates"}
+        table_names = ", ".join(
+            table.name
+            for table in reversed(Base.metadata.sorted_tables)
+            if table.name not in skip
+        )
         session.execute(text(f"TRUNCATE {table_names} CASCADE"))
         session.commit()
     finally:

@@ -64,6 +64,14 @@ class SourceItemRepository:
     def get(self, item_id: UUID) -> SourceItem | None:
         return self.session.get(SourceItem, item_id)
 
+    def get_with_source(self, item_id: UUID) -> SourceItem | None:
+        stmt = (
+            select(SourceItem)
+            .options(selectinload(SourceItem.source))
+            .where(SourceItem.id == item_id)
+        )
+        return self.session.scalars(stmt).first()
+
     def get_by_source_and_hash(self, source_id: UUID, content_hash: str) -> SourceItem | None:
         stmt = select(SourceItem).where(
             SourceItem.source_id == source_id,
@@ -126,6 +134,46 @@ class SourceItemRepository:
     def count_by_status(self) -> dict[str, int]:
         stmt = select(SourceItem.processing_status, func.count()).group_by(SourceItem.processing_status)
         return {status.value if hasattr(status, "value") else str(status): int(count) for status, count in self.session.execute(stmt)}
+
+    def list_admin(
+        self,
+        *,
+        source_id: UUID | None = None,
+        unlinked: bool = False,
+        detected_from: datetime | None = None,
+        detected_to: datetime | None = None,
+        published_from: datetime | None = None,
+        published_to: datetime | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list[SourceItem], int]:
+        stmt = select(SourceItem).options(selectinload(SourceItem.source))
+        count_stmt = select(func.count()).select_from(SourceItem)
+        filters = []
+        if source_id is not None:
+            filters.append(SourceItem.source_id == source_id)
+        if detected_from is not None:
+            filters.append(SourceItem.detected_at >= detected_from)
+        if detected_to is not None:
+            filters.append(SourceItem.detected_at < detected_to)
+        if published_from is not None:
+            filters.append(SourceItem.published_at >= published_from)
+        if published_to is not None:
+            filters.append(SourceItem.published_at < published_to)
+        if unlinked:
+            filters.append(
+                ~SourceItem.id.in_(select(EventSource.source_item_id).where(EventSource.source_item_id.is_not(None)))
+            )
+        if filters:
+            stmt = stmt.where(*filters)
+            count_stmt = count_stmt.where(*filters)
+        total = int(self.session.execute(count_stmt).scalar_one())
+        rows = list(
+            self.session.scalars(
+                stmt.order_by(SourceItem.detected_at.desc()).offset(max(offset, 0)).limit(limit)
+            )
+        )
+        return rows, total
 
 
 class EventRepository:
@@ -193,6 +241,30 @@ class EventRepository:
     def get_link_for_item(self, source_item_id: UUID) -> EventSource | None:
         stmt = select(EventSource).where(EventSource.source_item_id == source_item_id)
         return self.session.scalars(stmt).first()
+
+    def event_ids_for_items(self, item_ids: list[UUID]) -> dict[UUID, list[UUID]]:
+        if not item_ids:
+            return {}
+        stmt = select(EventSource.source_item_id, EventSource.event_id).where(
+            EventSource.source_item_id.in_(item_ids)
+        )
+        grouped: dict[UUID, list[UUID]] = {}
+        for source_item_id, event_id in self.session.execute(stmt):
+            grouped.setdefault(source_item_id, []).append(event_id)
+        return grouped
+
+    def count_links_added_since(self, since: datetime, until: datetime | None = None) -> dict[str, int]:
+        stmt = (
+            select(EventSource.relation_type, func.count())
+            .where(EventSource.added_at >= since)
+            .group_by(EventSource.relation_type)
+        )
+        if until is not None:
+            stmt = stmt.where(EventSource.added_at < until)
+        return {
+            (rel.value if hasattr(rel, "value") else str(rel)): int(count)
+            for rel, count in self.session.execute(stmt)
+        }
 
     def add_link(self, link: EventSource) -> EventSource:
         self.session.add(link)
@@ -300,11 +372,116 @@ class PipelineRunRepository:
 
     def latest_failed_error(self) -> str | None:
         latest = self.session.scalars(
-            select(PipelineRun).order_by(PipelineRun.started_at.desc()).limit(1)
+            select(PipelineRun)
+            .where(PipelineRun.status == PipelineStatus.FAILED)
+            .order_by(PipelineRun.started_at.desc())
+            .limit(1)
         ).first()
-        if latest is None or latest.status != PipelineStatus.FAILED:
-            return None
-        return latest.error_message
+        return latest.error_message if latest is not None else None
+
+    def latest_failed_run(self) -> PipelineRun | None:
+        return self.session.scalars(
+            select(PipelineRun)
+            .where(PipelineRun.status == PipelineStatus.FAILED)
+            .order_by(PipelineRun.started_at.desc())
+            .limit(1)
+        ).first()
+
+    def latest_per_object_stage(self) -> list[PipelineRun]:
+        object_key = func.coalesce(PipelineRun.event_id, PipelineRun.source_item_id)
+        stmt = (
+            select(PipelineRun)
+            .order_by(object_key, PipelineRun.stage, PipelineRun.started_at.desc())
+            .distinct(object_key, PipelineRun.stage)
+        )
+        return [run for run in self.session.scalars(stmt).all()]
+
+    def open_failures(self) -> list[PipelineRun]:
+        open_statuses = {
+            PipelineStatus.FAILED,
+            PipelineStatus.RETRY,
+            PipelineStatus.RUNNING,
+            PipelineStatus.PENDING,
+        }
+        return [run for run in self.latest_per_object_stage() if run.status in open_statuses]
+
+    def latest_detection_for_items(self, item_ids: list[UUID]) -> dict[UUID, PipelineRun]:
+        if not item_ids:
+            return {}
+        stmt = (
+            select(PipelineRun)
+            .where(
+                PipelineRun.source_item_id.in_(item_ids),
+                PipelineRun.stage == "event_detection",
+            )
+            .order_by(PipelineRun.source_item_id, PipelineRun.started_at.desc())
+            .distinct(PipelineRun.source_item_id)
+        )
+        return {
+            run.source_item_id: run
+            for run in self.session.scalars(stmt).all()
+            if run.source_item_id is not None
+        }
+
+    def list_detection_in_range(
+        self,
+        *,
+        since: datetime,
+        until: datetime | None = None,
+        limit: int = 500,
+    ) -> list[PipelineRun]:
+        effective = func.coalesce(PipelineRun.finished_at, PipelineRun.started_at)
+        stmt = (
+            select(PipelineRun)
+            .where(
+                PipelineRun.stage == "event_detection",
+                effective >= since,
+            )
+            .order_by(effective.desc())
+            .limit(limit)
+        )
+        if until is not None:
+            stmt = stmt.where(effective < until)
+        return list(self.session.scalars(stmt))
+
+    def detection_counts_in_range(
+        self,
+        *,
+        since: datetime,
+        until: datetime | None = None,
+    ) -> dict[str, int]:
+        effective = func.coalesce(PipelineRun.finished_at, PipelineRun.started_at)
+        filters = [PipelineRun.stage == "event_detection", effective >= since]
+        if until is not None:
+            filters.append(effective < until)
+        attempts = int(
+            self.session.execute(select(func.count()).select_from(PipelineRun).where(*filters)).scalar_one()
+        )
+        unique = int(
+            self.session.execute(
+                select(func.count(func.distinct(PipelineRun.source_item_id))).where(*filters)
+            ).scalar_one()
+        )
+        return {"attempts": attempts, "unique_items": unique}
+
+    def list_stage_in_range(
+        self,
+        stage: str,
+        *,
+        since: datetime,
+        until: datetime | None = None,
+        limit: int = 500,
+    ) -> list[PipelineRun]:
+        effective = func.coalesce(PipelineRun.finished_at, PipelineRun.started_at)
+        stmt = (
+            select(PipelineRun)
+            .where(PipelineRun.stage == stage, effective >= since)
+            .order_by(effective.desc())
+            .limit(limit)
+        )
+        if until is not None:
+            stmt = stmt.where(effective < until)
+        return list(self.session.scalars(stmt))
 
     def get_running(self, event_id: UUID, stage: str) -> PipelineRun | None:
         stmt = select(PipelineRun).where(

@@ -1,0 +1,24 @@
+---
+description: Principios y flujo de contexto de Sin Línea. No carga el resto de docs/ai.
+alwaysApply: true
+---
+
+# Sin Línea
+
+Medio automatizado. La unidad es el suceso (`Event`); el artículo es la representación actual. Stack: monolito modular (Next.js + FastAPI + Celery). Código determinista para reglas y locks; LLM solo para interpretar, comparar, clasificar o redactar.
+
+## Lectura
+
+No cargues el resto de `docs/ai/` por defecto. Empezá por [`docs/ai/INDEX.md`](docs/ai/INDEX.md). Leé solo el documento y los archivos del módulo de la tarea. Ampliá la búsqueda si hay dependencias o duda. Verificá en código lo que vas a cambiar: la documentación puede estar desactualizada. Ante conflicto, gana el código.
+
+`README.md` es onboarding operativo (Compose, env) y puede estar stale. `_master_prompt_extract.txt` es histórico, no verdad operativa.
+
+## Docs
+
+Si cambia arquitectura, una decisión deliberada o el estado, actualizá **solo** el archivo afectado (`pipeline.md`, `DECISIONS.md`, `STATE.md`). `HANDOFF.md` es reemplazable: actualizalo al cerrar una tarea o si piden continuar en otro chat. No acumulés sesiones. No inventes decisiones, resultados de pruebas ni features. No copies secretos.
+
+`DECISIONS.md` solo con evidencia de intención (spec, test de política, comentario). El cableado y los posibles defectos van a STATE y pipeline; no los trates como reglas a preservar.
+
+## Cierre
+
+Ejecutá las pruebas del cambio; ampliá si el riesgo o CI lo piden. Respuesta final breve: cambios, validación, pendientes.

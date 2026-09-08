@@ -3,7 +3,6 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 export const dynamic = "force-dynamic";
-export const robots = { index: false, follow: false };
 
 type Params = { token: string };
 

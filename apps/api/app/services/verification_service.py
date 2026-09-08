@@ -14,6 +14,13 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from app.core.source_content import (
+    BODY_SOURCE_EXTRACTED_HTML,
+    BODY_SOURCE_SEARCH_SNIPPET,
+    BODY_SOURCE_TITLE_ONLY,
+    is_extracted_body,
+    merge_item_metadata,
+)
 from app.core.text import content_fingerprint, excerpt_in_source, postgres_safe_json, postgres_safe_text
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
@@ -751,6 +758,18 @@ class VerificationService:
                 excerpt=(snippet or text or "")[:500] or None,
             )
         )
+        if html and is_extracted_body(text, src.title):
+            body_source = BODY_SOURCE_EXTRACTED_HTML
+        elif is_extracted_body(snippet, src.title):
+            body_source = BODY_SOURCE_SEARCH_SNIPPET
+        else:
+            body_source = BODY_SOURCE_TITLE_ONLY
+        if outcome.created or outcome.updated:
+            merge_item_metadata(
+                outcome.item,
+                body_source=body_source,
+                fetch_ok=bool(html),
+            )
         src.item = outcome.item
         return outcome.item
 

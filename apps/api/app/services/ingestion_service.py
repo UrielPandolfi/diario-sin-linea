@@ -11,11 +11,18 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.text import content_fingerprint
 from app.core.urls import canonicalize_url
+from app.core.source_content import (
+    BODY_SOURCE_EXTRACTED_HTML,
+    BODY_SOURCE_RSS_SUMMARY,
+    BODY_SOURCE_TITLE_ONLY,
+    is_extracted_body,
+    merge_item_metadata,
+)
 from app.domain.enums import IngestionMethod, SourceItemStatus
 from app.models import Source
 from app.repositories import SourceRepository
 from app.schemas import SourceItemCreate
-from app.services.fetching import HttpFetcher, extract_text
+from app.services.fetching import HttpFetcher, extract_text, fetch_failure_reason
 from app.services.source_item_service import IngestOutcome, SourceItemService
 
 EnqueueDetection = Callable[[UUID], None]
@@ -163,15 +170,32 @@ class IngestionService:
         canonical = canonicalize_url(entry.url)
         raw_text = entry.summary
         clean_text = entry.summary
+        fetch_ok = False
+        fetch_error = None
+        body_source = BODY_SOURCE_TITLE_ONLY
         try:
             article = self.fetcher.fetch(entry.url)
             extracted = self.extract(article.body, article.url)
             raw_text = article.body
-            if extracted:
+            fetch_ok = True
+            if is_extracted_body(extracted, entry.title):
                 clean_text = extracted
-        except Exception:
+                body_source = BODY_SOURCE_EXTRACTED_HTML
+            elif is_extracted_body(entry.summary, entry.title):
+                clean_text = entry.summary
+                body_source = BODY_SOURCE_RSS_SUMMARY
+            else:
+                clean_text = extracted or entry.summary
+                body_source = BODY_SOURCE_TITLE_ONLY
+        except Exception as exc:
             raw_text = entry.summary
             clean_text = entry.summary
+            fetch_ok = False
+            fetch_error = fetch_failure_reason(exc)
+            if is_extracted_body(entry.summary, entry.title):
+                body_source = BODY_SOURCE_RSS_SUMMARY
+            else:
+                body_source = BODY_SOURCE_TITLE_ONLY
 
         payload = SourceItemCreate(
             source_id=source.id,
@@ -187,4 +211,12 @@ class IngestionService:
             published_at=entry.published_at,
             processing_status=SourceItemStatus.PENDING,
         )
-        return self.item_service.ingest(payload)
+        outcome = self.item_service.ingest(payload)
+        if outcome.created or outcome.updated:
+            merge_item_metadata(
+                outcome.item,
+                body_source=body_source,
+                fetch_ok=fetch_ok,
+                fetch_error=fetch_error,
+            )
+        return outcome

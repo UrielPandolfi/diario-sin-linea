@@ -30,6 +30,8 @@ class VoyageEmbeddingProvider:
                 completion_tokens=0,
                 total_tokens=total,
                 duration_ms=duration_ms,
+                model_reported=(payload.get("model") if isinstance(payload, dict) else None),
+                usage_reported=True,
             )
             rows = sorted(payload["data"], key=lambda row: row["index"])
             return [row["embedding"] for row in rows]
