@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import router as admin_router
+from app.api.admin_cases import router as admin_cases_router
+from app.api.cases import router as cases_router
 from app.api.health import router as health_router
 from app.api.public import router as public_router
 from app.core.config import get_settings
@@ -31,7 +33,9 @@ def create_app() -> FastAPI:
     )
     application.include_router(health_router)
     application.include_router(public_router)
+    application.include_router(cases_router)
     application.include_router(admin_router)
+    application.include_router(admin_cases_router)
     return application
 
 

@@ -1,11 +1,12 @@
 from datetime import timedelta
+from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.api.deps import DbSession, require_admin
+from app.api.deps import DbSession, require_admin, require_admin_origin
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.source_content import has_extracted_body
@@ -42,6 +43,12 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 class LoginBody(BaseModel):
     password: str
+
+
+class PublishBody(BaseModel):
+    override_editorial_hold: bool = False
+    target_version: int | None = None
+    base_published_version: int | None = None
 
 
 class SourceWrite(BaseModel):
@@ -130,6 +137,7 @@ def _article_out(article) -> dict:
         "published_version": article.published_version,
         "published_at": _iso(article.published_at),
         "slug": article.slug,
+        "editorial_hold": bool(article.editorial_hold),
     }
 
 
@@ -182,7 +190,7 @@ def login(payload: LoginBody, request: Request) -> dict:
     return {"ok": True}
 
 
-@router.post("/logout")
+@router.post("/logout", dependencies=[Depends(require_admin_origin)])
 def logout(request: Request) -> dict:
     request.session.clear()
     return {"ok": True}
@@ -218,7 +226,7 @@ def list_sources(db: DbSession) -> list[dict]:
     return [_source_out(source) for source in SourceService(db).list_all()]
 
 
-@router.post("/sources", dependencies=[Depends(require_admin)], status_code=status.HTTP_201_CREATED)
+@router.post("/sources", dependencies=[Depends(require_admin_origin)], status_code=status.HTTP_201_CREATED)
 def create_source(payload: SourceWrite, db: DbSession) -> dict:
     source = SourceService(db).create(SourceCreate(**payload.model_dump()))
     return _source_out(source)
@@ -232,7 +240,7 @@ def get_source(source_id: UUID, db: DbSession) -> dict:
     return _source_out(source)
 
 
-@router.patch("/sources/{source_id}", dependencies=[Depends(require_admin)])
+@router.patch("/sources/{source_id}", dependencies=[Depends(require_admin_origin)])
 def patch_source(source_id: UUID, payload: SourceUpdate, db: DbSession) -> dict:
     service = SourceService(db)
     source = service.get(source_id)
@@ -242,7 +250,7 @@ def patch_source(source_id: UUID, payload: SourceUpdate, db: DbSession) -> dict:
     return _source_out(updated)
 
 
-@router.post("/sources/{source_id}/poll", dependencies=[Depends(require_admin)], status_code=status.HTTP_202_ACCEPTED)
+@router.post("/sources/{source_id}/poll", dependencies=[Depends(require_admin_origin)], status_code=status.HTTP_202_ACCEPTED)
 def enqueue_poll(source_id: UUID, db: DbSession) -> dict:
     source = SourceService(db).get(source_id)
     if source is None:
@@ -259,7 +267,7 @@ def list_items(db: DbSession, source_id: UUID | None = None, limit: int = 50) ->
 
 @router.post(
     "/source-items/requeue-pending",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_origin)],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def requeue_pending_detection(
@@ -311,6 +319,18 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
     entities = {entity.id: entity for entity in EntityRepository(db).list_for_event(event_id)}
     runs = PipelineRunRepository(db).list_for_event(event_id, limit=50)
     article = ArticleRepository(db).get_by_event_id(event_id)
+    live = None
+    if article is not None and article.published_version is not None:
+        live_row = ArticleRepository(db).get_version(article.id, article.published_version)
+        if live_row is not None:
+            live = {
+                "headline": live_row.headline,
+                "summary": live_row.summary,
+                "body": live_row.body,
+                "body_blocks": live_row.body_blocks,
+                "version_number": live_row.version_number,
+                "published_at": _iso(live_row.published_at),
+            }
     usage = LlmUsageRepository(db)
     latest = runs[0] if runs else None
     token_totals = usage.totals_for_event(event_id)
@@ -345,6 +365,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
         ],
         "claims": _claims_out(event, db),
         "article": _article_out(article) if article is not None else None,
+        "live": live,
         "audit": _audit_out(runs),
         "token_usage": {
             **token_totals,
@@ -368,7 +389,7 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
 
 @router.post(
     "/events/{event_id}/research",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_origin)],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def enqueue_research(event_id: UUID, db: DbSession) -> dict:
@@ -384,7 +405,7 @@ def enqueue_research(event_id: UUID, db: DbSession) -> dict:
 
 @router.post(
     "/events/{event_id}/claims",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_origin)],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def enqueue_claims(event_id: UUID, db: DbSession) -> dict:
@@ -400,7 +421,7 @@ def enqueue_claims(event_id: UUID, db: DbSession) -> dict:
 
 @router.post(
     "/events/{event_id}/verify",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_origin)],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def enqueue_verify(event_id: UUID, db: DbSession) -> dict:
@@ -416,7 +437,7 @@ def enqueue_verify(event_id: UUID, db: DbSession) -> dict:
 
 @router.post(
     "/events/{event_id}/write",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_origin)],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def enqueue_write(event_id: UUID, db: DbSession) -> dict:
@@ -432,7 +453,7 @@ def enqueue_write(event_id: UUID, db: DbSession) -> dict:
 
 @router.post(
     "/events/{event_id}/audit",
-    dependencies=[Depends(require_admin)],
+    dependencies=[Depends(require_admin_origin)],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def enqueue_audit(event_id: UUID, db: DbSession) -> dict:
@@ -445,8 +466,13 @@ def enqueue_audit(event_id: UUID, db: DbSession) -> dict:
     return {"queued": True, "event_id": str(event_id)}
 
 
-@router.post("/events/{event_id}/publish", dependencies=[Depends(require_admin)])
-def enqueue_publish(event_id: UUID, db: DbSession) -> dict:
+@router.post("/events/{event_id}/publish", dependencies=[Depends(require_admin_origin)])
+def enqueue_publish(
+    event_id: UUID,
+    db: DbSession,
+    payload: Annotated[PublishBody | None, Body()] = None,
+) -> dict:
+    payload = payload or PublishBody()
     event = EventRepository(db).get(event_id)
     if event is None:
         raise HTTPException(status_code=404, detail="Suceso no encontrado")
@@ -455,6 +481,17 @@ def enqueue_publish(event_id: UUID, db: DbSession) -> dict:
     article = ArticleRepository(db).get_by_event_id(event_id)
     if article is None:
         raise HTTPException(status_code=404, detail="Artículo no encontrado")
+    if article.editorial_hold and payload.override_editorial_hold:
+        result = PublishService(db).publish(
+            event_id,
+            trigger="admin_override",
+            override_editorial_hold=True,
+            target_version=payload.target_version,
+            base_published_version=payload.base_published_version,
+        )
+        if not result.get("published") and result.get("reason") not in {"already_published"}:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=result.get("reason"))
+        return result
     inspection = PublishService(db).inspect_publish(event_id)
     if inspection["reason"] == "already_published":
         return {"published": True, "reason": "already_published", "event_id": str(event_id)}
@@ -467,7 +504,7 @@ def enqueue_publish(event_id: UUID, db: DbSession) -> dict:
     )
 
 
-@router.post("/events/{event_id}/archive", dependencies=[Depends(require_admin)])
+@router.post("/events/{event_id}/archive", dependencies=[Depends(require_admin_origin)])
 def archive_event(event_id: UUID, db: DbSession) -> dict:
     event = EventRepository(db).get(event_id)
     if event is None:

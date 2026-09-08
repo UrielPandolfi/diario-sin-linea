@@ -19,6 +19,7 @@ from app.services.audit_service import AuditService
 from app.services.verification_service import VerificationService
 from app.services.writing_service import WritingService
 from app.services.publish_service import PublishService
+from app.repositories import ArticleRepository
 from app.workers.celery_app import celery_app
 
 settings = get_settings()
@@ -269,7 +270,9 @@ def audit_event_article(self, event_id: str, trigger: str = "writing") -> dict:
         result = service.audit(UUID(event_id), trigger=trigger)
         session.commit()
         if result.get("skipped") is False and result.get("passed") is True:
-            publish_event_article.delay(event_id, trigger)
+            article = ArticleRepository(session).get_by_event_id(UUID(event_id))
+            if article is None or not article.editorial_hold:
+                publish_event_article.delay(event_id, trigger)
         return result
     except Exception:
         session.rollback()

@@ -7,6 +7,8 @@ const OPEN_WITHOUT_LOCALITY = [
   /^\/entrar\/?$/,
   /^\/onboarding\/?$/,
   /^\/como-funciona\/?$/,
+  /^\/contacto\/?$/,
+  /^\/seguimiento(\/|$)/,
   /^\/noticias(\/|$)/,
   /^\/admin(\/|$)/,
   /^\/api(\/|$)/,

@@ -1,5 +1,7 @@
 import type {
   Article,
+  CaseCreateResponse,
+  CaseFollowUp,
   CursorPage,
   FeedScope,
   LocalitiesResponse,
@@ -99,4 +101,49 @@ export function fetchLocalities(): Promise<LocalitiesResponse> {
 
 export function fetchArticle(key: string): Promise<Article> {
   return publicGet<Article>(`/api/v1/articles/${encodeURIComponent(key)}`);
+}
+
+export async function createCase(
+  body: {
+    article_id?: string;
+    article_slug?: string;
+    reported_version_number?: number;
+    reason: string;
+    message: string;
+    link_url?: string;
+    email?: string;
+    website?: string;
+  },
+  idempotencyKey: string,
+): Promise<CaseCreateResponse> {
+  const origin = apiOrigin();
+  const url = origin ? `${origin}/api/v1/cases` : "/api/v1/cases";
+  const response = await fetch(url, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "Idempotency-Key": idempotencyKey,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    throw new PublicApiError("request_failed", response.status);
+  }
+  return (await response.json()) as CaseCreateResponse;
+}
+
+export async function fetchFollowUp(token: string): Promise<CaseFollowUp> {
+  const origin = apiOrigin();
+  const url = origin
+    ? `${origin}/api/v1/cases/follow-up/${encodeURIComponent(token)}`
+    : `/api/v1/cases/follow-up/${encodeURIComponent(token)}`;
+  const response = await fetch(url, {
+    cache: "no-store",
+    headers: { "Cache-Control": "no-store" },
+  });
+  if (!response.ok) {
+    throw new PublicApiError("request_failed", response.status);
+  }
+  return (await response.json()) as CaseFollowUp;
 }

@@ -54,6 +54,20 @@ def test_resolve_maps_c1_and_rejects_unknown_or_uuid() -> None:
         )
 
 
+def test_merge_editorial_keeps_exact_blocks_and_strips_changed() -> None:
+    from app.core.article_body import merge_editorial_body_blocks
+
+    claim_id = str(uuid4())
+    live = [
+        {"type": "paragraph", "segments": [{"text": "Párrafo estable.", "claim_ids": [claim_id]}]},
+        {"type": "paragraph", "segments": [{"text": "Párrafo a editar.", "claim_ids": [claim_id]}]},
+    ]
+    body, blocks = merge_editorial_body_blocks(live, "Párrafo estable.\n\nPárrafo corregido.")
+    assert body == "Párrafo estable.\n\nPárrafo corregido."
+    assert blocks[0]["segments"][0]["claim_ids"] == [claim_id]
+    assert blocks[1]["segments"][0]["claim_ids"] == []
+
+
 def test_context_claim_ref_map_prefers_explicit_index() -> None:
     context = ArticleContext(
         event=ContextEventStub(

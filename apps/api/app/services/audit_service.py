@@ -231,6 +231,7 @@ class AuditService:
             body, body_blocks = resolve_article_draft(
                 draft, claim_ref_map=context_claim_ref_map(article_context)
             )
+            article = self.articles.lock_by_id(article.id) or article
             article = self.article_service.update_content(
                 article,
                 ArticleContentUpdate(

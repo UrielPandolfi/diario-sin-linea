@@ -79,9 +79,13 @@ class Settings(BaseSettings):
     feed_freshness_weight: float = 1.0
     feed_locality_weight: float = 1.0
     nearby_window_hours: int = 12
+    trusted_proxies: str = ""
 
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    def trusted_proxy_list(self) -> list[str]:
+        return [item.strip() for item in self.trusted_proxies.split(",") if item.strip()]
 
 
 @lru_cache

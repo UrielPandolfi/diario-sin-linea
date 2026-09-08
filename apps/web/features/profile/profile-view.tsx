@@ -45,6 +45,9 @@ export function ProfileView() {
 
       <section className="mt-8 space-y-2 border-t border-border pt-6">
         <h2 className="font-heading text-sm text-primary">Sobre Sin Línea</h2>
+        <Link href="/contacto" className="block font-sans text-sm">
+          Contacto
+        </Link>
         <Link href="/como-funciona" className="inline-block font-sans text-sm">
           Cómo funciona
         </Link>

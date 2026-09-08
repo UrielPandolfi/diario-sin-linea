@@ -123,6 +123,15 @@ export type AdminEventDetail = AdminEvent & {
     published_version: number | null;
     published_at: string | null;
     slug: string;
+    editorial_hold?: boolean;
+  } | null;
+  live: {
+    headline: string;
+    summary: string;
+    body: string;
+    body_blocks?: unknown[] | null;
+    version_number: number;
+    published_at: string | null;
   } | null;
   audit: {
     run_id: string;

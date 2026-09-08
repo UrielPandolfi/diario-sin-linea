@@ -10,6 +10,7 @@ const NAV = [
   { href: "/admin/sources", label: "Fuentes" },
   { href: "/admin/events", label: "Sucesos" },
   { href: "/admin/published", label: "Publicadas" },
+  { href: "/admin/cases", label: "Casos" },
 ];
 
 function navIsActive(href: string, pathname: string): boolean {

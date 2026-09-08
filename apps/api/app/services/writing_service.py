@@ -141,7 +141,7 @@ class WritingService:
             base["reason"] = "no_claims"
             return base
 
-        article = self.articles.get_by_event_id(event.id)
+        article = self.articles.lock_by_event_id(event.id)
         if article is not None and not self._can_write(article):
             base["article_id"] = str(article.id)
             base["version"] = article.current_version

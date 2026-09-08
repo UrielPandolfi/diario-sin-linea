@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.article_body import plain_article_draft
 from app.core.config import get_settings
+from tests.origin import ADMIN_ORIGIN
 from app.domain.enums import (
     ArticleStatus,
     ClaimImportance,
@@ -228,6 +229,10 @@ def test_auto_publish_flag_does_not_gate_passed_chain(monkeypatch) -> None:
     from types import SimpleNamespace
 
     monkeypatch.setattr(
+        "app.workers.tasks.ArticleRepository",
+        lambda session: SimpleNamespace(get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False)),
+    )
+    monkeypatch.setattr(
         "app.workers.tasks.AuditService",
         lambda session: SimpleNamespace(audit=lambda *_a, **_k: {"skipped": False, "passed": True}),
     )
@@ -372,19 +377,19 @@ def test_admin_publish_retry_and_conflict(db_session: Session, monkeypatch) -> N
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        denied = client.post(f"/api/v1/admin/events/{event.id}/publish")
+        denied = client.post(f"/api/v1/admin/events/{event.id}/publish", headers=ADMIN_ORIGIN)
         assert denied.status_code == 409
         assert denied.json()["detail"] == "audit_not_passed"
         assert queued == []
 
         _audit_pass(db_session, event)
-        accepted = client.post(f"/api/v1/admin/events/{event.id}/publish")
+        accepted = client.post(f"/api/v1/admin/events/{event.id}/publish", headers=ADMIN_ORIGIN)
         assert accepted.status_code == 202
         assert queued == [(str(event.id), "admin")]
 
         _publish(db_session, event)
         db_session.commit()
-        again = client.post(f"/api/v1/admin/events/{event.id}/publish")
+        again = client.post(f"/api/v1/admin/events/{event.id}/publish", headers=ADMIN_ORIGIN)
         assert again.status_code == 200
         assert again.json()["reason"] == "already_published"
 
@@ -392,7 +397,7 @@ def test_admin_publish_retry_and_conflict(db_session: Session, monkeypatch) -> N
             PipelineRun(event_id=event.id, stage=AUDITING_STAGE, status=PipelineStatus.RUNNING, metadata_json={})
         )
         db_session.commit()
-        busy = client.post(f"/api/v1/admin/events/{event.id}/write")
+        busy = client.post(f"/api/v1/admin/events/{event.id}/write", headers=ADMIN_ORIGIN)
         assert busy.status_code == 409
 
 

@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.article_body import annotated_article_draft, plain_article_draft
 from app.core.config import get_settings
+from tests.origin import ADMIN_ORIGIN
 from app.domain.enums import (
     ArticleStatus,
     ClaimImportance,
@@ -591,7 +592,7 @@ def test_admin_write_accepted(db_session: Session, monkeypatch) -> None:
     with TestClient(app) as client:
         login = client.post("/api/v1/admin/login", json={"password": settings.admin_password})
         assert login.status_code == 200
-        response = client.post(f"/api/v1/admin/events/{event.id}/write")
+        response = client.post(f"/api/v1/admin/events/{event.id}/write", headers=ADMIN_ORIGIN)
         detail = client.get(f"/api/v1/admin/events/{event.id}")
     assert response.status_code == 202
     assert response.json()["queued"] is True
@@ -613,7 +614,7 @@ def test_admin_write_conflict_when_running(db_session: Session, monkeypatch) -> 
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post(f"/api/v1/admin/events/{event.id}/write")
+        response = client.post(f"/api/v1/admin/events/{event.id}/write", headers=ADMIN_ORIGIN)
     assert response.status_code == 409
     assert queued == []
 

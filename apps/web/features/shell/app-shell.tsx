@@ -1,5 +1,6 @@
 import { MobileNav } from "@/features/shell/mobile-nav";
 import { Sidebar } from "@/features/shell/sidebar";
+import { SiteFooter } from "@/features/shell/site-footer";
 import type { ReactNode } from "react";
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -7,7 +8,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-screen bg-background">
       <div className="mx-auto flex min-h-screen max-w-[1440px]">
         <Sidebar />
-        <div className="min-w-0 flex-1 pb-16 md:pb-0">{children}</div>
+        <div className="min-w-0 flex-1 pb-16 md:pb-0">
+          {children}
+          <SiteFooter />
+        </div>
       </div>
       <MobileNav />
     </div>

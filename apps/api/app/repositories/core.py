@@ -9,6 +9,7 @@ from app.models import (
     ArticleVersion,
     Claim,
     ClaimEvidence,
+    Correction,
     Entity,
     Event,
     EventEmbedding,
@@ -16,10 +17,12 @@ from app.models import (
     EventSource,
     LlmUsage,
     PipelineRun,
+    ReaderCase,
+    ReaderCaseAction,
     Source,
     SourceItem,
 )
-from app.domain.enums import EntityType, PipelineStatus, SourceItemStatus
+from app.domain.enums import CaseReason, CaseStatus, EntityType, PipelineStatus, SourceItemStatus
 
 
 class SourceRepository:
@@ -484,3 +487,86 @@ class ArticleRepository:
             ArticleVersion.version_number == version_number,
         )
         return self.session.scalars(stmt).first()
+
+    def lock_by_id(self, article_id: UUID) -> Article | None:
+        stmt = (
+            select(Article)
+            .where(Article.id == article_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return self.session.scalars(stmt).first()
+
+    def lock_by_event_id(self, event_id: UUID) -> Article | None:
+        stmt = (
+            select(Article)
+            .where(Article.event_id == event_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return self.session.scalars(stmt).first()
+
+    def list_public_corrections(self, article_id: UUID) -> list[Correction]:
+        stmt = (
+            select(Correction)
+            .where(Correction.article_id == article_id, Correction.is_public.is_(True))
+            .order_by(Correction.created_at.asc())
+        )
+        return list(self.session.scalars(stmt).all())
+
+    def get_correction(self, correction_id: UUID) -> Correction | None:
+        return self.session.get(Correction, correction_id)
+
+
+class ReaderCaseRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def add(self, row: ReaderCase) -> ReaderCase:
+        self.session.add(row)
+        return row
+
+    def get(self, case_id: UUID) -> ReaderCase | None:
+        return self.session.get(ReaderCase, case_id)
+
+    def get_by_token(self, token: str) -> ReaderCase | None:
+        stmt = (
+            select(ReaderCase)
+            .options(selectinload(ReaderCase.article))
+            .where(ReaderCase.access_token == token)
+        )
+        return self.session.scalars(stmt).first()
+
+    def get_by_public_code(self, public_code: str) -> ReaderCase | None:
+        return self.session.scalars(select(ReaderCase).where(ReaderCase.public_code == public_code)).first()
+
+    def get_by_idempotency_key(self, key: UUID) -> ReaderCase | None:
+        return self.session.scalars(select(ReaderCase).where(ReaderCase.idempotency_key == key)).first()
+
+    def list_filtered(
+        self,
+        *,
+        status: str | None = None,
+        reason: str | None = None,
+        article_id: UUID | None = None,
+        limit: int = 50,
+    ) -> list[ReaderCase]:
+        stmt = (
+            select(ReaderCase)
+            .options(selectinload(ReaderCase.article))
+            .order_by(ReaderCase.created_at.desc())
+            .limit(limit)
+        )
+        if status:
+            wanted_status = status if isinstance(status, CaseStatus) else CaseStatus(status)
+            stmt = stmt.where(ReaderCase.status == wanted_status)
+        if reason:
+            wanted_reason = reason if isinstance(reason, CaseReason) else CaseReason(reason)
+            stmt = stmt.where(ReaderCase.reason == wanted_reason)
+        if article_id is not None:
+            stmt = stmt.where(ReaderCase.article_id == article_id)
+        return list(self.session.scalars(stmt).all())
+
+    def add_action(self, action: ReaderCaseAction) -> ReaderCaseAction:
+        self.session.add(action)
+        return action

@@ -56,6 +56,42 @@ export type Article = EventCard & {
   body_blocks?: ArticleBodyBlock[] | null;
   hero_image_url: string | null;
   claims?: ArticleClaim[];
+  published_version?: number | null;
+  article_id?: string;
+  notices?: ArticleNotice[];
+  history?: ArticleHistoryItem[];
+};
+
+export type ArticleNotice = {
+  kind: string;
+  notice: string;
+  occurred_at: string | null;
+  show_near_title: boolean;
+};
+
+export type ArticleHistoryItem = {
+  type: string;
+  occurred_at: string | null;
+  notice: string | null;
+  headline: string | null;
+};
+
+export type CaseFollowUp = {
+  public_code: string;
+  status: string;
+  outcome: string | null;
+  public_resolution: string | null;
+  reason: string;
+  message: string;
+  created_at: string | null;
+  reviewing_at: string | null;
+  resolved_at: string | null;
+  article: { slug: string; headline: string } | null;
+};
+
+export type CaseCreateResponse = {
+  public_code: string;
+  follow_up_url: string;
 };
 
 export type NowItem = {

@@ -2,12 +2,12 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.clock import utc_now
-from app.domain.enums import ArticleStatus
+from app.domain.enums import ArticleStatus, CorrectionKind
 from app.models.base import Base, TimestampMixin
 from app.models.event import Event
 
@@ -45,10 +45,12 @@ class Article(TimestampMixin, Base):
     current_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     published_version: Mapped[int | None] = mapped_column(Integer)
     hero_image_url: Mapped[str | None] = mapped_column(Text)
+    editorial_hold: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     event: Mapped[Event] = relationship(back_populates="articles")
     versions: Mapped[list["ArticleVersion"]] = relationship(back_populates="article")
     corrections: Mapped[list["Correction"]] = relationship(back_populates="article")
+    reader_cases: Mapped[list["ReaderCase"]] = relationship(back_populates="article")
 
 
 class ArticleVersion(TimestampMixin, Base):
@@ -68,6 +70,7 @@ class ArticleVersion(TimestampMixin, Base):
     body: Mapped[str] = mapped_column(Text, nullable=False)
     body_blocks: Mapped[list | dict | None] = mapped_column(JSONB, nullable=True)
     change_reason: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     search_tsv: Mapped[Any] = mapped_column(
         TSVECTOR,
         Computed(
@@ -92,5 +95,21 @@ class Correction(TimestampMixin, Base):
     )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     reason: Mapped[str | None] = mapped_column(Text)
+    kind: Mapped[CorrectionKind] = mapped_column(
+        Enum(CorrectionKind, native_enum=False, length=32),
+        default=CorrectionKind.CORRECTION,
+        nullable=False,
+        index=True,
+    )
+    show_near_title: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_public: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reader_case_id: Mapped[UUID | None] = mapped_column(
+        Uuid, ForeignKey("reader_cases.id", ondelete="SET NULL", use_alter=True), index=True
+    )
 
     article: Mapped[Article] = relationship(back_populates="corrections")
+    article_version: Mapped[ArticleVersion | None] = relationship()
+    reader_case: Mapped["ReaderCase | None"] = relationship(
+        back_populates="authored_corrections",
+        foreign_keys=[reader_case_id],
+    )

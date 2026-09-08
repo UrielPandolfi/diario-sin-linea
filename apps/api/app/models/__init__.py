@@ -4,6 +4,7 @@ from app.models.claim import Claim, ClaimEvidence, Entity
 from app.models.event import Event, EventEmbedding, EventEntity, EventSource, EventUpdate
 from app.models.llm_usage import LlmUsage
 from app.models.pipeline import PipelineRun
+from app.models.reader_case import ReaderCase, ReaderCaseAction
 from app.models.source import Source, SourceItem
 
 __all__ = [
@@ -21,6 +22,8 @@ __all__ = [
     "EventUpdate",
     "LlmUsage",
     "PipelineRun",
+    "ReaderCase",
+    "ReaderCaseAction",
     "Source",
     "SourceItem",
 ]

@@ -22,7 +22,16 @@ class PublishService:
         self.articles = ArticleRepository(session)
         self.events = EventRepository(session)
 
-    def publish(self, event_id: UUID, *, trigger: str, context: dict | None = None) -> dict:
+    def publish(
+        self,
+        event_id: UUID,
+        *,
+        trigger: str,
+        context: dict | None = None,
+        override_editorial_hold: bool = False,
+        target_version: int | None = None,
+        base_published_version: int | None = None,
+    ) -> dict:
         event = self.events.get(event_id)
         if event is None:
             raise ValueError("event_not_found")
@@ -40,7 +49,13 @@ class PublishService:
             event_id=event.id,
             stage=PUBLISHING_STAGE,
             status=PipelineStatus.RUNNING,
-            metadata_json={"trigger": trigger, "context": context or {}},
+            metadata_json={
+                "trigger": trigger,
+                "context": context or {},
+                "override_editorial_hold": override_editorial_hold,
+                "target_version": target_version,
+                "base_published_version": base_published_version,
+            },
         )
         try:
             with self.session.begin_nested():
@@ -57,7 +72,12 @@ class PublishService:
             }
 
         try:
-            result = self._run(event)
+            result = self._run(
+                event,
+                override_editorial_hold=override_editorial_hold,
+                target_version=target_version,
+                base_published_version=base_published_version,
+            )
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}
@@ -83,6 +103,8 @@ class PublishService:
             and article.published_version == article.current_version
         ):
             return {"reason": "already_published", "published": True}
+        if article.editorial_hold:
+            return {"reason": "editorial_hold", "published": False}
         if not self._audit_passed_for_current(event.id, article):
             return {"reason": "audit_not_passed", "published": False}
         return {"reason": "ready", "published": False}
@@ -120,8 +142,15 @@ class PublishService:
             "error": message,
         }
 
-    def _run(self, event: Event) -> dict:
-        article = self.articles.get_by_event_id(event.id)
+    def _run(
+        self,
+        event: Event,
+        *,
+        override_editorial_hold: bool = False,
+        target_version: int | None = None,
+        base_published_version: int | None = None,
+    ) -> dict:
+        article = self.articles.lock_by_event_id(event.id)
         base: dict[str, Any] = {
             "article_id": str(article.id) if article is not None else None,
             "published": False,
@@ -142,6 +171,22 @@ class PublishService:
             base["published"] = True
             base["reason"] = "already_published"
             return base
+        if article.editorial_hold:
+            if not override_editorial_hold:
+                base["reason"] = "editorial_hold"
+                return base
+            if target_version is None or int(target_version) != int(article.current_version):
+                base["reason"] = "override_version_mismatch"
+                return base
+            if base_published_version is None or int(base_published_version) != int(
+                article.published_version or -1
+            ):
+                base["reason"] = "published_version_conflict"
+                return base
+            base["editorial_hold_override"] = True
+            base["from_published_version"] = article.published_version
+            base["target_version"] = target_version
+            base["override_at"] = utc_now().isoformat()
         if not self._audit_passed_for_current(event.id, article):
             base["reason"] = "audit_not_passed"
             return base
@@ -157,6 +202,9 @@ class PublishService:
             event.slug = article.slug
         if not first_publish:
             event.last_material_update_at = now
+        version = self.articles.get_version(article.id, article.current_version)
+        if version is not None:
+            version.published_at = now
         self.session.add(
             EventUpdate(
                 event_id=event.id,

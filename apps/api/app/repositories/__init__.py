@@ -4,6 +4,7 @@ from app.repositories.core import (
     EventRepository,
     LlmUsageRepository,
     PipelineRunRepository,
+    ReaderCaseRepository,
     SourceItemRepository,
     SourceRepository,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "EventRepository",
     "LlmUsageRepository",
     "PipelineRunRepository",
+    "ReaderCaseRepository",
     "SourceItemRepository",
     "SourceRepository",
 ]

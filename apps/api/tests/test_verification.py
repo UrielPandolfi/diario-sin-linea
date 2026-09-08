@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from tests.origin import ADMIN_ORIGIN
 from app.domain.enums import (
     ClaimImportance,
     ClaimStatus,
@@ -620,7 +621,7 @@ def test_admin_verify_accepted(db_session: Session, monkeypatch) -> None:
     with TestClient(app) as client:
         login = client.post("/api/v1/admin/login", json={"password": settings.admin_password})
         assert login.status_code == 200
-        response = client.post(f"/api/v1/admin/events/{event.id}/verify")
+        response = client.post(f"/api/v1/admin/events/{event.id}/verify", headers=ADMIN_ORIGIN)
     assert response.status_code == 202
     assert response.json()["queued"] is True
     assert queued == [(str(event.id), "admin")]
@@ -639,7 +640,7 @@ def test_admin_verify_conflict_when_running(db_session: Session, monkeypatch) ->
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post(f"/api/v1/admin/events/{event.id}/verify")
+        response = client.post(f"/api/v1/admin/events/{event.id}/verify", headers=ADMIN_ORIGIN)
     assert response.status_code == 409
     assert queued == []
 

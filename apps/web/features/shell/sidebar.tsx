@@ -7,6 +7,7 @@ import {
   Bookmark,
   CircleHelp,
   House,
+  Mail,
   MapPin,
   Radio,
   Search,
@@ -61,6 +62,23 @@ export function Sidebar() {
           })}
         </nav>
         <nav aria-label="Acerca de" className="mt-auto">
+          <Link
+            href="/contacto"
+            aria-current={navIsActive("/contacto", pathname) ? "page" : undefined}
+            title="Contacto"
+            className={`flex items-center gap-3 px-2 py-2.5 font-sans text-sm transition-colors ${
+              navIsActive("/contacto", pathname)
+                ? "bg-hover text-primary"
+                : "text-secondary hover:bg-hover hover:text-primary"
+            }`}
+          >
+            <Mail
+              className="h-[18px] w-[18px] shrink-0"
+              strokeWidth={navIsActive("/contacto", pathname) ? 2.2 : 1.75}
+              aria-hidden
+            />
+            <span className="hidden lg:inline">Contacto</span>
+          </Link>
           <Link
             href="/como-funciona"
             aria-current={navIsActive("/como-funciona", pathname) ? "page" : undefined}

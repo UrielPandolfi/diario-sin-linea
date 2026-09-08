@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.core.article_body import annotated_article_draft, plain_article_draft
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
+from tests.origin import ADMIN_ORIGIN
 from app.domain.enums import (
     ArticleStatus,
     ClaimImportance,
@@ -457,7 +458,7 @@ def test_admin_audit_accepted_and_get_compact(db_session: Session, monkeypatch) 
         login = client.post("/api/v1/admin/login", json={"password": settings.admin_password})
         assert login.status_code == 200
         detail = client.get(f"/api/v1/admin/events/{event.id}")
-        response = client.post(f"/api/v1/admin/events/{event.id}/audit")
+        response = client.post(f"/api/v1/admin/events/{event.id}/audit", headers=ADMIN_ORIGIN)
     assert detail.status_code == 200
     body = detail.json()
     assert body["article"]["status"] == ArticleStatus.DRAFT.value
@@ -477,7 +478,7 @@ def test_admin_audit_conflict_when_writing_running(db_session: Session, monkeypa
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post(f"/api/v1/admin/events/{event.id}/audit")
+        response = client.post(f"/api/v1/admin/events/{event.id}/audit", headers=ADMIN_ORIGIN)
     assert response.status_code == 409
     assert queued == []
 
@@ -493,7 +494,7 @@ def test_admin_write_conflict_when_auditing_running(db_session: Session, monkeyp
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post(f"/api/v1/admin/events/{event.id}/write")
+        response = client.post(f"/api/v1/admin/events/{event.id}/write", headers=ADMIN_ORIGIN)
     assert response.status_code == 409
     assert queued == []
 
@@ -578,6 +579,11 @@ def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
     from app.workers.tasks import audit_event_article
 
     monkeypatch.setattr(
+        "app.workers.tasks.ArticleRepository",
+        lambda session: SimpleNamespace(get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False)),
+    )
+
+    monkeypatch.setattr(
         "app.workers.tasks.AuditService",
         lambda session: SimpleNamespace(
             audit=lambda *_a, **_k: {"skipped": False, "passed": True, "event_id": "eid"}
@@ -608,6 +614,20 @@ def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
         ),
     )
     audit_event_article.run("00000000-0000-0000-0000-000000000001", "admin")
+    assert queued == []
+
+    queued.clear()
+    monkeypatch.setattr(
+        "app.workers.tasks.ArticleRepository",
+        lambda session: SimpleNamespace(get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=True)),
+    )
+    monkeypatch.setattr(
+        "app.workers.tasks.AuditService",
+        lambda session: SimpleNamespace(
+            audit=lambda *_a, **_k: {"skipped": False, "passed": True, "event_id": "eid"}
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
     assert queued == []
 
 

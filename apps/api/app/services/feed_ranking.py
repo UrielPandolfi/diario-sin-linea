@@ -6,14 +6,16 @@ from uuid import UUID
 from sqlalchemy import Select, and_, select
 from sqlalchemy.orm import Session, aliased, selectinload
 
+from app.core.article_body import claim_ids_in_body_blocks
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType
+from app.domain.enums import ArticleStatus, CorrectionKind, EventStatus, EventUpdateType
 from app.models import (
     Article,
     ArticleVersion,
     Claim,
     ClaimEvidence,
+    Correction,
     Event,
     EventSource,
     EventUpdate,
@@ -106,7 +108,9 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
     return payload
 
 
-def compact_public_claims(session: Session, event: Event) -> list[dict]:
+def compact_public_claims(
+    session: Session, event: Event, *, allowed_ids: set[str] | None = None
+) -> list[dict]:
     run = latest_success_verification(session, event.id)
     view = parse_verification_run(run)
     editorials = labels_for_event_claims(list(event.claims), view)
@@ -119,6 +123,8 @@ def compact_public_claims(session: Session, event: Event) -> list[dict]:
         }
     rows: list[dict] = []
     for claim in event.claims:
+        if allowed_ids is not None and str(claim.id) not in allowed_ids:
+            continue
         source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
         payload = {
             "id": str(claim.id),
@@ -134,13 +140,80 @@ def compact_public_claims(session: Session, event: Event) -> list[dict]:
     return rows
 
 
+def public_notices(corrections: list[Correction]) -> list[dict]:
+    return [
+        {
+            "kind": row.kind.value,
+            "notice": row.description,
+            "occurred_at": iso(row.created_at),
+            "show_near_title": row.show_near_title,
+        }
+        for row in corrections
+    ]
+
+
+def public_history(
+    article: Article,
+    corrections: list[Correction],
+    updates: list[EventUpdate],
+) -> list[dict]:
+    items: list[dict] = []
+    if article.published_at is not None:
+        items.append(
+            {
+                "type": "published",
+                "occurred_at": iso(article.published_at),
+                "notice": None,
+                "headline": None,
+            }
+        )
+    for row in corrections:
+        items.append(
+            {
+                "type": "correction" if row.kind == CorrectionKind.CORRECTION else "update",
+                "occurred_at": iso(row.created_at),
+                "notice": row.description,
+                "headline": None,
+            }
+        )
+    published_at = article.published_at
+    for update in updates:
+        if update.update_type != EventUpdateType.ARTICLE_UPDATED or not update.is_material:
+            continue
+        if published_at is not None and update.occurred_at <= published_at + timedelta(seconds=2):
+            continue
+        items.append(
+            {
+                "type": "pipeline_update",
+                "occurred_at": iso(update.occurred_at),
+                "notice": None,
+                "headline": update.headline,
+            }
+        )
+    items.sort(key=lambda row: row["occurred_at"] or "")
+    return items
+
+
 def article_payload(event: Event, article: Article, live: ArticleVersion, *, session: Session) -> dict:
+    allowed = claim_ids_in_body_blocks(live.body_blocks)
+    corrections = ArticleRepository(session).list_public_corrections(article.id)
+    updates = list(
+        session.scalars(
+            select(EventUpdate)
+            .where(EventUpdate.event_id == event.id)
+            .order_by(EventUpdate.occurred_at.asc())
+        ).all()
+    )
     return {
         **card_payload(event, article, live),
         "body": live.body,
         "body_blocks": live.body_blocks,
         "hero_image_url": article.hero_image_url,
-        "claims": compact_public_claims(session, event),
+        "published_version": article.published_version,
+        "article_id": str(article.id),
+        "notices": public_notices(corrections),
+        "history": public_history(article, corrections, updates),
+        "claims": compact_public_claims(session, event, allowed_ids=allowed),
     }
 
 
@@ -203,9 +276,31 @@ class FeedRankingService:
                     "headline": update.headline,
                     "slug": article.slug,
                     "public_id": str(event.public_id),
+                    "kind": "pipeline_update",
                 }
             )
-        return {"items": items}
+        corr_stmt = (
+            select(Correction, Event, Article)
+            .join(Article, Article.id == Correction.article_id)
+            .join(Event, Event.id == Article.event_id)
+            .where(*public_filters())
+            .where(Correction.is_public.is_(True))
+            .order_by(Correction.created_at.desc())
+            .limit(clamp_limit(limit))
+        )
+        for correction, event, article in self.session.execute(corr_stmt):
+            items.append(
+                {
+                    "occurred_at": iso(correction.created_at),
+                    "locality": event.locality,
+                    "headline": article.headline,
+                    "slug": article.slug,
+                    "public_id": str(event.public_id),
+                    "kind": correction.kind.value.lower(),
+                }
+            )
+        items.sort(key=lambda row: (row["occurred_at"] or "", row["slug"]), reverse=True)
+        return {"items": items[: clamp_limit(limit)]}
 
     def nearby(self, *, locality: str, limit: int) -> dict:
         wanted = normalize_locality(locality)

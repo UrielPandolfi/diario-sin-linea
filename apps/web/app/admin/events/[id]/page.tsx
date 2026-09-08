@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { EditorialReviseForm, HoldOverrideForm } from "@/features/admin/editorial-revise-form";
 import { editorialLabelCopy } from "@/features/article/claim-status";
 import { adminFetch, adminJson, formatDuration, formatTokens, formatWhen, type AdminEventDetail } from "@/lib/admin";
 
@@ -452,6 +453,31 @@ export default function AdminEventDetailPage() {
             ) : (
               <p className="px-4 py-6 font-sans text-sm text-secondary">Sin article draft.</p>
             )}
+          </section>
+
+          {event.article?.editorial_hold ? (
+            <HoldOverrideForm
+              eventId={params.id}
+              detail={event}
+              onDone={(message) => {
+                setNotice(message);
+                void load();
+              }}
+            />
+          ) : null}
+
+          <section className="border border-border bg-surface">
+            <h2 className="border-b border-border px-4 py-3 font-heading text-lg text-primary">
+              Revisión editorial
+            </h2>
+            <EditorialReviseForm
+              eventId={params.id}
+              detail={event}
+              onDone={(message) => {
+                setNotice(message);
+                void load();
+              }}
+            />
           </section>
 
           <section className="border border-border bg-surface">

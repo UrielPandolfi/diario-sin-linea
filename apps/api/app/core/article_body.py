@@ -134,3 +134,58 @@ def resolve_article_draft(
     if not body.strip():
         raise ArticleDraftValidationError("body derivado vacío")
     return body, [block.model_dump(mode="json") for block in persisted]
+
+
+def split_body_paragraphs(body: str) -> list[str]:
+    paragraphs = [part.strip() for part in (body or "").split("\n\n") if part.strip()]
+    if paragraphs:
+        return paragraphs
+    stripped = (body or "").strip()
+    return [stripped] if stripped else []
+
+
+def block_plain_text(block: dict | PersistedBodyBlock) -> str:
+    if isinstance(block, dict):
+        segments = block.get("segments") or []
+        return "".join(str(segment.get("text") or "") for segment in segments).strip()
+    return "".join(segment.text for segment in block.segments).strip()
+
+
+def claim_ids_in_body_blocks(blocks: list | dict | None) -> set[str]:
+    ids: set[str] = set()
+    if not isinstance(blocks, list):
+        return ids
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        for segment in block.get("segments") or []:
+            if not isinstance(segment, dict):
+                continue
+            for claim_id in segment.get("claim_ids") or []:
+                text = str(claim_id).strip()
+                if text:
+                    ids.add(text)
+    return ids
+
+
+def merge_editorial_body_blocks(live_blocks: list | dict | None, new_body: str) -> tuple[str, list[dict[str, Any]]]:
+    paragraphs = split_body_paragraphs(new_body)
+    if not paragraphs:
+        raise ArticleDraftValidationError("body derivado vacío")
+    unused: list[dict[str, Any]] = []
+    if isinstance(live_blocks, list):
+        unused = [block for block in live_blocks if isinstance(block, dict)]
+    merged: list[dict[str, Any]] = []
+    for paragraph in paragraphs:
+        match_index = next(
+            (index for index, block in enumerate(unused) if block_plain_text(block) == paragraph),
+            None,
+        )
+        if match_index is not None:
+            merged.append(unused.pop(match_index))
+        else:
+            merged.append({"type": "paragraph", "segments": [{"text": paragraph, "claim_ids": []}]})
+    body = render_article_body(merged)
+    if not body.strip():
+        raise ArticleDraftValidationError("body derivado vacío")
+    return body, merged

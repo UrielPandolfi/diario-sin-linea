@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from tests.origin import ADMIN_ORIGIN
 from app.domain.enums import IngestionMethod, SourceItemStatus
 from app.main import app
 from app.schemas import SourceCreate, SourceItemCreate
@@ -38,7 +39,9 @@ def test_requeue_pending_enqueues_detection(db_session: Session, monkeypatch) ->
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post("/api/v1/admin/source-items/requeue-pending?limit=3")
+        response = client.post(
+            "/api/v1/admin/source-items/requeue-pending?limit=3", headers=ADMIN_ORIGIN
+        )
     assert response.status_code == 202
     body = response.json()
     assert body["queued"] == 3
@@ -56,7 +59,9 @@ def test_requeue_pending_empty(db_session: Session, monkeypatch) -> None:
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post("/api/v1/admin/source-items/requeue-pending?limit=3")
+        response = client.post(
+            "/api/v1/admin/source-items/requeue-pending?limit=3", headers=ADMIN_ORIGIN
+        )
     assert response.status_code == 202
     assert response.json()["queued"] == 0
     assert queued == []
@@ -90,7 +95,9 @@ def test_requeue_includes_failed_items(db_session: Session, monkeypatch) -> None
     settings = get_settings()
     with TestClient(app) as client:
         client.post("/api/v1/admin/login", json={"password": settings.admin_password})
-        response = client.post("/api/v1/admin/source-items/requeue-pending?limit=3")
+        response = client.post(
+            "/api/v1/admin/source-items/requeue-pending?limit=3", headers=ADMIN_ORIGIN
+        )
     assert response.status_code == 202
     assert response.json()["queued"] == 1
     assert len(queued) == 1
