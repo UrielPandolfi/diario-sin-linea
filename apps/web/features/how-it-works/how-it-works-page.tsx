@@ -5,371 +5,311 @@ import {
   ClaimsDiagram,
   EventMergeDiagram,
   EventTimeline,
-  PipelineStrip,
-  Principles,
   RadarDiagram,
   ResearchDiagram,
   StatusGrid,
   UncertaintyDiagram,
   VerificationList,
 } from "@/features/how-it-works/diagrams";
+import { LandingFooter, LandingHeader } from "@/features/how-it-works/landing-chrome";
+import { LandingHero } from "@/features/how-it-works/landing-hero";
+import { ProcessStepper, type ProcessStep } from "@/features/how-it-works/process-stepper";
+import { Reveal } from "@/features/how-it-works/reveal";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-const ACCENT = {
-  petrol: "text-accent-petrol",
-  blue: "text-accent-blue",
-  ochre: "text-accent-ochre",
-} as const;
+const IDEAS = [
+  {
+    index: "01",
+    accent: "text-accent-petrol",
+    title: "La unidad es el suceso",
+    body: "Diez publicaciones sobre el mismo hecho no son diez noticias. Son una historia que evoluciona.",
+  },
+  {
+    index: "02",
+    accent: "text-accent-blue",
+    title: "La evidencia va antes que el texto",
+    body: "La IA redacta al final, sobre un suceso ya investigado y contrastado.",
+  },
+  {
+    index: "03",
+    accent: "text-accent-ochre",
+    title: "El criterio es tuyo",
+    body: "Te damos los hechos, las fuentes y también lo que todavía no se sabe.",
+  },
+] as const;
+
+const STEPS: ProcessStep[] = [
+  {
+    id: "senal",
+    index: "01",
+    label: "SEÑAL",
+    title: "Nuestro radar no rastrea Internet indiscriminadamente.",
+    body: "Monitoreamos un conjunto acotado de medios, organismos, gobiernos e instituciones. Cuando uno informa algo nuevo, eso funciona como señal y recién ahí empieza la investigación.",
+    note: "Una fuente encontrada durante una investigación no entra automáticamente al radar permanente.",
+    visual: <RadarDiagram />,
+  },
+  {
+    id: "suceso",
+    index: "02",
+    label: "SUCESO",
+    title: "No pensamos en artículos. Pensamos en sucesos.",
+    body: "Reunimos las señales que describen el mismo hecho y construimos una sola historia, en lugar de publicar una nota por cada versión que circula.",
+    visual: <EventMergeDiagram />,
+  },
+  {
+    id: "investigacion",
+    index: "03",
+    label: "INVESTIGACIÓN",
+    title: "Investigamos antes de escribir.",
+    body: "Buscamos la fuente oficial, los documentos públicos y lo que aportan otros medios: información nueva, confirmaciones o contradicciones.",
+    visual: <ResearchDiagram />,
+  },
+  {
+    id: "afirmaciones",
+    index: "04",
+    label: "AFIRMACIONES",
+    title: "Separamos la noticia en afirmaciones comprobables.",
+    body: "Cada afirmación que importa se evalúa por separado y se conecta con evidencia concreta.",
+    visual: <ClaimsDiagram />,
+  },
+  {
+    id: "verificacion",
+    index: "05",
+    label: "VERIFICACIÓN",
+    title: "Verificamos cuando puede cambiar la historia.",
+    body: "Ponemos atención especial en declaraciones políticas, acusaciones, leyes, decretos, estadísticas, elecciones y cifras importantes.",
+    visual: <VerificationList />,
+  },
+  {
+    id: "redaccion",
+    index: "06",
+    label: "REDACCIÓN",
+    title: "La IA trabaja sobre evidencia, no al revés.",
+    body: "Usamos inteligencia artificial para interpretar publicaciones, comparar información, detectar afirmaciones y redactar. El texto se construye a partir del estado estructurado del suceso.",
+    note: "El artículo no es nuestra fuente de verdad.",
+    visual: <AiStack />,
+  },
+  {
+    id: "auditoria",
+    index: "07",
+    label: "AUDITORÍA",
+    title: "Escribir no es el último paso.",
+    body: "Antes de publicar, el borrador pasa por una auditoría que revisa nombres, cifras, fechas, atribuciones, contradicciones y lenguaje editorial.",
+    visual: <AuditList />,
+  },
+];
+
+const NOT_DOING = [
+  "No clasificamos los hechos como positivos o negativos.",
+  "No usamos orientación política como señal de ranking.",
+  "No convertimos declaraciones en hechos.",
+  "No ocultamos las fuentes.",
+  "No fabricamos certeza cuando la evidencia no existe.",
+] as const;
+
+const PRINCIPLES = ["PRECISIÓN", "CLARIDAD", "CONTEXTO", "BREVEDAD"] as const;
 
 function Section({
   id,
-  index,
-  accent,
+  eyebrow,
   title,
-  visual,
+  lead,
   children,
 }: {
-  id: string;
-  index: string;
-  accent: keyof typeof ACCENT;
+  id?: string;
+  eyebrow: string;
   title: ReactNode;
-  visual?: ReactNode;
-  children?: ReactNode;
+  lead?: ReactNode;
+  children: ReactNode;
 }) {
-  const heading = (
-    <>
-      <p className={`font-sans text-[10px] font-semibold tracking-[0.08em] md:text-xs ${ACCENT[accent]}`}>{index}</p>
-      <h2
-        id={`${id}-title`}
-        className="mt-3 max-w-[760px] font-heading text-[1.9375rem] font-semibold leading-[1.22] text-primary md:mt-5 md:text-[42px] md:leading-[51px]"
-      >
-        {title}
-      </h2>
-    </>
-  );
-
   return (
-    <section id={id} className="border-t border-border py-16 md:py-[5.75rem]" aria-labelledby={`${id}-title`}>
-      {visual ? (
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,30.625rem)] lg:items-start lg:gap-16">
-          <div>
-            {heading}
-            {children}
-          </div>
-          <div className="min-w-0">{visual}</div>
-        </div>
-      ) : (
-        <>
-          {heading}
-          {children}
-        </>
-      )}
+    <section id={id} className="border-t border-border" aria-labelledby={id ? `${id}-title` : undefined}>
+      <div className="mx-auto max-w-[1240px] px-5 py-16 md:px-8 md:py-24">
+        <Reveal>
+          <p className="font-sans text-[10px] font-semibold tracking-[0.16em] text-accent-petrol md:text-xs">
+            {eyebrow}
+          </p>
+          <h2
+            id={id ? `${id}-title` : undefined}
+            className="mt-4 max-w-[46rem] font-heading text-[1.875rem] font-semibold leading-[1.16] tracking-tight text-primary md:mt-5 md:text-[2.75rem]"
+          >
+            {title}
+          </h2>
+          {lead ? (
+            <p className="mt-5 max-w-[40rem] font-sans text-[15px] leading-[25px] text-secondary md:text-[17px] md:leading-[28px]">
+              {lead}
+            </p>
+          ) : null}
+        </Reveal>
+        {children}
+      </div>
     </section>
   );
 }
 
-function Body({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <p className={`max-w-[640px] font-sans text-[15px] leading-[25px] text-secondary md:text-lg md:leading-[29px] ${className}`}>{children}</p>;
-}
-
 export function HowItWorksPage() {
   return (
-    <article className="px-5 pb-16 pt-10 md:px-8 md:pb-24 md:pt-14">
-      <header className="max-w-[820px]">
-        <p className="font-sans text-[10px] font-semibold tracking-[0.16em] text-accent-petrol md:text-xs">
-          TRANSPARENCIA EDITORIAL
-        </p>
-        <h1 className="mt-4 font-heading text-[2.5rem] font-semibold leading-[1.1] tracking-tight text-primary md:mt-6 md:text-5xl md:leading-[1.08] xl:text-[4.75rem] xl:leading-[82px]">
-          Cómo funciona
-          <span className="block">Sin Línea</span>
-        </h1>
-        <p className="mt-6 font-sans text-[17px] leading-[27px] text-secondary md:mt-8 md:text-[22px] md:leading-[34px]">
-          Una noticia no empieza cuando una IA escribe un texto. Empieza cuando detectamos un suceso, buscamos evidencia
-          y contrastamos lo que distintas fuentes sostienen.
-        </p>
-        <p className="mt-4 max-w-[760px] font-sans text-sm font-medium leading-[23px] text-primary md:mt-6 md:text-base md:leading-[26px]">
-          Cada información importante puede rastrearse hasta las fuentes utilizadas para construirla.
-        </p>
-      </header>
+    <div className="min-h-screen bg-background">
+      {/* Sin JS el observer nunca marca las secciones como visibles. */}
+      <noscript dangerouslySetInnerHTML={{ __html: "<style>.sl-reveal{opacity:1;transform:none}</style>" }} />
 
-      <PipelineStrip />
+      <LandingHeader />
 
-      <Section
-        id="sucesos"
-        index="01"
-        accent="petrol"
-        title={
-          <>
-            No pensamos en artículos.
-            <span className="block">Pensamos en sucesos.</span>
-          </>
-        }
-        visual={<EventMergeDiagram />}
-      >
-        <Body className="mt-4 md:mt-6">
-          <span className="md:hidden">
-            Si diez medios publican sobre el mismo hecho, Sin Línea reúne esas señales en un único suceso y construye una
-            sola historia que puede evolucionar.
-          </span>
-          <span className="hidden md:inline">
-            Si diez medios publican sobre el mismo hecho, Sin Línea no considera que existan diez noticias distintas.
-            Reunimos las señales que describen el mismo suceso y construimos una sola historia que puede evolucionar.
-          </span>
-        </Body>
-      </Section>
+      <main>
+        <LandingHero />
 
-      <Section
-        id="radar"
-        index="02"
-        accent="blue"
-        title={
-          <>
-            Nuestro radar no rastrea
-            <span className="block">Internet indiscriminadamente.</span>
-          </>
-        }
-        visual={
-          <div>
-            <RadarDiagram />
-            <p className="mt-4 hidden font-sans text-sm leading-[22px] text-secondary md:block">
-              Una fuente encontrada durante una investigación no pasa automáticamente a formar parte del radar permanente.
-            </p>
+        <section className="border-t border-border" aria-label="Ideas centrales">
+          <div className="mx-auto max-w-[1240px] px-5 md:px-8">
+            <div className="grid divide-y divide-border md:grid-cols-3 md:divide-x md:divide-y-0">
+              {IDEAS.map((idea, index) => (
+                <Reveal key={idea.index} delay={index * 90}>
+                  <div
+                    className={`h-full py-10 md:py-16 ${index === 0 ? "md:pr-10" : index === 1 ? "md:px-10" : "md:pl-10"}`}
+                  >
+                    <p className={`font-sans text-[11px] font-semibold tracking-[0.1em] ${idea.accent}`}>
+                      {idea.index}
+                    </p>
+                    <h2 className="mt-4 font-heading text-[1.375rem] font-semibold leading-[1.25] text-primary md:text-2xl">
+                      {idea.title}
+                    </h2>
+                    <p className="mt-3 max-w-[24rem] font-sans text-[15px] leading-[24px] text-secondary">
+                      {idea.body}
+                    </p>
+                  </div>
+                </Reveal>
+              ))}
+            </div>
           </div>
-        }
-      >
-        <Body className="mt-4 md:mt-6">
-          <span className="md:hidden">
-            Monitoreamos un conjunto de medios, organismos, gobiernos e instituciones. Una señal nueva activa la
-            investigación; una fuente descubierta no entra automáticamente al radar permanente.
-          </span>
-          <span className="hidden md:inline">
-            Sin Línea monitorea un conjunto de medios, organismos, instituciones y otras fuentes seleccionadas. Cuando
-            una de ellas informa algo nuevo, eso funciona como una señal. Recién entonces comienza la investigación web.
-          </span>
-        </Body>
-      </Section>
+        </section>
 
-      <Section
-        id="investigacion"
-        index="03"
-        accent="ochre"
-        title={
-          <>
-            Investigamos antes
-            <span className="block md:inline"> de escribir.</span>
-          </>
-        }
-      >
-        <Body className="mt-4 md:mt-5 md:max-w-[720px]">
-          Una publicación activa la investigación. Buscamos fuentes que aporten información nueva, confirmen algo
-          importante o permitan detectar contradicciones.
-        </Body>
-        <ResearchDiagram />
-      </Section>
+        <Section
+          id="proceso"
+          eyebrow="EL PROCESO"
+          title="Siete etapas entre una señal y una noticia publicada."
+          lead="Recorré cada etapa para ver qué pasa con la información antes de que llegue a la portada."
+        >
+          <div className="mt-12 md:mt-16">
+            <Reveal>
+              <ProcessStepper steps={STEPS} />
+            </Reveal>
+          </div>
+        </Section>
 
-      <Section
-        id="afirmaciones"
-        index="04"
-        accent="petrol"
-        title={
-          <>
-            Separamos una noticia en
-            <span className="block">afirmaciones comprobables.</span>
-          </>
-        }
-      >
-        <Body className="mt-4 md:mt-6">
-          <span className="md:hidden">
-            Antes de redactar identificamos las afirmaciones que realmente importan. Cada una puede conectarse con
-            evidencia concreta.
-          </span>
-          <span className="hidden md:inline">
-            Antes de redactar, identificamos las afirmaciones que realmente importan. Así podemos evaluar cada una por
-            separado y conectarla con evidencia concreta.
-          </span>
-        </Body>
-        <ClaimsDiagram />
-      </Section>
+        <Section
+          id="estados"
+          eyebrow="ESTADOS DE LA INFORMACIÓN"
+          title="No todo lo que se publica tiene el mismo respaldo."
+          lead="Cada afirmación importante lleva un estado visible, para que puedas distinguir qué está sostenido y qué todavía no."
+        >
+          <div className="mt-12 md:mt-16">
+            <Reveal>
+              <StatusGrid />
+            </Reveal>
+          </div>
 
-      <Section
-        id="estados"
-        index="05"
-        accent="blue"
-        title={
-          <>
-            Mostramos el estado de
-            <span className="block">la información.</span>
-          </>
-        }
-      >
-        <Body className="mt-4 md:hidden">
-          El lector puede distinguir entre información respaldada, de una sola fuente, en disputa, contradicha o
-          chequeada.
-        </Body>
-        <StatusGrid />
-      </Section>
+          <Reveal delay={120}>
+            <div className="mt-12 grid gap-8 border-t border-border pt-12 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,32rem)] lg:items-center lg:gap-16 md:mt-16 md:pt-16">
+              <div>
+                <h3 className="max-w-[26rem] font-heading text-[1.625rem] font-semibold leading-[1.2] text-primary md:text-[2.125rem]">
+                  “No sabemos” también es información.
+                </h3>
+                <p className="mt-4 max-w-[30rem] font-sans text-[15px] leading-[25px] text-secondary md:text-[17px] md:leading-[28px]">
+                  Cuando las fuentes no coinciden, lo decimos. Sin Línea no elige una versión solo para poder cerrar una
+                  historia.
+                </p>
+              </div>
+              <UncertaintyDiagram />
+            </div>
+          </Reveal>
+        </Section>
 
-      <Section
-        id="incertidumbre"
-        index="06"
-        accent="ochre"
-        title={
-          <>
-            “No sabemos” también
-            <span className="block">es información.</span>
-          </>
-        }
-        visual={<UncertaintyDiagram />}
-      >
-        <p className="mt-4 max-w-[630px] font-sans text-[15px] font-medium leading-[25px] text-primary md:mt-8 md:text-lg md:leading-[29px]">
-          Sin Línea no elige una versión solo para poder cerrar una historia.
-        </p>
-      </Section>
+        <Section
+          id="historial"
+          eyebrow="DESPUÉS DE PUBLICAR"
+          title="Un suceso continúa después de publicado."
+          lead="No abrimos una URL nueva cada vez que aparece información material. El mismo suceso se actualiza y conserva su historial."
+        >
+          <div className="mt-12 md:mt-16">
+            <Reveal>
+              <EventTimeline />
+            </Reveal>
+          </div>
+        </Section>
 
-      <Section
-        id="verificacion"
-        index="07"
-        accent="petrol"
-        title={
-          <>
-            Verificamos cuando realmente
-            <span className="block">puede cambiar la historia.</span>
-          </>
-        }
-        visual={<VerificationList />}
-      >
-        <Body className="mt-4 md:mt-6 md:max-w-[650px]">
-          Ponemos especial atención en declaraciones políticas, acusaciones, leyes, decretos, estadísticas, elecciones,
-          cifras importantes, documentos públicos, responsabilidades y causalidad.
-        </Body>
-      </Section>
+        <Section
+          id="evidencia"
+          eyebrow="TRAZABILIDAD"
+          title="Podés ver de dónde sale la información."
+          lead="Cada noticia muestra las fuentes utilizadas y el estado de las afirmaciones que importan."
+        >
+          <div className="mt-12 md:mt-16">
+            <Reveal>
+              <ArticleEvidenceDemo />
+            </Reveal>
+          </div>
+        </Section>
 
-      <Section
-        id="ia"
-        index="08"
-        accent="blue"
-        title={
-          <>
-            La IA trabaja sobre evidencia,
-            <span className="block">no al revés.</span>
-          </>
-        }
-        visual={<AiStack />}
-      >
-        <Body className="mt-4 md:mt-6 md:max-w-[660px]">
-          <span className="md:hidden">
-            La IA interpreta publicaciones, compara información, detecta afirmaciones, encuentra inconsistencias y
-            redacta. El artículo se construye a partir del estado estructurado del suceso.
-          </span>
-          <span className="hidden md:inline">
-            Utilizamos inteligencia artificial para interpretar publicaciones, comparar información, detectar
-            afirmaciones, encontrar inconsistencias y redactar. Pero el artículo final se construye a partir del estado
-            estructurado del suceso.
-          </span>
-        </Body>
-        <p className="mt-6 max-w-[700px] font-sans text-base font-semibold leading-6 text-accent-petrol md:mt-16 md:text-[22px] md:leading-[30px]">
-          El artículo no es nuestra fuente de verdad.
-        </p>
-      </Section>
+        <Section id="principios" eyebrow="NUESTROS PRINCIPIOS" title="Cuatro criterios y cinco límites.">
+          <Reveal>
+            <ul className="mt-12 grid divide-y divide-border border-y border-border md:mt-16 md:grid-cols-4 md:divide-x md:divide-y-0">
+              {PRINCIPLES.map((item, index) => (
+                <li
+                  key={item}
+                  className={`py-7 font-heading text-[1.75rem] font-semibold leading-[1.2] md:py-9 md:text-[1.875rem] ${
+                    index > 0 ? "md:pl-6" : ""
+                  } ${index === 0 ? "text-primary" : "text-secondary"}`}
+                >
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </Reveal>
 
-      <Section
-        id="auditoria"
-        index="09"
-        accent="ochre"
-        title="Escribir no es el último paso."
-        visual={<AuditList />}
-      >
-        <Body className="mt-4 md:mt-5 md:max-w-[690px]">
-          <span className="md:hidden">
-            El borrador pasa por una auditoría que revisa nombres, cifras, fechas, atribuciones, contradicciones,
-            afirmaciones sin respaldo y lenguaje editorial.
-          </span>
-          <span className="hidden md:inline">
-            Antes de publicar, el borrador pasa por una auditoría que revisa nombres, cifras, fechas, atribuciones,
-            contradicciones, afirmaciones sin respaldo y lenguaje editorial.
-          </span>
-        </Body>
-      </Section>
+          <Reveal delay={120}>
+            <ul className="mt-10 grid max-w-[52rem] gap-3 md:mt-12 md:grid-cols-2 md:gap-x-10">
+              {NOT_DOING.map((item) => (
+                <li key={item} className="flex items-start gap-3">
+                  <span className="mt-2.5 h-px w-4 shrink-0 bg-accent-ochre" aria-hidden />
+                  <span className="font-sans text-[15px] leading-[25px] text-secondary">{item}</span>
+                </li>
+              ))}
+            </ul>
+          </Reveal>
+        </Section>
 
-      <Section
-        id="historial"
-        index="10"
-        accent="petrol"
-        title={
-          <>
-            Un suceso continúa
-            <span className="block">después de publicado.</span>
-          </>
-        }
-        visual={<EventTimeline />}
-      >
-        <Body className="mt-4 md:mt-6">
-          <span className="md:hidden">
-            El mismo suceso se actualiza cuando aparece información materialmente nueva y conserva su historial.
-          </span>
-          <span className="hidden md:inline">
-            Sin Línea no necesita publicar una URL nueva cada vez que aparece información material. El mismo suceso se
-            actualiza y conserva su historial.
-          </span>
-        </Body>
-      </Section>
+        <section className="border-t border-border" aria-labelledby="cierre-title">
+          <div className="mx-auto max-w-[1240px] px-5 py-20 md:px-8 md:py-28">
+            <Reveal>
+              <p className="font-sans text-[10px] font-semibold tracking-[0.16em] text-accent-ochre md:text-xs">
+                LOS HECHOS. EL CRITERIO ES TUYO.
+              </p>
+              <h2
+                id="cierre-title"
+                className="mt-5 max-w-[42rem] font-heading text-[2rem] font-semibold leading-[1.12] tracking-tight text-primary md:text-[3.25rem]"
+              >
+                Ahora podés ver cómo aplicamos todo esto.
+              </h2>
+              <div className="mt-9 flex flex-wrap items-center gap-3 md:mt-11">
+                <Link
+                  href="/"
+                  className="bg-accent-petrol px-5 py-3 font-sans text-sm font-medium text-[#ece8df] transition-opacity hover:opacity-90"
+                >
+                  Ver las noticias
+                </Link>
+                <Link
+                  href="/en-vivo"
+                  className="border border-border px-5 py-3 font-sans text-sm font-medium text-primary transition-colors hover:border-accent-petrol hover:text-accent-petrol"
+                >
+                  Sucesos en desarrollo
+                </Link>
+              </div>
+            </Reveal>
+          </div>
+        </section>
+      </main>
 
-      <Section
-        id="fuentes"
-        index="11"
-        accent="blue"
-        title={
-          <>
-            Podés ver de dónde sale
-            <span className="block">la información.</span>
-          </>
-        }
-      >
-        <Body className="mt-4 md:hidden">
-          Cada noticia muestra las fuentes utilizadas y, cuando corresponde, el estado de afirmaciones importantes.
-        </Body>
-        <div className="mt-8 md:mt-10">
-          <ArticleEvidenceDemo />
-        </div>
-      </Section>
-
-      <section className="border-t border-border py-16 md:py-[5.75rem]" aria-labelledby="principios-title">
-        <p id="principios-title" className="font-sans text-[10px] font-semibold tracking-[0.08em] text-accent-petrol md:text-xs">
-          NUESTROS PRINCIPIOS
-        </p>
-        <Principles />
-        <p className="mt-6 max-w-[900px] font-sans text-[15px] leading-6 text-secondary md:mt-8 md:text-base md:leading-[27px]">
-          <span className="md:hidden">
-            No clasificamos los hechos como positivos o negativos. No usamos orientación política como señal de ranking.
-            No convertimos declaraciones en hechos. No ocultamos las fuentes. No fabricamos certeza cuando la evidencia
-            no existe.
-          </span>
-          <span className="hidden md:inline">
-            No clasificamos los hechos como positivos o negativos. No utilizamos orientación política como señal de
-            ranking. No convertimos declaraciones en hechos. No ocultamos las fuentes. No fabricamos certeza cuando la
-            evidencia no existe.
-          </span>
-        </p>
-      </section>
-
-      <section className="rounded-2xl border border-border bg-surface px-4 py-6 md:flex md:items-end md:justify-between md:px-7 md:py-8">
-        <div>
-          <p className="max-w-[780px] font-heading text-[22px] font-semibold leading-7 text-primary md:text-[28px] md:leading-[35px]">
-            Ahora podés ver cómo aplicamos estos principios.
-          </p>
-          <Link
-            href="/"
-            className="mt-6 inline-block font-sans text-[15px] font-semibold text-accent-petrol hover:text-accent-blue md:mt-10"
-          >
-            Ver las noticias →
-          </Link>
-        </div>
-        <p className="mt-6 font-sans text-xs leading-[18px] text-secondary md:mt-0 md:text-right">
-          <span className="md:hidden">Sin Línea · Transparencia · Correcciones</span>
-          <span className="hidden md:inline">Sin Línea · Transparencia · Fuentes · Correcciones</span>
-        </p>
-      </section>
-    </article>
+      <LandingFooter />
+    </div>
   );
 }

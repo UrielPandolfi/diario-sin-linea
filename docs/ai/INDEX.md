@@ -37,7 +37,9 @@ Routers (`main.py`): `api/health.py`, `api/public.py`, `api/cases.py`, `api/admi
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/como-funciona`, `/contacto`, `/seguimiento/[token]`, `/perfil`). Stubs: `/seguidos`, `/notificaciones`, `/guardados`. Localidad: `/entrar`, `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`). Stubs: `/seguidos`, `/notificaciones`, `/guardados`. Localidad: `/entrar`, `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
+
+`/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
 
 ## Validación (comandos en CI / README)
 
