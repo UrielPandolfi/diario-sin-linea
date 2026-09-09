@@ -1120,7 +1120,7 @@ def test_hydrated_additional_sources_can_make_claim_supported(db_session: Sessio
     )
 
     claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
-    assert claim.status == ClaimStatus.SUPPORTED
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
     ids = {
         row.source_item_id
         for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id))

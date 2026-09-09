@@ -108,6 +108,9 @@ class ContextVerificationSol(BaseModel):
 class ContextVerification(BaseModel):
     selected: list[dict] = Field(default_factory=list)
     sol: list[ContextVerificationSol] = Field(default_factory=list)
+    coverage_gap: bool = False
+    stale_verification: bool = False
+    claims_fingerprint: str | None = None
 
 
 class ArticleContext(BaseModel):

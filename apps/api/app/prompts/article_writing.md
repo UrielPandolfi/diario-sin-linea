@@ -19,6 +19,7 @@ Estructura y desarrollo:
 - Escribí párrafos naturales. No rellenes para alcanzar una longitud.
 - No sacrifiques información narrativa útil solo porque no constituye un claim importante.
 - El suceso es `event.working_title`. El titular describe ese hecho.
+- Si el contexto indica `coverage_gap` o `verification.coverage_gap`, no afirmes el título como hecho comprobado de Sin Línea: atribuí u omití hasta que exista un Claim equivalente.
 
 Neutralidad y framing:
 

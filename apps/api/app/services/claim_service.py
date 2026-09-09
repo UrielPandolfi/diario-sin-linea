@@ -36,12 +36,23 @@ from app.schemas.claims import (
     ExtractedClaim,
     ExtractedEvidence,
 )
+from app.schemas.editorial_evidence import CONTRACT_VERSION, CoverageMatch, DropReason, GapReason
+from app.services.claim_coverage import (
+    MergeOutcome,
+    build_coverage_contract,
+    claims_fingerprint,
+    expected_centrals_from_event,
+    match_expected_to_claims,
+    record_drop,
+    recover_expected_from_dropped,
+    recover_from_source_body,
+    split_compound_extracted,
+)
+from app.services.information_origin import assess_origins, has_support_evidence
 from app.services.verification_outcome import (
     is_verification_locked,
-    latest_success_verification,
-    parse_verification_run,
+    verification_view_for_event,
 )
-from app.services.verification_policy import independent_support_count
 
 CLAIM_STAGE = "claim_resolution"
 
@@ -315,6 +326,7 @@ class ClaimService:
                 "needs_external_verification": [],
                 "escalated_claim_refs": [],
                 "reason": "no_usable_sources",
+                "contract_version": CONTRACT_VERSION,
             }
         extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
         batch = extractor.generate_structured(
@@ -322,19 +334,56 @@ class ClaimService:
             user_prompt=self._extraction_prompt(event, sources),
             schema=ClaimExtractionBatch,
         )
-        pending = self._merge_extracted(batch.claims, sources)
-        claims = self._persist(event, pending)
+        split_claims: list[ExtractedClaim] = []
+        for raw in batch.claims:
+            split_claims.extend(split_compound_extracted(raw))
+        outcome = self._merge_extracted(split_claims, sources)
+        claims = self._persist(event, outcome.pending)
         self.session.flush()
+        claims = self._reload_claims(event.id) if claims else []
+        expected = match_expected_to_claims(expected_centrals_from_event(event), claims)
+        recovered = recover_expected_from_dropped(
+            expected,
+            outcome.dropped_raw,
+            sources,
+            excerpt_ok=lambda rows, items: bool(self._valid_evidence(rows, items, require_body=True)),
+        )
+        still_open = [row for row in expected if row.match != CoverageMatch.EQUIVALENT]
+        if still_open:
+            recovered.extend(recover_from_source_body(still_open, sources))
+        if recovered:
+            recovered_outcome = self._merge_extracted(recovered, sources, require_body=True)
+            if recovered_outcome.pending:
+                self._persist(event, recovered_outcome.pending)
+                self.session.flush()
+                claims = self._reload_claims(event.id)
+            outcome.dropped.extend(recovered_outcome.dropped)
+            outcome.dropped_raw.extend(recovered_outcome.dropped_raw)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        if coverage.coverage_gap:
+            recovered_keys = {assertion_key_for(row) for row in recovered}
+            for row in coverage.expected_central:
+                if row.match == CoverageMatch.EQUIVALENT:
+                    continue
+                if row.gap_reason in {GapReason.DROPPED_INVALID_EXCERPT.value, GapReason.NOT_EXTRACTED.value}:
+                    if recovered and not recovered_keys:
+                        row.gap_reason = GapReason.RECOVERY_FAILED.value
+                    elif recovered:
+                        row.gap_reason = row.gap_reason or GapReason.RECOVERY_FAILED.value
+        fingerprint = claims_fingerprint(claims)
+        empty = {
+            "extracted": len(batch.claims),
+            "persisted": len(claims),
+            "resolved": 0,
+            "needs_external_verification": [],
+            "escalated_claim_refs": [],
+            "contract_version": CONTRACT_VERSION,
+            "claims_fingerprint": fingerprint,
+            "coverage": coverage.model_dump(mode="json"),
+        }
         if not claims:
-            return {
-                "extracted": len(batch.claims),
-                "persisted": 0,
-                "resolved": 0,
-                "needs_external_verification": [],
-                "escalated_claim_refs": [],
-            }
+            return empty
 
-        claims = self._reload_claims(event.id)
         resolver = self.resolver_llm or get_claim_resolution_provider(escalated=False)
         resolution = resolver.generate_structured(
             system_prompt=load_prompt("claim_resolution.md"),
@@ -362,12 +411,18 @@ class ClaimService:
                 escalated_done = escalate_refs
         needs = self._apply_resolution(claims, resolution, event_id=event.id)
         self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        fingerprint = claims_fingerprint(claims)
         return {
             "extracted": len(batch.claims),
             "persisted": len(claims),
             "resolved": len(claims),
             "needs_external_verification": needs,
             "escalated_claim_refs": escalated_done,
+            "contract_version": CONTRACT_VERSION,
+            "claims_fingerprint": fingerprint,
+            "coverage": coverage.model_dump(mode="json"),
         }
 
     def _numbered_sources(self, event: Event) -> list[SourceItem]:
@@ -422,17 +477,31 @@ class ClaimService:
         self,
         extracted: list[ExtractedClaim],
         sources: list[SourceItem],
-    ) -> dict[str, _PendingClaim]:
+        *,
+        require_body: bool = False,
+    ) -> MergeOutcome:
         by_key: dict[str, _PendingClaim] = {}
+        dropped: list = []
+        dropped_raw: list[tuple[ExtractedClaim, str]] = []
         for raw in extracted:
             canonical = (raw.canonical_text or "").strip()
             if not canonical:
+                dropped.append(record_drop(canonical_text="", reason=DropReason.EMPTY_CANONICAL.value))
+                dropped_raw.append((raw, DropReason.EMPTY_CANONICAL.value))
                 continue
-            valid_evidence = self._valid_evidence(raw.evidence, sources)
+            valid_evidence = self._valid_evidence(raw.evidence, sources, require_body=require_body)
             if not valid_evidence:
+                dropped.append(
+                    record_drop(canonical_text=canonical, reason=DropReason.INVALID_EXCERPT.value)
+                )
+                dropped_raw.append((raw, DropReason.INVALID_EXCERPT.value))
                 continue
             key = assertion_key_for(raw)
             if not key:
+                dropped.append(
+                    record_drop(canonical_text=canonical, reason=DropReason.EMPTY_KEY.value)
+                )
+                dropped_raw.append((raw, DropReason.EMPTY_KEY.value))
                 continue
             pending = by_key.get(key)
             if pending is None:
@@ -449,6 +518,16 @@ class ClaimService:
                 )
                 by_key[key] = pending
             else:
+                if normalize_name(pending.canonical_text) != normalize_name(canonical):
+                    dropped.append(
+                        record_drop(
+                            canonical_text=canonical,
+                            reason=DropReason.MERGED_INTO.value,
+                            assertion_key=key,
+                            merged_into=pending.canonical_text,
+                        )
+                    )
+                    dropped_raw.append((raw, DropReason.MERGED_INTO.value))
                 pending.canonical_text = canonical
                 pending.claim_type = raw.claim_type or pending.claim_type
                 pending.importance = raw.importance or pending.importance
@@ -469,12 +548,14 @@ class ClaimService:
                     current.excerpt = row.excerpt
                     if row.confidence is not None:
                         current.confidence = row.confidence
-        return by_key
+        return MergeOutcome(pending=by_key, dropped=dropped, dropped_raw=dropped_raw)
 
     def _valid_evidence(
         self,
         rows: list[ExtractedEvidence],
         sources: list[SourceItem],
+        *,
+        require_body: bool = False,
     ) -> dict[UUID, _PendingEvidence]:
         valid: dict[UUID, _PendingEvidence] = {}
         for row in rows:
@@ -482,7 +563,8 @@ class ClaimService:
                 continue
             item = sources[row.source_ref - 1]
             excerpt = (row.excerpt or "").strip() or None
-            if excerpt and not excerpt_in_source(excerpt, item.clean_text, item.excerpt, item.title):
+            blobs = (item.clean_text,) if require_body else (item.clean_text, item.excerpt, item.title)
+            if excerpt and not excerpt_in_source(excerpt, *blobs):
                 continue
             pending = _PendingEvidence(
                 evidence_type=row.evidence_type,
@@ -622,8 +704,7 @@ class ClaimService:
         *,
         event_id: UUID,
     ) -> list[dict]:
-        verify_run = latest_success_verification(self.session, event_id)
-        view = parse_verification_run(verify_run)
+        verify_run, view = verification_view_for_event(self.session, event_id)
         groups: dict[str, list[Claim]] = defaultdict(list)
         for claim in claims:
             groups[comparison_key_for(claim)].append(claim)
@@ -690,12 +771,7 @@ class ClaimService:
         types = {row.evidence_type for row in claim.evidence}
         if EvidenceType.SUPPORTS in types and EvidenceType.CONTRADICTS in types:
             return ClaimStatus.CONFLICTING
-        count = independent_support_count(claim)
-        if count >= 2:
-            return ClaimStatus.SUPPORTED
-        if count == 1:
-            return ClaimStatus.SINGLE_SOURCE
-        return ClaimStatus.UNCERTAIN
+        return clamp_supported_status(claim, ClaimStatus.SUPPORTED)
 
     def _clamp_supported(self, claim: Claim, status: ClaimStatus) -> ClaimStatus:
         return clamp_supported_status(claim, status)
@@ -704,10 +780,21 @@ class ClaimService:
 def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
     if status != ClaimStatus.SUPPORTED:
         return status
-    count = independent_support_count(claim)
-    if count >= 2:
+    from app.schemas.editorial_evidence import PropositionRole, StatementEvidenceClass
+
+    assessment = assess_origins(claim)
+    role = None
+    try:
+        from app.services.claim_coverage import proposition_role_for
+
+        role = proposition_role_for(claim)
+    except Exception:
+        role = None
+    if role == PropositionRole.UTTERANCE and assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
         return ClaimStatus.SUPPORTED
-    if count == 1:
+    if assessment.known_independent >= 2:
+        return ClaimStatus.SUPPORTED
+    if has_support_evidence(claim) or assessment.unknown_groups or assessment.known_independent == 1:
         return ClaimStatus.SINGLE_SOURCE
     return ClaimStatus.UNCERTAIN
 

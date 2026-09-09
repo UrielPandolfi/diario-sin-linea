@@ -3,9 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
-from app.core.text import normalize_name, token_set
-from app.core.urls import url_domain
-from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType
+from app.core.text import normalize_name
+from app.domain.enums import ClaimImportance, ClaimStatus
 from app.models import Claim
 
 CANONICAL_TYPES = frozenset({"hecho", "estado", "declaracion", "cifra", "documento"})
@@ -62,8 +61,6 @@ _WEAK_INDEPENDENT_HOSTS = (
     "medium.com",
     "substack.com",
 )
-_REPRINT_CONTAINMENT = 0.85
-_REPRINT_MIN_TOKENS = 8
 
 
 def canonicalize_claim_type(raw: str | None) -> str:
@@ -83,51 +80,10 @@ def _is_weak_independent_host(domain: str) -> bool:
     return any(token == host or token.endswith("." + host) for host in _WEAK_INDEPENDENT_HOSTS)
 
 
-def _support_domain(row) -> str:
-    item = getattr(row, "source_item", None)
-    domain = ""
-    if item is not None:
-        source = getattr(item, "source", None)
-        if source is not None and getattr(source, "domain", None):
-            domain = source.domain
-        if not domain:
-            domain = url_domain(getattr(item, "canonical_url", None) or getattr(item, "url", "") or "")
-    if not domain:
-        domain = url_domain(getattr(row, "source_url", None) or "")
-    return (domain or "").strip().lower()
-
-
-def _reprint_of(tokens_a: set[str], tokens_b: set[str]) -> bool:
-    if len(tokens_a) < _REPRINT_MIN_TOKENS or len(tokens_b) < _REPRINT_MIN_TOKENS:
-        return False
-    overlap = len(tokens_a & tokens_b)
-    return overlap / min(len(tokens_a), len(tokens_b)) >= _REPRINT_CONTAINMENT
-
-
 def independent_support_count(claim: Claim) -> int:
-    rows: list[tuple[str, set[str]]] = []
-    for row in getattr(claim, "evidence", None) or []:
-        if getattr(row, "evidence_type", None) != EvidenceType.SUPPORTS:
-            continue
-        domain = _support_domain(row)
-        if not domain or _is_weak_independent_host(domain):
-            continue
-        excerpt = getattr(row, "excerpt", None) or ""
-        rows.append((domain, token_set(excerpt)))
+    from app.services.information_origin import independent_support_count as origin_count
 
-    used = [False] * len(rows)
-    count = 0
-    for index, (domain, tokens) in enumerate(rows):
-        if used[index]:
-            continue
-        used[index] = True
-        count += 1
-        for other, (other_domain, other_tokens) in enumerate(rows[index + 1 :], start=index + 1):
-            if used[other]:
-                continue
-            if other_domain == domain or _reprint_of(tokens, other_tokens):
-                used[other] = True
-    return count
+    return origin_count(claim)
 
 
 def is_documentary_claim(claim: Claim) -> bool:
@@ -142,7 +98,9 @@ def is_well_supported(claim: Claim) -> bool:
     return claim.status == ClaimStatus.SUPPORTED and independent_support_count(claim) >= 2
 
 
-def is_vetoed(claim: Claim) -> bool:
+def is_vetoed(claim: Claim, *, central: bool = False) -> bool:
+    if central:
+        return claim.status in VETO_STATUSES
     if claim.status in VETO_STATUSES:
         return True
     kind = canonicalize_claim_type(claim.claim_type)
@@ -182,14 +140,19 @@ def select_claims(
     *,
     flagged_ids: set[UUID],
     limit: int,
+    central_ids: set[UUID] | None = None,
 ) -> tuple[list[SelectedClaim], list[dict]]:
+    centrals = central_ids or set()
     selected: list[SelectedClaim] = []
     skipped: list[dict] = []
     for claim in claims:
-        if is_vetoed(claim):
+        is_central = claim.id in centrals
+        if is_vetoed(claim, central=is_central):
             skipped.append({"claim_id": str(claim.id), "reason": "veto"})
             continue
         reasons: list[str] = []
+        if is_central:
+            reasons.append("central")
         if claim.id in flagged_ids:
             reasons.append("m5_flag")
         if policy_selects(claim):
@@ -204,6 +167,7 @@ def select_claims(
         claim = row.claim
         kind = canonicalize_claim_type(claim.claim_type)
         return (
+            0 if claim.id in centrals else 1,
             0 if "m5_flag" in row.reasons else 1,
             0 if claim.importance == ClaimImportance.HIGH else 1,
             0 if kind in PRIORITY_TYPES else 1,
@@ -211,4 +175,7 @@ def select_claims(
         )
 
     selected.sort(key=_sort_key)
-    return selected[: max(0, limit)], skipped
+    kept = selected[: max(0, limit)]
+    for row in selected[max(0, limit) :]:
+        skipped.append({"claim_id": str(row.claim.id), "reason": "budget"})
+    return kept, skipped

@@ -57,7 +57,11 @@ Preferí pocos claims HIGH o MEDIUM útiles a muchos LOW.
 
 Claims materiales y atómicos:
 
-Cada Claim representa exactamente una proposición material que pueda verificarse o contradecirse de forma independiente. Si una oración mezcla afirmaciones que requieren evidencia distinta, SEPARALAS. No dejes un Claim “ómnibus”.
+Cada Claim representa exactamente una proposición material que pueda verificarse o contradecirse de forma independiente. Si una oración mezcla dicho + vigencia + alcance normativo, o denuncia presentada + culpabilidad, SEPARALAS. No dejes un Claim “ómnibus”.
+
+Incorrecto (un solo Claim compuesto): Myriam Bregman dijo que el régimen se aplica a menores de 14 años y que entra en vigencia el mes próximo.
+
+Mejor, si el texto lo exige: (1) Bregman dijo Y; (2) el alcance de la norma es Z; (3) la norma entra en vigencia en T. No inventes tres claims si el texto no los pide.
 
 Incorrecto (un solo Claim compuesto): Cristina Fernández de Kirchner firmó la designación de Natalia Laura Federman, una ciudadana británica, en un cargo de alta sensibilidad.
 

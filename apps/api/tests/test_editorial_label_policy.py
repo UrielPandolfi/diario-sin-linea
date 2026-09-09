@@ -256,6 +256,19 @@ def test_compact_public_claims_includes_editorial_payload(db_session: Session) -
         )
     )
     cid = str(claim.id)
+    from app.services.claim_coverage import claims_fingerprint
+    from app.services.claim_service import CLAIM_STAGE
+
+    fingerprint = claims_fingerprint([claim])
+    claim_run = PipelineRun(
+        event_id=event.id,
+        stage=CLAIM_STAGE,
+        status=PipelineStatus.SUCCESS,
+        finished_at=datetime.now(timezone.utc),
+        metadata_json={"claims_fingerprint": fingerprint, "coverage": {"coverage_gap": False}},
+    )
+    db_session.add(claim_run)
+    db_session.flush()
     db_session.add(
         PipelineRun(
             event_id=event.id,
@@ -263,6 +276,8 @@ def test_compact_public_claims_includes_editorial_payload(db_session: Session) -
             status=PipelineStatus.SUCCESS,
             finished_at=datetime.now(timezone.utc),
             metadata_json={
+                "claims_fingerprint": fingerprint,
+                "based_on_claim_run_id": str(claim_run.id),
                 "selected": [{"claim_id": cid, "reasons": ["policy:documento"]}],
                 "skipped_search": [],
                 "primary_source_supports_claim": {cid: True},

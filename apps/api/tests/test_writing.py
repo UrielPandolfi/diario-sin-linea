@@ -269,12 +269,27 @@ def test_context_omits_html_and_event_body(db_session: Session) -> None:
             source_url=item.url,
         )
     )
+    from app.services.claim_coverage import claims_fingerprint
+    from app.services.claim_service import CLAIM_STAGE
+
+    fingerprint = claims_fingerprint([claim])
+    claim_run = PipelineRun(
+        event_id=event.id,
+        stage=CLAIM_STAGE,
+        status=PipelineStatus.SUCCESS,
+        metadata_json={"claims_fingerprint": fingerprint, "coverage": {"coverage_gap": False}},
+        finished_at=datetime.now(timezone.utc),
+    )
+    db_session.add(claim_run)
+    db_session.flush()
     db_session.add(
         PipelineRun(
             event_id=event.id,
             stage=VERIFICATION_STAGE,
             status=PipelineStatus.SUCCESS,
             metadata_json={
+                "claims_fingerprint": fingerprint,
+                "based_on_claim_run_id": str(claim_run.id),
                 "selected": [{"claim_id": str(claim.id), "reasons": ["policy:hecho"]}],
                 "sol": [
                     {

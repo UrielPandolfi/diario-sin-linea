@@ -18,6 +18,7 @@ from app.schemas.writing import (
     ContextVerification,
     ContextVerificationSol,
 )
+from app.services.verification_outcome import pair_from_runs
 
 _IMPORTANCE_RANK = {
     ClaimImportance.HIGH: 0,
@@ -57,9 +58,14 @@ def select_context_claims(claims: Sequence[Claim], *, limit: int) -> list[Claim]
     return ordered[:limit]
 
 
-def compact_verification(run: PipelineRun | None) -> ContextVerification:
+def compact_verification(
+    run: PipelineRun | None,
+    *,
+    coverage_gap: bool = False,
+    stale: bool = False,
+) -> ContextVerification:
     if run is None or run.status != PipelineStatus.SUCCESS:
-        return ContextVerification()
+        return ContextVerification(coverage_gap=coverage_gap, stale_verification=stale)
     raw = run.metadata_json or {}
     selected = raw.get("selected") if isinstance(raw.get("selected"), list) else []
     sol_rows: list[ContextVerificationSol] = []
@@ -75,7 +81,17 @@ def compact_verification(run: PipelineRun | None) -> ContextVerification:
                 reason=row.get("reason"),
             )
         )
-    return ContextVerification(selected=list(selected), sol=sol_rows)
+    gap = coverage_gap
+    coverage = raw.get("coverage") if isinstance(raw.get("coverage"), dict) else {}
+    if coverage.get("coverage_gap"):
+        gap = True
+    return ContextVerification(
+        selected=list(selected),
+        sol=sol_rows,
+        coverage_gap=gap,
+        stale_verification=stale,
+        claims_fingerprint=raw.get("claims_fingerprint"),
+    )
 
 
 def last_success_run(runs: Sequence[PipelineRun], stage: str) -> PipelineRun | None:
@@ -284,7 +300,11 @@ def build_article_context(
             )
         )
 
-    verification = compact_verification(last_success_run(pipeline_runs, VERIFICATION_STAGE))
+    claim_run, verify_run = pair_from_runs(list(pipeline_runs))
+    coverage = ((claim_run.metadata_json if claim_run is not None else None) or {}).get("coverage") or {}
+    coverage_gap = bool(isinstance(coverage, dict) and coverage.get("coverage_gap"))
+    stale = verify_run is None and claim_run is not None and bool((claim_run.metadata_json or {}).get("claims_fingerprint"))
+    verification = compact_verification(verify_run, coverage_gap=coverage_gap, stale=stale)
     return ArticleContext(
         event=ContextEventStub(
             event_id=str(event.id),

@@ -3,39 +3,42 @@
 Reemplazar este archivo al cerrar una tarea o al continuar en otro chat. No es un diario de sesiones.
 
 **Fecha:** 2026-09-08  
-**Tarea:** Track A — control operativo y costos (Admin). Track B no implementado.
+**Tarea:** Claims centrales, evidencia y verificación (etapa 1). Contrato `editorial-evidence-1`. Sin auditor, publish ni UI.
 
 ## Objetivo de este chat
 
-Observabilidad de publicaciones y costos estimados sobre `pipeline_runs`, `SourceItem` y `llm_usages`, con atribución 1:1 y snapshot de tarifas. Sin cambiar gates, prompts ni políticas de retry. Sin reparar el circuito de actualización al vincular.
+Cobertura del hecho central, evaluación fiel de cada claim y decisión final alineada a procedencia informativa (no dominio). Persistencia del contrato en `pipeline_runs.metadata_json`; Writing/labels leen el **par** claim_run↔verify_run.
 
 ## Avances
 
-- Mapper de estado actual vs corridas de período (`publication_outcome.py`); listado Admin `/admin/publications` + historial por ítem.
-- Procedencia de cuerpo (`body_source`) en ingest RSS / research / verify; no se usa `has_extracted_body` como “leída”.
-- Skip de cuota persistido como `PipelineRun` de detección.
-- Uso LLM: caché, modelo pedido/reportado, fallos sin tokens, intento BadRequest interno, sello `event_id` solo si `created`, backfill de embeddings separado.
-- Libro `llm_price_books` / `llm_price_rates` (migración `0014`) + `rate_snapshot` por llamada. Semilla: gpt-4o, gpt-4o-mini, gpt-5-nano, gpt-5.6-luna, voyage-3.
-- Stats/costos: unique vs attempts, subtotal conocido + cobertura, fallos abiertos ≠ último error histórico.
-- `no_material_change` solo a nivel Event/write.
+- Esquemas `editorial-evidence-1` (`schemas/editorial_evidence.py`): coverage, budget, `SupportBasis`, `ClaimDecision`. Sin migración 0015.
+- Extracción: drop-log, `expected_central` + match/gap, recovery con `_valid_evidence` contra el cuerpo, split de compuesto (dicho / vigencia / alcance cuando el texto lo exige).
+- Verify: no-veto de centrales persistidos, presupuesto, packet con `select_source_snippet` + `body_source`, prompt claim-primero, ancla temporal orientativa (histórico/TIMELESS sin `pd`).
+- Independencia: `document_key` ≠ `information_origin`; unknown no suma; reprint ≥12 tokens; utterance `authentic_primary` vs `attributed_report`.
+- Par atado: `claims_fingerprint` + `based_on_claim_run_id`. Extract nueva + verify FAILED no reutiliza aprobación anterior. Recordatorio Writing si `coverage_gap`.
 
-## Pendientes
+## Limitaciones
 
-Track B (siguiente trabajo, **no** resuelto): verificar embeddings/Terra/`level1_code`; reabrir research al linkear (si se decide); novedad con 0 claims o sin claims nuevos; carrera de detección; no imponer `unique(source_item_id)`. Ver `docs/ai/STATE.md`.
+- Gap explícito no bloquea publish. Eval real Luna/Sol pendiente. RELATED_CONTEXT no se adjunta. Histórico sin fingerprint: `unknown`.
 
-Aplicar `alembic upgrade head` (0014) en cada entorno. Estimación ≠ factura.
+## Pendientes (etapa 2)
+
+Auditor sobre el snapshot del par; UI de `support_basis`/coverage; bloqueo si `coverage_gap` o `verification_incomplete`. Track B de detección/link (STATE) sigue abierto.
 
 ## Archivos relevantes
 
-`apps/api/app/api/admin.py`, `services/publication_outcome.py`, `services/cost_service.py`, `services/usage_recorder.py`, `migrations/versions/0014_llm_costs.py`, `apps/web/app/admin/publications/`, `docs/ai/STATE.md`, `docs/ai/pipeline.md`.
+`schemas/editorial_evidence.py`, `services/claim_coverage.py`, `services/information_origin.py`, `services/claim_service.py`, `services/verification_{service,policy,plan,outcome}.py`, `services/writing_service.py`, `services/article_context.py`, `prompts/{claim_extraction,claim_assessment,verification,verification_planner,article_writing}.md`, `tests/test_editorial_evidence.py`.
 
 ## Pruebas
 
-- `pytest` (API en Compose): `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_llm_usage`, `test_ingestion`, `test_openai_temperature`, `test_pipeline_budget`, `test_admin`, `test_source_content`, `test_detection`, `test_research`, `test_requeue_pending` — 117 passed en dos corridas (63+54) más 32 en el re-run de costos/detección/publicaciones.
-- ESLint de archivos Admin tocados: ok.
-- `npm run typecheck` falla por un error previo en `/seguimiento/[token]` (`robots`), no por Publicaciones.
-- UI en browser: no se recorrió (servicio `web` no estaba levantado). Rutas nuevas en API responden 401 sin sesión.
+Desde `apps/api` (Postgres+Redis; no hace falta rebuild de imagen si pytest corre local):
+
+```
+python -m pytest
+```
+
+374 passed (2026-09-08). Incluye Alberto/Bregman, dos URLs misma fuente, par desparejado, `test_supported_two_distinct_domains` → SINGLE_SOURCE, `test_two_proven_information_origins_can_be_supported`.
 
 ## Siguiente paso
 
-Track B según STATE. Para ver Admin: levantar `web` y abrir tablero → Publicaciones → historial → suceso (costo directo). Aplicar `alembic upgrade head` (`0014`) en cada entorno.
+Etapa 2 según STATE. No reintroducir «dos dominios = independientes».

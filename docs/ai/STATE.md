@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-08. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto.
+Revisión: 2026-09-08. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto. Etapa 1 de claims/evidencia/verificación (`editorial-evidence-1`) está en código y tests con dobles; etapa 2 (auditor, UI, bloqueo de publish) **no**.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -16,7 +16,7 @@ Casos de lectores y revisión editorial: routers en `main.py`, migración `0013_
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
+Backend: además de la suite previa, `test_editorial_evidence`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
 
 ## Hallazgos de cableado (no decisiones)
 
@@ -29,6 +29,12 @@ Backend: además de la suite previa, `test_publication_outcome`, `test_admin_pub
 No se escribieron tests de `embedding_high`, Terra ni `level1_code` positivo. No se reabre research al linkear. El hueco `no_claims` (write saltea sin evaluar novedad) y los cambios factuales sin claims **siguen**. No hay `unique(source_item_id)` en `event_sources` (una publicación puede ser varios sucesos). La carrera de dos `detect` concurrentes no se evaluó. Research que adjunta ítems no los marca PROCESSED.
 
 Hasta B, “fuente agregada” >> “actualización publicada” es el cableado real. Dedup por embeddings/Voyage **no** quedó verificado en esta tarea.
+
+## Claims / verify — etapa 1 en código; etapa 2 no
+
+En código: contrato versionado en `metadata_json`, par claim↔verify, coverage/recovery, split de compuestos, packet claim-primero, independencia por `information_origin`, primaria auténtica de utterance. Tests de política con dobles (Alberto/Bregman, dos URLs misma fuente, par desparejado). **No** demuestran que Luna/Sol reales dejen de confundir proposiciones; eval con modelos reales queda fuera (`scripts/run_editorial_eval.py`).
+
+Etapa 2 (siguiente, **no** implementada): issues de auditor sobre el snapshot del par; Admin UI de `support_basis` / coverage; **bloqueo** de publish (o de afirmar el título) si `coverage_gap` o `verification_incomplete`. El recordatorio Writing no es ese gate. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`.
 
 ## Parcial / stub / posible defecto
 

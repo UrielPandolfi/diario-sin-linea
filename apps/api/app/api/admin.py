@@ -21,7 +21,7 @@ from app.repositories import (
     SourceRepository,
 )
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
-from app.services.verification_outcome import latest_success_verification, parse_verification_run
+from app.services.verification_outcome import verification_view_for_event
 from app.services.cost_service import aggregate_usage_costs, event_direct_cost
 from app.services.publication_outcome import (
     CODE_LABELS,
@@ -165,7 +165,7 @@ def _claim_out(claim, editorial=None) -> dict:
 
 
 def _claims_out(event, db) -> list[dict]:
-    view = parse_verification_run(latest_success_verification(db, event.id))
+    _run, view = verification_view_for_event(db, event.id)
     editorials = labels_for_event_claims(list(event.claims), view)
     return [_claim_out(claim, editorials.get(str(claim.id))) for claim in event.claims]
 

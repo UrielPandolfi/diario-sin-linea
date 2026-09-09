@@ -29,6 +29,7 @@ def _para_score(
     *,
     entity_needles: list[str],
     place_needles: list[str],
+    extra_needles: list[str],
 ) -> int:
     score = 0
     if index == 0:
@@ -44,6 +45,8 @@ def _para_score(
         score += 35
     if any(needle and needle in folded for needle in place_needles):
         score += 25
+    if any(needle and needle in folded for needle in extra_needles):
+        score += 50
     return score
 
 
@@ -54,8 +57,9 @@ def select_source_snippet(
     entity_names: list[str] | tuple[str, ...] = (),
     locality: str | None = None,
     address: str | None = None,
+    extra_needles: list[str] | tuple[str, ...] = (),
 ) -> str:
-    """Hasta `budget` chars: lead + párrafos con cifras, fechas, entidades o lugar."""
+    """Hasta `budget` chars: lead + párrafos con cifras, fechas, entidades, lugar o claim."""
     cleaned = (text or "").strip()
     if not cleaned:
         return ""
@@ -67,8 +71,15 @@ def select_source_snippet(
 
     entity_needles = [normalize_name(name) for name in entity_names if name]
     place_needles = [normalize_name(part) for part in (locality, address) if part]
+    claim_needles = [normalize_name(part) for part in extra_needles if part]
     scores = [
-        _para_score(index, para, entity_needles=entity_needles, place_needles=place_needles)
+        _para_score(
+            index,
+            para,
+            entity_needles=entity_needles,
+            place_needles=place_needles,
+            extra_needles=claim_needles,
+        )
         for index, para in enumerate(paragraphs)
     ]
 

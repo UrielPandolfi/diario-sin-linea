@@ -384,7 +384,7 @@ def test_secondary_consistent_evidence_can_support_without_primary_heuristic(db_
     search = FakeSearchProvider([])
     _service(db_session, llm, search).verify(event.id, trigger="admin")
     db_session.refresh(claim)
-    assert claim.status == ClaimStatus.SUPPORTED
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
 
 
 def test_document_without_primary_can_stay_uncertain(db_session: Session) -> None:

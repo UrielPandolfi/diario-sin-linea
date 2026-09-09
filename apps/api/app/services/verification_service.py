@@ -21,7 +21,8 @@ from app.core.source_content import (
     is_extracted_body,
     merge_item_metadata,
 )
-from app.core.text import content_fingerprint, excerpt_in_source, postgres_safe_json, postgres_safe_text
+from app.core.source_snippet import select_source_snippet
+from app.core.text import content_fingerprint, excerpt_in_source, postgres_safe_json, postgres_safe_text, token_set
 from app.core.urls import canonicalize_url, url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import (
@@ -59,7 +60,31 @@ from app.schemas.verification import (
     VerificationPlan,
     VerificationResult,
 )
+from app.schemas.editorial_evidence import (
+    CONTRACT_VERSION,
+    ClaimDecision,
+    CoverageContract,
+    Demotion,
+    PrimaryAccess,
+    PropositionRole,
+    StatementEvidenceClass,
+    VerificationBudget,
+)
+from app.services.claim_coverage import (
+    central_claim_ids,
+    claims_fingerprint,
+    evaluated_claims_payload,
+    is_mixed_proposition,
+    proposition_role_for,
+)
 from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for, _EVIDENCE_RANK
+from app.services.information_origin import (
+    assess_origins,
+    demotion_for,
+    final_reason_for,
+    support_basis_from_assessment,
+    usable_body_source,
+)
 from app.services.event_service import EventService
 from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
 from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
@@ -81,6 +106,7 @@ from app.services.verification_plan import (
 from app.services.verification_outcome import (
     VERIFICATION_STAGE,
     is_strong_verification,
+    latest_success_claim_resolution,
     view_from_mapping,
 )
 from app.services.verification_policy import canonicalize_claim_type, select_claims
@@ -99,6 +125,7 @@ class _PacketSource:
     hit: SearchHit | None = None
     fetched_html: str | None = None
     fetched_text: str | None = None
+    body_source: str = ""
 
 
 class VerificationService:
@@ -242,12 +269,41 @@ class VerificationService:
 
     def _run(self, event: Event) -> dict:
         flagged, consumed = self._flagged_ids(event.id)
+        claim_run = latest_success_claim_resolution(self.session, event.id)
+        claim_meta = (claim_run.metadata_json if claim_run is not None else None) or {}
+        coverage = None
+        raw_coverage = claim_meta.get("coverage")
+        if isinstance(raw_coverage, dict):
+            try:
+                coverage = CoverageContract.model_validate(raw_coverage)
+            except Exception:
+                coverage = None
+        centrals = central_claim_ids(coverage) if coverage is not None else set()
         selected, skipped_policy = select_claims(
             list(event.claims),
             flagged_ids=flagged,
             limit=self.settings.max_verification_claims_per_event,
+            central_ids=centrals,
         )
+        deferred = [row for row in skipped_policy if row.get("reason") == "budget"]
+        budget = VerificationBudget(
+            limit=self.settings.max_verification_claims_per_event,
+            selected_ids=[str(row.claim.id) for row in selected],
+            deferred=deferred,
+            central_unverified=[
+                str(cid)
+                for cid in centrals
+                if str(cid) not in {str(row.claim.id) for row in selected}
+            ],
+        )
+        fingerprint = claim_meta.get("claims_fingerprint") or claims_fingerprint(list(event.claims))
         payload: dict[str, Any] = {
+            "contract_version": CONTRACT_VERSION,
+            "claims_fingerprint": fingerprint,
+            "based_on_claim_run_id": str(claim_run.id) if claim_run is not None else None,
+            "coverage": coverage.model_dump(mode="json") if coverage is not None else None,
+            "verification_budget": budget.model_dump(mode="json"),
+            "verification_incomplete": bool(budget.central_unverified),
             "selected": [{"claim_id": str(row.claim.id), "reasons": row.reasons} for row in selected],
             "skipped_policy": skipped_policy,
             "consumed_needs_external_verification": consumed,
@@ -262,12 +318,17 @@ class VerificationService:
             "assessments": {},
             "skipped_search": [],
             "sol": [],
+            "decision_by_claim_id": {},
             "attached": 0,
             "fetched": 0,
             "cited": 0,
             "verified": 0,
         }
+        if coverage is not None:
+            coverage.verification_incomplete = bool(budget.central_unverified)
+            payload["coverage"] = coverage.model_dump(mode="json")
         if not selected:
+            payload["evaluated_claims"] = evaluated_claims_payload(list(event.claims))
             return payload
 
         search = self.search or get_search_provider()
@@ -304,11 +365,24 @@ class VerificationService:
                 continue
             if skip_directed_search(claim, plan, preferred):
                 found = claim_has_preferred_evidence(claim, preferred)
+                authentic = self._utterance_primary_supports(claim)
                 payload["skipped_search"].append(claim_id)
                 payload["escalated"][claim_id] = False
-                payload["primary_found"][claim_id] = found
-                payload["primary_source_found"][claim_id] = found
-                payload["primary_source_supports_claim"][claim_id] = found
+                payload["primary_found"][claim_id] = found or authentic
+                payload["primary_source_found"][claim_id] = found or authentic
+                payload["primary_source_supports_claim"][claim_id] = found or authentic
+                self._record_decision(
+                    payload,
+                    claim,
+                    plan,
+                    status_before=status_before,
+                    llm_reason="skipped_search",
+                    unresolved=False,
+                    escalated=False,
+                    primary_found=found or authentic,
+                    primary_supports=found or authentic,
+                    packet_size=len(claim.evidence),
+                )
                 continue
 
             queries = build_verification_queries(
@@ -333,6 +407,8 @@ class VerificationService:
                 )
                 payload["attached"] += attached
                 payload["cited"] += cited
+            if self._utterance_primary_supports(claim):
+                primary_supports = True
             payload["primary_found"][claim_id] = bool(primary_found)
             payload["primary_source_found"][claim_id] = bool(primary_found)
             payload["primary_source_supports_claim"][claim_id] = bool(primary_supports)
@@ -348,7 +424,7 @@ class VerificationService:
                     user_prompt=self._user_prompt(event, claim, packet, plan),
                     schema=VerificationResult,
                 )
-                attached, cited, primary_supports = self._apply_result(
+                attached, cited, primary_supports, decision = self._apply_result(
                     event, claim, packet, result, plan, preferred, bool(primary_supports)
                 )
                 payload["attached"] += attached
@@ -359,27 +435,42 @@ class VerificationService:
                         "claim_id": claim_id,
                         "status_before": status_before.value,
                         "status_after": claim.status.value,
-                        "unresolved": result.unresolved,
-                        "reason": result.reason,
+                        "unresolved": decision.unresolved,
+                        "reason": decision.final_reason,
+                        "llm_reason": decision.llm_reason,
                         "escalated": True,
                     }
                 )
+                payload["decision_by_claim_id"][claim_id] = decision.model_dump(mode="json")
                 continue
             if assessment is not None and assessment_has_support(assessment):
                 claim.status = apply_primary_requirement(
                     claim, ClaimStatus.SUPPORTED, plan, primary_supports=bool(primary_supports)
                 )
+            decision = self._decision_after_policy(
+                claim,
+                plan,
+                desired=ClaimStatus.SUPPORTED if assessment is not None and assessment_has_support(assessment) else claim.status,
+                llm_reason=(assessment.reason if assessment is not None else None) or "cheap_assessment",
+                unresolved=False,
+                primary_found=bool(primary_found),
+                primary_supports=bool(primary_supports),
+                packet_size=len(packet),
+            )
             payload["sol"].append(
                 {
                     "claim_id": claim_id,
                     "status_before": status_before.value,
                     "status_after": claim.status.value,
-                    "unresolved": False,
-                    "reason": (assessment.reason if assessment is not None else None) or "cheap_assessment",
+                    "unresolved": decision.unresolved,
+                    "reason": decision.final_reason,
+                    "llm_reason": decision.llm_reason,
                     "escalated": False,
                 }
             )
+            payload["decision_by_claim_id"][claim_id] = decision.model_dump(mode="json")
         self._reconcile_verified_competitors(list(event.claims), payload)
+        payload["evaluated_claims"] = [row.model_dump(mode="json") for row in evaluated_claims_payload(list(event.claims))]
         return payload
 
     def _reconcile_verified_competitors(self, claims: list[Claim], payload: dict[str, Any]) -> None:
@@ -423,7 +514,7 @@ class VerificationService:
                 user_prompt=self._plan_prompt(event, claim),
                 schema=VerificationPlan,
             )
-            return refine_plan(planned, fallback)
+            return refine_plan(planned, fallback, claim=claim)
         except _PLANNER_ERRORS:
             return fallback
 
@@ -445,6 +536,114 @@ class VerificationService:
             )
         except _PLANNER_ERRORS:
             return None
+
+    def _packet_snippet(self, claim: Claim, item: SourceItem, *, fallback: str | None) -> str:
+        body = (item.clean_text or "").strip()
+        needles = list(token_set(claim.canonical_text or ""))[:12]
+        if body:
+            snippet = select_source_snippet(body, budget=SNIPPET_CHARS, extra_needles=needles)
+        else:
+            snippet = (fallback or item.excerpt or item.title or "")[:SNIPPET_CHARS]
+        excerpt = (fallback or "").strip()
+        if excerpt and excerpt not in snippet:
+            combined = f"{excerpt}\n\n{snippet}".strip()
+            snippet = combined[:SNIPPET_CHARS]
+        return postgres_safe_text(snippet) or ""
+
+    def _utterance_primary_supports(self, claim: Claim) -> bool:
+        role = proposition_role_for(claim)
+        if role != PropositionRole.UTTERANCE and canonicalize_claim_type(claim.claim_type) != "declaracion":
+            return False
+        if is_mixed_proposition(claim.canonical_text or "", claim.claim_type):
+            return False
+        assessment = assess_origins(claim)
+        return assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY
+
+    def _primary_access(self, *, primary_found: bool, primary_supports: bool) -> str:
+        if primary_supports:
+            return PrimaryAccess.FOUND_RELEVANT.value
+        if primary_found:
+            return PrimaryAccess.FOUND_UNRELATED.value
+        return PrimaryAccess.NOT_FOUND.value
+
+    def _decision_after_policy(
+        self,
+        claim: Claim,
+        plan,
+        *,
+        desired: ClaimStatus,
+        llm_reason: str | None,
+        unresolved: bool,
+        primary_found: bool,
+        primary_supports: bool,
+        packet_size: int,
+    ) -> ClaimDecision:
+        assessment = assess_origins(claim, packet_size=packet_size)
+        role = proposition_role_for(claim)
+        mixed = is_mixed_proposition(claim.canonical_text or "", claim.claim_type)
+        demotion = demotion_for(
+            desired_status=desired.value,
+            final_status=claim.status.value,
+            assessment=assessment,
+            primary_required=bool(plan.primary_source_required) if plan is not None else False,
+            primary_supports=primary_supports,
+            mixed=mixed,
+            role=role,
+        )
+        basis = support_basis_from_assessment(
+            claim,
+            assessment,
+            demotion=demotion,
+            evaluated_text=claim.canonical_text,
+            primary_access=self._primary_access(primary_found=primary_found, primary_supports=primary_supports),
+        )
+        return ClaimDecision(
+            claim_id=str(claim.id),
+            status=claim.status.value,
+            unresolved=unresolved,
+            final_reason=final_reason_for(demotion, assessment, claim.status.value),
+            llm_reason=llm_reason,
+            support_basis=basis,
+            proposition_role=role.value,
+        )
+
+    def _record_decision(
+        self,
+        payload: dict[str, Any],
+        claim: Claim,
+        plan,
+        *,
+        status_before: ClaimStatus,
+        llm_reason: str | None,
+        unresolved: bool,
+        escalated: bool,
+        primary_found: bool,
+        primary_supports: bool,
+        packet_size: int,
+    ) -> ClaimDecision:
+        decision = self._decision_after_policy(
+            claim,
+            plan,
+            desired=claim.status,
+            llm_reason=llm_reason,
+            unresolved=unresolved,
+            primary_found=primary_found,
+            primary_supports=primary_supports,
+            packet_size=packet_size,
+        )
+        payload["sol"].append(
+            {
+                "claim_id": str(claim.id),
+                "status_before": status_before.value,
+                "status_after": claim.status.value,
+                "unresolved": decision.unresolved,
+                "reason": decision.final_reason,
+                "llm_reason": decision.llm_reason,
+                "escalated": escalated,
+            }
+        )
+        payload["decision_by_claim_id"][str(claim.id)] = decision.model_dump(mode="json")
+        return decision
 
     def _plan_prompt(self, event: Event, claim: Claim) -> str:
         occurred = claim.occurred_at.isoformat() if claim.occurred_at else ""
@@ -497,7 +696,12 @@ class VerificationService:
             return added
 
         official_added = _run(official) if official else 0
-        need_general = (not official) or official_added == 0 or plan.independent_corroboration_required
+        utterance = (
+            plan.verification_target.value == "PRIMARY_STATEMENT"
+            or plan.subject.value == "PUBLIC_STATEMENT"
+            or plan.independent_corroboration_required
+        )
+        need_general = (not official) or official_added == 0 or utterance
         if need_general and general:
             _run(general)
         return hits
@@ -513,11 +717,16 @@ class VerificationService:
             canonical = canonicalize_url(item.canonical_url or item.url)
             if canonical:
                 seen.add(canonical)
-            snippet = postgres_safe_text(
-                (row.excerpt or item.excerpt or item.clean_text or item.title or "")[:SNIPPET_CHARS]
-            ) or ""
+            snippet = self._packet_snippet(claim, item, fallback=row.excerpt or item.excerpt)
             packet.append(
-                _PacketSource(ref=ref, url=item.url, title=item.title or "", snippet=snippet, item=item)
+                _PacketSource(
+                    ref=ref,
+                    url=item.url,
+                    title=item.title or "",
+                    snippet=snippet,
+                    item=item,
+                    body_source=usable_body_source(item),
+                )
             )
             ref += 1
 
@@ -531,9 +740,7 @@ class VerificationService:
             seen.add(canonical)
             existing = self.items.get_by_canonical_url(canonical) or self.items.get_by_canonical_url(hit.url)
             if existing is not None:
-                snippet = postgres_safe_text(
-                    (existing.excerpt or existing.clean_text or hit.snippet or existing.title or "")[:SNIPPET_CHARS]
-                ) or ""
+                snippet = self._packet_snippet(claim, existing, fallback=hit.snippet or existing.excerpt)
                 packet.append(
                     _PacketSource(
                         ref=ref,
@@ -542,6 +749,7 @@ class VerificationService:
                         snippet=snippet,
                         item=existing,
                         hit=hit,
+                        body_source=usable_body_source(existing),
                     )
                 )
                 ref += 1
@@ -549,16 +757,26 @@ class VerificationService:
             html, text = self._fetch_to_memory(hit.url)
             if html is not None:
                 fetched += 1
-            snippet = (text or hit.snippet or hit.title or "")[:SNIPPET_CHARS]
+            body_source = BODY_SOURCE_EXTRACTED_HTML if text else BODY_SOURCE_SEARCH_SNIPPET
+            snippet_source = text or hit.snippet or hit.title or ""
+            snippet = postgres_safe_text(
+                select_source_snippet(
+                    snippet_source,
+                    budget=SNIPPET_CHARS,
+                    extra_needles=list(token_set(claim.canonical_text or ""))[:12],
+                )
+                or snippet_source[:SNIPPET_CHARS]
+            ) or ""
             packet.append(
                 _PacketSource(
                     ref=ref,
                     url=hit.url,
                     title=hit.title,
-                    snippet=postgres_safe_text(snippet) or "",
+                    snippet=snippet,
                     hit=hit,
                     fetched_html=html,
                     fetched_text=text,
+                    body_source=body_source if html else BODY_SOURCE_SEARCH_SNIPPET,
                 )
             )
             ref += 1
@@ -586,20 +804,23 @@ class VerificationService:
         kind = canonicalize_claim_type(claim.claim_type)
         occurred = claim.occurred_at.isoformat() if claim.occurred_at else ""
         lines = [
-            f"Suceso (contexto mínimo): {event.title_internal} ({event.event_type})",
-            f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
-            "Claim:",
+            "Claim a evaluar (única proposición; no la sustituyas por el título del suceso):",
             f"canonical_text={claim.canonical_text}",
             f"claim_type={kind} status_actual={claim.status.value} importance={claim.importance.value}",
             f"subject={claim.subject or ''} predicate={claim.predicate or ''} "
             f"object_text={claim.object_text or ''} normalized_value={claim.normalized_value or ''} "
             f"unit={claim.unit or ''} occurred_at={occurred}",
+            f"Suceso (contexto mínimo; no juzgues esta frase en lugar del Claim): {event.title_internal} ({event.event_type})",
+            f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
         ]
         if plan is not None:
             lines.append(f"VerificationPlan={plan.model_dump_json()}")
         lines.append("Fuentes (source_ref 1..N, snippet truncado; no hay HTML crudo ni el Event entero):")
         for src in packet:
-            lines.append(f"{src.ref}. title={src.title} url={src.url}\nsnippet={src.snippet}")
+            lines.append(
+                f"{src.ref}. title={src.title} url={src.url} body_source={src.body_source or 'unknown'}\n"
+                f"snippet={src.snippet}"
+            )
         return "\n".join(lines)
 
     def _apply_judgements(
@@ -641,7 +862,7 @@ class VerificationService:
         plan: VerificationPlan,
         preferred: list[str],
         primary_supports: bool,
-    ) -> tuple[int, int, bool]:
+    ) -> tuple[int, int, bool, ClaimDecision]:
         by_ref = {src.ref: src for src in packet}
         attached = 0
         cited = 0
@@ -661,14 +882,29 @@ class VerificationService:
                 primary_supports = True
 
         self.session.flush()
-        if result.unresolved:
-            if result.status in {ClaimStatus.CONFLICTING, ClaimStatus.UNCERTAIN}:
-                claim.status = result.status
+        if self._utterance_primary_supports(claim):
+            primary_supports = True
+        unresolved = False
+        desired = result.status
+        if result.unresolved and result.status in {ClaimStatus.CONFLICTING, ClaimStatus.UNCERTAIN}:
+            claim.status = result.status
+            unresolved = True
         else:
             claim.status = apply_primary_requirement(
                 claim, result.status, plan, primary_supports=primary_supports
             )
-        return attached, cited, primary_supports
+            unresolved = False
+        decision = self._decision_after_policy(
+            claim,
+            plan,
+            desired=desired,
+            llm_reason=result.reason,
+            unresolved=unresolved,
+            primary_found=any(is_preferred_domain(src.url, preferred) for src in packet),
+            primary_supports=primary_supports,
+            packet_size=len(packet),
+        )
+        return attached, cited, primary_supports, decision
 
     def _attach_evidence(
         self,

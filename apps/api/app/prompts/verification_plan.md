@@ -24,14 +24,16 @@ Reglas:
 - judicial_forum FEDERAL si el Claim menciona Juzgado Federal, Cámara Federal, Justicia Federal, fuero federal o la Corte Suprema de Justicia de la Nación. PROVINCIAL si menciona un tribunal provincial (Suprema Corte provincial, Superior Tribunal, Justicia de una provincia). UNKNOWN si no hay datos suficientes: no asumas la provincia del suceso periodístico.
 - La acusación contenida en esa denuncia (lo imputado) es OTRA proposición: subject ACCUSATION e independent_corroboration_required true. No las mezcles.
 - Acusación material sobre un hecho (no el acto de denunciar) → subject ACCUSATION e independent_corroboration_required true. No asumas que es verdadera.
-- Declaración o cita → PRIMARY_STATEMENT, PUBLIC_STATEMENT.
+- Declaración o cita ya desambiguada (solo “X dijo Y”) → PRIMARY_STATEMENT, PUBLIC_STATEMENT. No uses OFFICIAL_RECORD ni Boletín Oficial para verificar el dicho.
+- Si el Claim mezcla dicho + vigencia + alcance, no lo trates como sola declaración: usá el requisito más estricto.
 - Dato monetario o financiero de autoridad monetaria → FINANCIAL_OFFICIAL_DATA.
 - Elección, padrón, resultado oficial → ELECTION_AUTHORITY.
 - Un hecho ordinario ya bien respaldado por medios independientes no requiere investigación extra. Una sentencia, ley, decreto, nombramiento, estadística oficial, elección, presupuesto o documento administrativo central SÍ debe buscar fuente primaria aunque ya tenga dos medios.
 
 Temporalidad del CLAIM, no del suceso detectado hoy:
 
-- Un hecho de 2011 es HISTORICAL aunque la nota sea de hoy.
+- Un hecho de 2011 es HISTORICAL aunque la nota sea de hoy. `published_at` de la nota orienta; no es una ventana `pd` que excluya el original.
+- Si el Claim tiene año propio (occurred_at o el texto), usalo. Si hay conflicto entre la fecha de la nota y la del dicho, no cierres ventana y conservá términos distintivos.
 - “El Gobierno anunció hoy X” puede ser CURRENT o RECENT.
 - year_hint del año en curso NUNCA va con HISTORICAL.
 - Una cifra o cargo sin tiempo propio puede ser TIMELESS o HISTORICAL según el año del Claim.

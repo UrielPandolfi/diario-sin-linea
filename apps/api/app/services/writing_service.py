@@ -23,6 +23,7 @@ from app.services.article_context import build_article_context, last_success_run
 from app.services.article_service import ArticleService
 from app.services.material_change import detect_material_change, snapshot_claims
 from app.services.pipeline_lock import WRITING_STAGE, is_write_audit_publish_busy
+from app.services.verification_outcome import compatible_verification_pair, writing_evidence_snapshot
 
 WRITING_ROLE = "writing"
 
@@ -212,6 +213,8 @@ class WritingService:
                 "material_reasons": change.reasons,
             }
         )
+        claim_run, verify_run = compatible_verification_pair(self.session, event.id)
+        base.update(writing_evidence_snapshot(claim_run, verify_run, version=article.current_version))
         return base
 
     def _can_write(self, article) -> bool:
@@ -243,6 +246,12 @@ class WritingService:
                 "atribución explícita, incertidumbre, u omisión.\n"
                 + "\n".join(weak)
                 + "\n\n"
+            )
+        coverage_gap = bool(getattr(article_context.verification, "coverage_gap", False))
+        if coverage_gap:
+            reminder += (
+                "Hay un hueco de cobertura: el título o el lead del suceso no tiene un Claim "
+                "equivalente persistido. No afirmes event.working_title como hecho de Sin Línea.\n\n"
             )
         return (
             "Redactá a partir de este ArticleContext JSON. "

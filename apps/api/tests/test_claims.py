@@ -239,12 +239,70 @@ def test_supported_two_distinct_domains(db_session: Session) -> None:
         ),
     )
 
+    result = _service(db_session, llm).resolve(event.id, trigger="admin")
+
+    claim = _event_claims(db_session, event.id)[0]
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    ids = {row.source_item_id for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id))}
+    assert ids == {item_a.id, item_b.id}
+    run = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.event_id == event.id, PipelineRun.stage == CLAIM_STAGE)
+    ).one()
+    coverage = (run.metadata_json or {}).get("coverage") or {}
+    assert coverage.get("contract_version") == "editorial-evidence-1"
+
+
+def test_two_proven_information_origins_can_be_supported(db_session: Session) -> None:
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    body_a = (
+        "El informe de https://seguridad.gob.ar/parte-rosario confirmó que el choque dejó seis heridos "
+        "tras el impacto en el centro de Rosario según el recuento policial oficial del operativo."
+    )
+    body_b = (
+        "El parte de https://salud.santafe.gob.ar/reporte-heridos indica que el choque dejó seis heridos "
+        "en el hospital de referencia de la ciudad según el recuento médico de guardia."
+    )
+    item_a = _item(db_session, source_a.id, url="https://a.test/n", title="A", body=body_a, content_hash="ha")
+    item_b = _item(db_session, source_b.id, url="https://b.test/n", title="B", body=body_b, content_hash="hb")
+    event = _event(db_session, item_a)
+    _attach(db_session, event, item_b)
+    excerpt_a = (
+        "el choque dejó seis heridos tras el impacto en el centro de Rosario según el recuento policial oficial del operativo"
+    )
+    excerpt_b = (
+        "el choque dejó seis heridos en el hospital de referencia de la ciudad según el recuento médico de guardia"
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="El choque dejó seis heridos",
+                    normalized_value="6",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt=excerpt_a, confidence=0.9
+                        ),
+                        ExtractedEvidence(
+                            source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt=excerpt_b, confidence=0.8
+                        ),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.9, reason="dos orígenes")
+            ]
+        ),
+    )
+
     _service(db_session, llm).resolve(event.id, trigger="admin")
 
     claim = _event_claims(db_session, event.id)[0]
     assert claim.status == ClaimStatus.SUPPORTED
-    ids = {row.source_item_id for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id))}
-    assert ids == {item_a.id, item_b.id}
 
 
 def test_same_outlet_two_items_is_single_source(db_session: Session) -> None:
@@ -578,6 +636,8 @@ def test_invented_excerpt_is_discarded(db_session: Session) -> None:
     assert result.get("error") is None
     assert result["extracted"] == 1
     assert result["persisted"] == 0
+    dropped = ((result.get("coverage") or {}).get("dropped")) or []
+    assert any(row.get("reason") == "invalid_excerpt" for row in dropped)
     assert result["resolved"] == 0
     assert claims == []
     assert "fallback_used" not in result
@@ -1013,12 +1073,29 @@ def _strong_verification_run(session: Session, event, claim: Claim, **overrides)
     primary = overrides.get("primary", True)
     unresolved = overrides.get("unresolved", False)
     status_after = overrides.get("status_after", "SUPPORTED")
+    claim_run = session.scalars(
+        select(PipelineRun)
+        .where(
+            PipelineRun.event_id == event.id,
+            PipelineRun.stage == CLAIM_STAGE,
+            PipelineRun.status == PipelineStatus.SUCCESS,
+        )
+        .order_by(PipelineRun.finished_at.desc())
+    ).first()
+    fingerprint = None
+    based_on = None
+    if claim_run is not None:
+        fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint")
+        based_on = str(claim_run.id)
     run = PipelineRun(
         event_id=event.id,
         stage=VERIFICATION_STAGE,
         status=PipelineStatus.SUCCESS,
         finished_at=overrides.get("finished_at") or utc_now(),
         metadata_json={
+            "contract_version": "editorial-evidence-1",
+            "claims_fingerprint": fingerprint,
+            "based_on_claim_run_id": based_on,
             "selected": [{"claim_id": cid, "reasons": ["policy:hecho"]}],
             "skipped_search": [cid] if skipped else [],
             "primary_source_supports_claim": {cid: primary},
@@ -1041,9 +1118,16 @@ def _strong_verification_run(session: Session, event, claim: Claim, **overrides)
 def _two_source_event(session: Session):
     source_a = _source(session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
     source_b = _source(session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
-    body = "El choque dejó seis heridos. Fuentes oficiales desmintieron que hubiera heridos."
-    item_a = _item(session, source_a.id, url="https://a.test/n", title="A", body=body, content_hash="ha")
-    item_b = _item(session, source_b.id, url="https://b.test/n", title="B", body=body, content_hash="hb")
+    body_a = (
+        "El informe de https://seguridad.gob.ar/parte-rosario confirmó que el choque dejó seis heridos "
+        "tras el impacto. Fuentes oficiales desmintieron que hubiera heridos en un recuento policial distinto."
+    )
+    body_b = (
+        "El parte de https://salud.santafe.gob.ar/reporte-heridos indica que el choque dejó seis heridos "
+        "en el hospital. Fuentes oficiales desmintieron que hubiera heridos según otro recuento médico."
+    )
+    item_a = _item(session, source_a.id, url="https://a.test/n", title="A", body=body_a, content_hash="ha")
+    item_b = _item(session, source_b.id, url="https://b.test/n", title="B", body=body_b, content_hash="hb")
     event = _event(session, item_a)
     _attach(session, event, item_b)
     return event, item_a, item_b

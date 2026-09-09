@@ -227,19 +227,49 @@ def test_queries_include_site_and_general_fallback() -> None:
     assert len(queries) <= 3
 
 
+def _independent_support_pair():
+    excerpt_a = (
+        "el organismo A midió el indicador oficial en su informe de precios al consumidor publicado ayer"
+    )
+    excerpt_b = (
+        "el organismo B confirmó el mismo indicador en una serie estadística distinta del ente regulador"
+    )
+    return [
+        SimpleNamespace(
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt=excerpt_a,
+            source_item=SimpleNamespace(
+                clean_text=f"{excerpt_a} https://indec.gob.ar/serie-a",
+                canonical_url="https://a.test/n",
+                url="https://a.test/n",
+                title="A",
+                source=None,
+                metadata_json={"body_source": "extracted_html"},
+            ),
+            source_url="https://a.test/n",
+        ),
+        SimpleNamespace(
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt=excerpt_b,
+            source_item=SimpleNamespace(
+                clean_text=f"{excerpt_b} https://enre.gob.ar/serie-b",
+                canonical_url="https://b.test/n",
+                url="https://b.test/n",
+                title="B",
+                source=None,
+                metadata_json={"body_source": "extracted_html"},
+            ),
+            source_url="https://b.test/n",
+        ),
+    ]
+
+
 def test_policy_skips_well_supported_declaration_not_high_stat() -> None:
     declaration = _claim(
         claim_type="declaracion",
         importance=ClaimImportance.MEDIUM,
         status=ClaimStatus.SUPPORTED,
-        evidence=[
-            SimpleNamespace(
-                evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://a.test/n"
-            ),
-            SimpleNamespace(
-                evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://b.test/n"
-            ),
-        ],
+        evidence=_independent_support_pair(),
     )
     assert policy_selects(declaration) is False
     cifra = _claim(
@@ -291,15 +321,42 @@ def test_select_claims_still_vetoes_mundane() -> None:
 
 
 def test_skip_search_for_well_supported_without_primary_need() -> None:
+    excerpt_a = (
+        "el organismo A midió que el IPC de julio fue 2,1 por ciento según el informe oficial de inflación"
+    )
+    excerpt_b = (
+        "el organismo B confirmó que el IPC de julio fue 2,1 por ciento en su serie de precios al consumidor"
+    )
     claim = _claim(
         claim_type="declaracion",
         status=ClaimStatus.SUPPORTED,
+        canonical_text="El ministro dijo que el IPC de julio fue 2,1%",
         evidence=[
             SimpleNamespace(
-                evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://a.test/n"
+                evidence_type=EvidenceType.SUPPORTS,
+                excerpt=excerpt_a,
+                source_item=SimpleNamespace(
+                    clean_text=f"{excerpt_a} https://indec.gob.ar/ipc-julio",
+                    canonical_url="https://a.test/n",
+                    url="https://a.test/n",
+                    title="A",
+                    source=None,
+                    metadata_json={"body_source": "extracted_html", "fetch_ok": True},
+                ),
+                source_url="https://a.test/n",
             ),
             SimpleNamespace(
-                evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://b.test/n"
+                evidence_type=EvidenceType.SUPPORTS,
+                excerpt=excerpt_b,
+                source_item=SimpleNamespace(
+                    clean_text=f"{excerpt_b} https://enre.gob.ar/otra-serie",
+                    canonical_url="https://b.test/n",
+                    url="https://b.test/n",
+                    title="B",
+                    source=None,
+                    metadata_json={"body_source": "extracted_html", "fetch_ok": True},
+                ),
+                source_url="https://b.test/n",
             ),
         ],
     )
@@ -523,7 +580,34 @@ def test_primary_required_blocks_supported_without_primary() -> None:
     )
     already = _claim(
         status=ClaimStatus.SUPPORTED,
-        evidence=claim.evidence,
+        evidence=[
+            SimpleNamespace(
+                evidence_type=EvidenceType.SUPPORTS,
+                excerpt="el organismo A midió el IPC de julio en 2,1 por ciento según el informe oficial publicado",
+                source_item=SimpleNamespace(
+                    clean_text="el organismo A midió el IPC de julio en 2,1 por ciento según el informe oficial publicado https://indec.gob.ar/ipc",
+                    canonical_url="https://medio.test/n",
+                    url="https://medio.test/n",
+                    title="A",
+                    source=None,
+                    metadata_json={"body_source": "extracted_html"},
+                ),
+                source_url="https://medio.test/n",
+            ),
+            SimpleNamespace(
+                evidence_type=EvidenceType.SUPPORTS,
+                excerpt="el ente regulador publicó que el IPC de julio fue 2,1 por ciento en su serie de precios",
+                source_item=SimpleNamespace(
+                    clean_text="el ente regulador publicó que el IPC de julio fue 2,1 por ciento en su serie de precios https://enre.gob.ar/serie",
+                    canonical_url="https://otro.test/n",
+                    url="https://otro.test/n",
+                    title="B",
+                    source=None,
+                    metadata_json={"body_source": "extracted_html"},
+                ),
+                source_url="https://otro.test/n",
+            ),
+        ],
     )
     assert (
         apply_primary_requirement(already, ClaimStatus.SUPPORTED, plan, primary_supports=False)
@@ -534,7 +618,10 @@ def test_primary_required_blocks_supported_without_primary() -> None:
 def test_reprints_and_blogs_are_not_independent_corroboration() -> None:
     from app.services.verification_policy import independent_support_count
 
-    excerpt = "la funcionaria británica accedió a información estratégica de las fuerzas armadas argentinas"
+    excerpt = (
+        "la funcionaria británica accedió a información estratégica de las fuerzas armadas argentinas "
+        "según el relato publicado sobre el acceso total a esos archivos"
+    )
     first = SimpleNamespace(
         evidence_type=EvidenceType.SUPPORTS,
         excerpt=excerpt,
@@ -618,10 +705,30 @@ def test_well_supported_documentary_searches_primary_without_sol() -> None:
 
     evidence = [
         SimpleNamespace(
-            evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://a.test/n"
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt="la corte provincial sobreseyó a los acusados según el fallo publicado en el sitio oficial",
+            source_item=SimpleNamespace(
+                clean_text="la corte provincial sobreseyó a los acusados según el fallo publicado https://jus.mendoza.gov.ar/fallo",
+                canonical_url="https://a.test/n",
+                url="https://a.test/n",
+                title="A",
+                source=None,
+                metadata_json={"body_source": "extracted_html"},
+            ),
+            source_url="https://a.test/n",
         ),
         SimpleNamespace(
-            evidence_type=EvidenceType.SUPPORTS, source_item=None, source_url="https://b.test/n"
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt="el tribunal confirmó el sobreseimiento de los acusados en una resolución posterior distinta",
+            source_item=SimpleNamespace(
+                clean_text="el tribunal confirmó el sobreseimiento de los acusados https://pjn.gov.ar/causa",
+                canonical_url="https://b.test/n",
+                url="https://b.test/n",
+                title="B",
+                source=None,
+                metadata_json={"body_source": "extracted_html"},
+            ),
+            source_url="https://b.test/n",
         ),
     ]
     claim = _claim(
@@ -656,4 +763,59 @@ def test_well_supported_documentary_searches_primary_without_sol() -> None:
         ambiguous=False,
     )
     assert needs_sol_after_assessment(claim, plan, assessment, primary_support=False) is False
+
+
+def test_select_claims_does_not_veto_expected_central() -> None:
+    mundane = _claim(
+        claim_type="hecho",
+        importance=ClaimImportance.LOW,
+        status=ClaimStatus.SINGLE_SOURCE,
+        canonical_text="Presentó una denuncia penal contra el ex presidente",
+    )
+    selected, skipped = select_claims(
+        [mundane],
+        flagged_ids=set(),
+        limit=5,
+        central_ids={mundane.id},
+    )
+    assert [row.claim.id for row in selected] == [mundane.id]
+    assert "central" in selected[0].reasons
+    assert not any(row.get("reason") == "veto" for row in skipped)
+
+
+def test_refine_plan_clamps_utterance_away_from_boletin() -> None:
+    claim = _claim(
+        claim_type="declaracion",
+        canonical_text="Myriam Bregman dijo que es un vejestorio jurídico",
+        subject="Bregman",
+        predicate="dijo",
+    )
+    fallback = heuristic_plan(claim)
+    planned = VerificationPlan(
+        verification_target=VerificationTarget.OFFICIAL_RECORD,
+        subject=VerificationSubject.LAW_OR_DECREE,
+        primary_source_required=True,
+        search_terms=["Bregman"],
+    )
+    refined = refine_plan(planned, fallback, claim=claim)
+    assert refined.verification_target == VerificationTarget.PRIMARY_STATEMENT
+    assert refined.subject == VerificationSubject.PUBLIC_STATEMENT
+    assert refined.primary_source_required is False
+    assert refined.independent_corroboration_required is False
+
+
+def test_historical_utterance_search_has_no_pd_window() -> None:
+    from app.services.verification_plan import search_window_for
+
+    claim = _claim(
+        claim_type="declaracion",
+        canonical_text="En 2011 dijo que era un vejestorio jurídico",
+        occurred_at=datetime(2011, 6, 9, tzinfo=timezone.utc),
+    )
+    plan = heuristic_plan(claim)
+    window = search_window_for(plan, claim, now=datetime(2026, 9, 8, tzinfo=timezone.utc))
+    assert plan.temporal_scope == TemporalScope.HISTORICAL
+    assert window.freshness is None
+    assert window.since is None
+    assert window.until is None
 

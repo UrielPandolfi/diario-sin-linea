@@ -23,7 +23,7 @@ from app.models import (
 )
 from app.repositories import ArticleRepository, EventRepository
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
-from app.services.verification_outcome import latest_success_verification, parse_verification_run
+from app.services.verification_outcome import verification_view_for_event
 
 PUBLIC_CANDIDATE_CAP = 200
 DEFAULT_LIMIT = 20
@@ -111,8 +111,7 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
 def compact_public_claims(
     session: Session, event: Event, *, allowed_ids: set[str] | None = None
 ) -> list[dict]:
-    run = latest_success_verification(session, event.id)
-    view = parse_verification_run(run)
+    _run, view = verification_view_for_event(session, event.id)
     editorials = labels_for_event_claims(list(event.claims), view)
     sol_by_id: dict[str, dict] = {}
     for cid, sol in view.sol_by_id.items():

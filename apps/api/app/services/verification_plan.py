@@ -19,7 +19,15 @@ from app.schemas.verification import (
     VerificationTarget,
 )
 from app.services.evidence_source_registry import infer_judicial_forum, is_preferred_domain
-from app.services.verification_policy import canonicalize_claim_type, independent_support_count, is_well_supported
+from app.services.claim_coverage import is_mixed_proposition, proposition_role_for
+from app.schemas.editorial_evidence import PropositionRole, StatementEvidenceClass
+from app.services.information_origin import assess_origins, has_support_evidence
+from app.services.verification_policy import (
+    canonicalize_claim_type,
+    independent_support_count,
+    is_documentary_claim,
+    is_well_supported,
+)
 
 _YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
@@ -90,6 +98,8 @@ def year_hint_from_claim(claim: Claim) -> int | None:
     if claim.occurred_at is not None:
         return claim.occurred_at.year
     years = [int(match) for match in _YEAR_RE.findall(claim.canonical_text or "")]
+    for row in getattr(claim, "evidence", None) or []:
+        years.extend(int(match) for match in _YEAR_RE.findall(getattr(row, "excerpt", None) or ""))
     return min(years) if years else None
 
 
@@ -163,8 +173,14 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
             subject = VerificationSubject.STATISTICS
         primary = True
     elif kind == "declaracion":
-        target = VerificationTarget.PRIMARY_STATEMENT
-        subject = VerificationSubject.PUBLIC_STATEMENT
+        if is_mixed_proposition(claim.canonical_text or "", claim.claim_type):
+            target = VerificationTarget.INDEPENDENT_CORROBORATION
+            subject = VerificationSubject.GENERAL
+            primary = True
+            corroboration = True
+        else:
+            target = VerificationTarget.PRIMARY_STATEMENT
+            subject = VerificationSubject.PUBLIC_STATEMENT
     elif kind == "hecho" and claim.importance == ClaimImportance.HIGH:
         if claim.status in {ClaimStatus.SINGLE_SOURCE, ClaimStatus.UNCERTAIN, ClaimStatus.CONFLICTING}:
             subject = VerificationSubject.ACCUSATION
@@ -197,7 +213,13 @@ def _choose_year_hint(planned: VerificationPlan, fallback: VerificationPlan, *, 
     return planned_year
 
 
-def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: datetime | None = None) -> VerificationPlan:
+def refine_plan(
+    planned: VerificationPlan,
+    fallback: VerificationPlan,
+    *,
+    claim: Claim | None = None,
+    now: datetime | None = None,
+) -> VerificationPlan:
     """Keep LLM structure, but correct impossible temporal/target combinations in code."""
     clock = now or utc_now()
     year_hint = _choose_year_hint(planned, fallback, now=clock)
@@ -216,6 +238,13 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: d
     target = planned.verification_target
     subject = planned.subject
     forum = planned.judicial_forum
+    primary = planned.primary_source_required or fallback.primary_source_required
+    corroboration = planned.independent_corroboration_required or fallback.independent_corroboration_required
+    mixed = False
+    role = None
+    if claim is not None:
+        mixed = is_mixed_proposition(claim.canonical_text or "", claim.claim_type)
+        role = proposition_role_for(claim)
     if fallback.subject == VerificationSubject.REGULATED_TARIFF:
         subject = fallback.subject
         if planned.verification_target == VerificationTarget.OFFICIAL_STATISTICS:
@@ -234,6 +263,19 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: d
             forum = fallback.judicial_forum
         elif planned.judicial_forum == JudicialForum.UNKNOWN:
             forum = fallback.judicial_forum
+    if (
+        claim is not None
+        and not mixed
+        and (
+            fallback.subject == VerificationSubject.PUBLIC_STATEMENT
+            or role == PropositionRole.UTTERANCE
+            or canonicalize_claim_type(claim.claim_type) == "declaracion"
+        )
+    ):
+        target = VerificationTarget.PRIMARY_STATEMENT
+        subject = VerificationSubject.PUBLIC_STATEMENT
+        primary = False
+        corroboration = False
     return normalize_temporal_scope(
         planned.model_copy(
             update={
@@ -242,10 +284,8 @@ def refine_plan(planned: VerificationPlan, fallback: VerificationPlan, *, now: d
                 "verification_target": target,
                 "subject": subject,
                 "judicial_forum": forum,
-                "independent_corroboration_required": (
-                    planned.independent_corroboration_required or fallback.independent_corroboration_required
-                ),
-                "primary_source_required": planned.primary_source_required or fallback.primary_source_required,
+                "independent_corroboration_required": corroboration,
+                "primary_source_required": primary,
             }
         ),
         now=clock,
@@ -333,7 +373,13 @@ def date_bounds_for_plan(plan: VerificationPlan, claim: Claim) -> tuple[datetime
     return None, None
 
 
-def search_window_for(plan: VerificationPlan, claim: Claim) -> SearchWindow:
+def search_window_for(plan: VerificationPlan, claim: Claim, *, now: datetime | None = None) -> SearchWindow:
+    clock = now or utc_now()
+    if plan.year_hint is not None and plan.year_hint <= clock.year - 2:
+        return SearchWindow(freshness=None, since=None, until=None)
+    if plan.temporal_scope in {TemporalScope.HISTORICAL, TemporalScope.TIMELESS}:
+        since, until = date_bounds_for_plan(plan, claim)
+        return SearchWindow(freshness=None, since=since, until=until)
     since, until = date_bounds_for_plan(plan, claim)
     return SearchWindow(freshness=freshness_for_plan(plan), since=since, until=until)
 
@@ -453,15 +499,35 @@ def apply_primary_requirement(
     *,
     primary_supports: bool,
 ) -> ClaimStatus:
-    count = independent_support_count(claim)
     if status != ClaimStatus.SUPPORTED:
         return status
+    assessment = assess_origins(claim)
+    count = assessment.known_independent
+    has_support = has_support_evidence(claim)
+    mixed = is_mixed_proposition(claim.canonical_text or "", claim.claim_type)
+    role = proposition_role_for(claim)
+    if mixed:
+        if plan.primary_source_required and not primary_supports:
+            return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
+        if count >= 2:
+            return ClaimStatus.SUPPORTED
+        return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
+    if role == PropositionRole.UTTERANCE or plan.subject == VerificationSubject.PUBLIC_STATEMENT:
+        if assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
+            return ClaimStatus.SUPPORTED
+        if plan.primary_source_required and not primary_supports:
+            return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
+        if count >= 2:
+            return ClaimStatus.SUPPORTED
+        return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
     if plan.primary_source_required and not primary_supports:
         if claim.status == ClaimStatus.SUPPORTED and count >= 2:
             return ClaimStatus.SUPPORTED
-        return ClaimStatus.SINGLE_SOURCE if count >= 1 else ClaimStatus.UNCERTAIN
+        return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
+    if primary_supports and (is_documentary_claim(claim) or plan.primary_source_required):
+        return ClaimStatus.SUPPORTED
     if count >= 2:
         return ClaimStatus.SUPPORTED
-    if count == 1:
+    if has_support:
         return ClaimStatus.SINGLE_SOURCE
     return ClaimStatus.UNCERTAIN
