@@ -10,6 +10,7 @@ from app.core.clock import utc_now
 from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType, PipelineStatus
 from app.models import Article, Event, EventUpdate, PipelineRun
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
+from app.services.audit_policy import blocking_issues, structural_findings
 from app.services.pipeline_lock import PUBLISHING_STAGE, is_write_audit_publish_busy
 
 AUDITING_STAGE = "auditing"
@@ -226,14 +227,26 @@ class PublishService:
         return base
 
     def _audit_passed_for_current(self, event_id: UUID, article: Article) -> bool:
-        run = self.pipeline.latest_success(event_id, AUDITING_STAGE)
-        if run is None:
+        run = self.pipeline.latest_completed(event_id, AUDITING_STAGE)
+        if run is None or run.status != PipelineStatus.SUCCESS:
             return False
         meta = run.metadata_json or {}
+        if meta.get("audited") is not True:
+            return False
         passed = meta.get("passed")
         if passed is not True and passed != "true":
             return False
         version_after = meta.get("version_after")
         if version_after is None:
             return False
-        return int(version_after) == int(article.current_version)
+        if int(version_after) != int(article.current_version):
+            return False
+        snapshot = meta.get("evidence_snapshot")
+        if not isinstance(snapshot, dict):
+            return False
+        bound = snapshot.get("version")
+        if bound is None or int(bound) != int(article.current_version):
+            return False
+        if blocking_issues(structural_findings(snapshot, article)):
+            return False
+        return True

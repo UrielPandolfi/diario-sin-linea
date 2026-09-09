@@ -18,6 +18,7 @@ from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.domain.enums import EntityType
+from tests.editorial_snapshot import persist_version_snapshot
 
 
 def _source(session: Session, **overrides):
@@ -89,6 +90,7 @@ def _seed(session: Session, *, locality: str, headline: str, hash_key: str, body
         ArticleCreate(event_id=event.id, headline=headline, summary=f"Resumen {locality}", body=text)
     )
     session.flush()
+    persist_version_snapshot(session, event, article)
     return event, article
 
 

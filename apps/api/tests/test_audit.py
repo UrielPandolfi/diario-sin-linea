@@ -34,6 +34,7 @@ from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.writing_service import WRITING_STAGE, WritingService
+from tests.editorial_snapshot import persist_version_snapshot
 
 
 def test_normalize_audit_result_low_issues_do_not_block() -> None:
@@ -218,6 +219,7 @@ def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str 
         )
     )
     session.flush()
+    persist_version_snapshot(session, event, article)
     return event, article
 
 
@@ -265,6 +267,8 @@ def test_audit_prompt_has_context_and_draft_not_html(db_session: Session) -> Non
     assert "Un colectivo chocó en Pellegrini" in prompt
     assert "confirmed_claims" in prompt
     assert "body_blocks" in prompt
+    assert "evidence_snapshot" in prompt
+    assert "structural_findings" in prompt
     assert html not in prompt
     assert "raw_text" not in prompt
     assert "SECRETO" not in prompt
@@ -683,10 +687,10 @@ def test_writing_prompt_covers_characterization_and_causality() -> None:
     assert "Los insultos de Milei desataron la crisis" in prompt
     assert "Tras los dichos de Milei, el gobierno brasileño llamó a consultas" in prompt
     assert "sin “según varias fuentes” delante de cada oración" in prompt or 'sin "según varias fuentes"' in prompt
-    assert "Son respaldo suficiente para hechos ordinarios" in prompt
     assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
     assert "Párrafos o segmentos enteros con `claim_refs: []` son correctos" in prompt
     assert "NUNCA se convierte en hecho afirmado por Sin Línea" in prompt
+    assert "Atribuir" in prompt or "según X" in prompt
 
 
 def test_audit_schema_has_no_other_catchall() -> None:

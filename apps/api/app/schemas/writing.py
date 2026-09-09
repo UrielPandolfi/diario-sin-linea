@@ -58,6 +58,31 @@ class ContextSourceText(BaseModel):
     text: str
 
 
+class ContextSupportBasis(BaseModel):
+    known_independent_count: int = 0
+    unknown_group_count: int = 0
+    statement_evidence_class: str | None = None
+    primary_access: str | None = None
+    demotion: str | None = None
+
+
+class ContextClaimDecision(BaseModel):
+    claim_id: str
+    status: str | None = None
+    unresolved: bool = False
+    final_reason: str | None = None
+    proposition_role: str | None = None
+    support_basis: ContextSupportBasis | None = None
+
+
+class ContextExpectedCentral(BaseModel):
+    proposition: str
+    role: str | None = None
+    match: str | None = None
+    gap_reason: str | None = None
+    match_claim_id: str | None = None
+
+
 class ContextClaim(BaseModel):
     id: str
     ref: str
@@ -72,6 +97,9 @@ class ContextClaim(BaseModel):
     unit: str | None = None
     occurred_at: datetime | None = None
     evidence: list[ContextEvidence] = Field(default_factory=list)
+    proposition_role: str | None = None
+    final_reason: str | None = None
+    support_basis: ContextSupportBasis | None = None
 
 
 class ContextEntity(BaseModel):
@@ -111,6 +139,13 @@ class ContextVerification(BaseModel):
     coverage_gap: bool = False
     stale_verification: bool = False
     claims_fingerprint: str | None = None
+    based_on_claim_run_id: str | None = None
+    coverage_run_id: str | None = None
+    verification_run_id: str | None = None
+    verification_incomplete: bool = False
+    central_unverified: list[str] = Field(default_factory=list)
+    expected_central: list[ContextExpectedCentral] = Field(default_factory=list)
+    decision_by_claim_id: dict[str, ContextClaimDecision] = Field(default_factory=dict)
 
 
 class ArticleContext(BaseModel):

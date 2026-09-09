@@ -21,9 +21,10 @@ from app.schemas import ArticleContentUpdate, ArticleCreate
 from app.schemas.writing import ArticleDraft
 from app.services.article_context import build_article_context, last_success_run
 from app.services.article_service import ArticleService
+from app.services.evidence_snapshot import capture_evidence_snapshot, persist_snapshot_fields
 from app.services.material_change import detect_material_change, snapshot_claims
 from app.services.pipeline_lock import WRITING_STAGE, is_write_audit_publish_busy
-from app.services.verification_outcome import compatible_verification_pair, writing_evidence_snapshot
+from app.services.verification_outcome import pair_from_runs
 
 WRITING_ROLE = "writing"
 
@@ -165,7 +166,19 @@ class WritingService:
             base["material_reasons"] = change.reasons
             return base
 
-        article_context = self._article_context(event)
+        pipeline_runs = self.pipeline.list_for_event(event.id, limit=50)
+        article_context = build_article_context(
+            event,
+            entities=self.entities.list_for_event(event.id),
+            pipeline_runs=pipeline_runs,
+            max_claims=self.settings.max_writing_claims_per_event,
+            max_sources=self.settings.max_writing_sources_per_event,
+            excerpt_chars=self.settings.writing_excerpt_chars,
+            max_source_contexts=self.settings.max_writing_source_contexts,
+            source_context_chars=self.settings.writing_source_context_chars,
+        )
+        claim_run, verify_run = pair_from_runs(list(pipeline_runs))
+        evidence_snapshot = capture_evidence_snapshot(article_context, claim_run, verify_run)
         llm = self.llm or get_structured_provider(ModelRole.WRITING)
         bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
         draft = llm.generate_structured(
@@ -203,6 +216,7 @@ class WritingService:
             if article.status == ArticleStatus.PUBLISHED:
                 article.status = ArticleStatus.DRAFT
             self.session.flush()
+        evidence_snapshot["version"] = article.current_version
         base.update(
             {
                 "article_id": str(article.id),
@@ -213,8 +227,7 @@ class WritingService:
                 "material_reasons": change.reasons,
             }
         )
-        claim_run, verify_run = compatible_verification_pair(self.session, event.id)
-        base.update(writing_evidence_snapshot(claim_run, verify_run, version=article.current_version))
+        base.update(persist_snapshot_fields(evidence_snapshot))
         return base
 
     def _can_write(self, article) -> bool:
@@ -251,12 +264,26 @@ class WritingService:
         if coverage_gap:
             reminder += (
                 "Hay un hueco de cobertura: el título o el lead del suceso no tiene un Claim "
-                "equivalente persistido. No afirmes event.working_title como hecho de Sin Línea.\n\n"
+                "equivalente persistido. No afirmes event.working_title como hecho de Sin Línea. "
+                "Atribuir no cierra el hueco.\n\n"
+            )
+        if getattr(article_context.verification, "stale_verification", False):
+            reminder += (
+                "La verificación está desparejada o ausente. No afirmes hechos centrales como "
+                "comprobados de Sin Línea.\n\n"
+            )
+        if getattr(article_context.verification, "verification_incomplete", False) or getattr(
+            article_context.verification, "central_unverified", None
+        ):
+            reminder += (
+                "Hay claims centrales pendientes de verificación. No los presentes como acreditados.\n\n"
             )
         return (
             "Redactá a partir de este ArticleContext JSON. "
             "El suceso a cubrir es event.working_title; no conviertas otro hecho del mismo día en el titular. "
             "No uses fuentes ni claims que no estén listados. "
+            "source_contexts son narrativa de lo ya cubierto: no introduzcas hechos materiales nuevos. "
+            "Atribuir ('según X') solo si hay claim/evidencia evaluada de que esa fuente dijo o reportó lo afirmado. "
             "En body_blocks usá claim_refs C1/C2 del context, nunca UUIDs.\n"
             + reminder
             + "\n"

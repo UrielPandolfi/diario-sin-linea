@@ -504,6 +504,19 @@ class PipelineRunRepository:
         )
         return self.session.scalars(stmt).first()
 
+    def latest_completed(self, event_id: UUID, stage: str) -> PipelineRun | None:
+        stmt = (
+            select(PipelineRun)
+            .where(
+                PipelineRun.event_id == event_id,
+                PipelineRun.stage == stage,
+                PipelineRun.status.in_((PipelineStatus.SUCCESS, PipelineStatus.FAILED)),
+            )
+            .order_by(PipelineRun.started_at.desc())
+            .limit(1)
+        )
+        return self.session.scalars(stmt).first()
+
     def count_running_by_stage(self) -> dict[str, int]:
         stmt = (
             select(PipelineRun.stage, func.count())

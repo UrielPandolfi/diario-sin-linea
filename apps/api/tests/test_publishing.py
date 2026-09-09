@@ -31,6 +31,7 @@ from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.writing_service import WRITING_STAGE, WritingService
+from tests.editorial_snapshot import persist_version_snapshot
 
 
 def _source(session: Session, **overrides):
@@ -124,6 +125,7 @@ def _seed_draft(session: Session, *, locality: str = "Rosario", headline: str = 
         )
     )
     session.flush()
+    persist_version_snapshot(session, event, article)
     return event, article, claim
 
 

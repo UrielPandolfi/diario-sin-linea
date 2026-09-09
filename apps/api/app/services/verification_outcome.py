@@ -232,14 +232,26 @@ def writing_evidence_snapshot(
     claim_meta = (claim_run.metadata_json if claim_run is not None else None) or {}
     verify_meta = (verify_run.metadata_json if verify_run is not None else None) or {}
     fingerprint = verify_meta.get("claims_fingerprint") or claim_meta.get("claims_fingerprint")
+    coverage = verify_meta.get("coverage") or claim_meta.get("coverage")
+    budget = verify_meta.get("verification_budget") if isinstance(verify_meta.get("verification_budget"), dict) else {}
+    central_unverified = list(budget.get("central_unverified") or []) if budget else []
+    incomplete = bool(
+        verify_meta.get("verification_incomplete")
+        or (isinstance(coverage, dict) and coverage.get("verification_incomplete"))
+        or central_unverified
+    )
     return {
         "contract_version": CONTRACT_VERSION,
         "coverage_run_id": str(claim_run.id) if claim_run is not None else None,
         "verification_run_id": str(verify_run.id) if verify_run is not None else None,
+        "based_on_claim_run_id": verify_meta.get("based_on_claim_run_id"),
         "claims_fingerprint": fingerprint,
         "evaluated_claims": verify_meta.get("evaluated_claims") or [],
         "decision_by_claim_id": verify_meta.get("decision_by_claim_id") or {},
-        "coverage": verify_meta.get("coverage") or claim_meta.get("coverage"),
+        "coverage": coverage,
+        "verification_budget": budget or None,
+        "verification_incomplete": incomplete,
+        "central_unverified": central_unverified,
         "stale_verification": verify_run is None and bool(claim_meta.get("claims_fingerprint")),
         "version": version,
     }

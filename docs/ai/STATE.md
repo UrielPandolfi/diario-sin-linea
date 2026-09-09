@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-08. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto. Etapa 1 de claims/evidencia/verificación (`editorial-evidence-1`) está en código y tests con dobles; etapa 2 (auditor, UI, bloqueo de publish) **no**.
+Revisión: 2026-09-09. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto. Etapa 1 (`editorial-evidence-1`) y etapa 2 (snapshot de writing, invariantes de audit, bloqueo de publish) están en código y tests con dobles. UI Admin de `support_basis`/coverage y eval paga **no**.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -12,16 +12,18 @@ Ingesta RSS (HTML no soportado en `ingestion_service.py`). Gate editorial en det
 
 Admin Track A: `/admin/publications` (estado actual vs ejecuciones de período), costos estimados con libro/snapshot (`0014_llm_costs`), procedencia de cuerpo (`body_source`), skip de cuota persistido, fallo histórico ≠ fallo abierto. Atribución 1:1 de `LlmUsage`; backfill de embeddings separado.
 
-Casos de lectores y revisión editorial: routers en `main.py`, migración `0013_reader_cases`, UI `/contacto`, `/seguimiento/[token]`, `/admin/cases`. **No** pasan por Celery.
+Casos de lectores y revisión editorial: routers en `main.py`, migración `0013_reader_cases`, UI `/contacto`, `/seguimiento/[token]`, `/admin/cases`. **No** pasan por Celery. `EditorialService.revise` no usa el gate de audit/publish.
+
+Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `support_basis`, `verification_incomplete`, `central_unverified`) **antes** del LLM y lo ata a la versión. Audit lee ese snapshot (`evidence_snapshot_for_version`), no un `ArticleContext` reconstruido. Publish usa `latest_completed` de auditing y exige snapshot + `version_after` de **esa** versión.
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_editorial_evidence`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
+Backend: además de la suite previa, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
 
 ## Hallazgos de cableado (no decisiones)
 
 1. **Link no encola research.** `detect_event` solo llama `research_event` si `created` y hay `event_id`. Vincular o filtrar no reabre research→publish. **Track B:** no verificado ni reparado en A.
-2. **`AUTO_PUBLISH` no se lee** fuera de Settings. El path vivo publica por audit `passed` + no hold.
+2. **`AUTO_PUBLISH` no se lee** fuera de Settings. El path vivo publica por audit `passed` + no hold + gate de versión/snapshot.
 3. **`READY_FOR_REVIEW` no se asigna** en servicios.
 
 ## Track B — no resuelto al cerrar A
@@ -30,11 +32,11 @@ No se escribieron tests de `embedding_high`, Terra ni `level1_code` positivo. No
 
 Hasta B, “fuente agregada” >> “actualización publicada” es el cableado real. Dedup por embeddings/Voyage **no** quedó verificado en esta tarea.
 
-## Claims / verify — etapa 1 en código; etapa 2 no
+## Claims / verify / audit — etapas 1–2 en código; UI y eval no
 
-En código: contrato versionado en `metadata_json`, par claim↔verify, coverage/recovery, split de compuestos, packet claim-primero, independencia por `information_origin`, primaria auténtica de utterance. Tests de política con dobles (Alberto/Bregman, dos URLs misma fuente, par desparejado). **No** demuestran que Luna/Sol reales dejen de confundir proposiciones; eval con modelos reales queda fuera (`scripts/run_editorial_eval.py`).
+En código: contrato versionado en `metadata_json`, par claim↔verify, coverage/recovery, split de compuestos, packet claim-primero, independencia por `information_origin`, primaria auténtica de utterance. Tests de política con dobles (Alberto/Bregman extract-verify, y ahora write/audit/publish: gap, par desparejado, snapshot de versión, FAILED posterior). **No** demuestran que Luna/Sol reales dejen de confundir proposiciones; eval con modelos reales queda fuera (`scripts/run_editorial_eval.py`).
 
-Etapa 2 (siguiente, **no** implementada): issues de auditor sobre el snapshot del par; Admin UI de `support_basis` / coverage; **bloqueo** de publish (o de afirmar el título) si `coverage_gap` o `verification_incomplete`. El recordatorio Writing no es ese gate. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`.
+Etapa 3 (siguiente): Admin UI de `support_basis` / coverage; eval paga no corrida. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`.
 
 ## Parcial / stub / posible defecto
 

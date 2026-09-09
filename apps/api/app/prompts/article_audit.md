@@ -6,17 +6,21 @@ Antes de reportar un issue, relee el artículo completo (headline + summary + bo
 
 SUPPORTED no significa que cualquier formulación del claim pueda escribirse como verdad objetiva. El status indica evidencia coincidente para la afirmación persistida; todavía debés revisar framing, atribución, causalidad, superlativos, valoraciones, inferencias y generalizaciones en headline, summary y body (no solo en segmentos anotados).
 
-Revisá el draft contra el context:
+Revisá el draft contra el **snapshot de evidencia de esta versión** (no contra claims actuales ni un par más reciente):
 
-- hechos nuevos que no estén en claims ni en `source_contexts`; afirmaciones materialmente sensibles escritas como voz propia o hecho sin Claim (UNSUPPORTED_CLAIM)
+- hechos materiales nuevos que no estén en claims ni excerpts evaluados; “según X” no alcanza si esa atribución no está respaldada
 - números, nombres y fechas
 - atribuciones (SINGLE_SOURCE o UNCERTAIN material escrito como hecho de Sin Línea, sin atribución ni incertidumbre → ATTRIBUTION o UNSUPPORTED_CLAIM, MEDIUM o HIGH; CONFLICTING con ambos lados; usá `sources[].name` vía `source_ref`, no infieras el medio desde una URL)
+- una primaria auténtica única **sí** puede sostener “X dijo Y”; no justifica “varias fuentes independientes”
+- no recalcules el status: usá `decision_by_claim_id`, `support_basis` y `final_reason`
 - contradicciones internas
 - causalidad no respaldada (CAUSALITY) e inferencias no sostenidas
 - framing asimétrico, adjetivación sensacional y caracterizaciones no atribuidas
 - omisiones materiales de claims (no de excerpts sueltos)
 - repetición y claridad de la estructura
 - annotations de Claims en `body_blocks`
+- findings estructurales del payload: ya están decididos; no los marques passed=true ignorándolos
+- heuristic_signals: pistas de vigencia o plural de fuentes; respetá negación (“no está confirmado”), atribución (“según X, comenzó a regir”) y alcance de la cita. No las conviertas en HIGH por una palabra aislada.
 
 Caracterización no atribuida (UNATTRIBUTED_CHARACTERIZATION):
 
@@ -44,8 +48,9 @@ No marques (hechos ordinarios y secuencia factual):
 - “Tras los dichos de Milei, Brasil llamó a consultas a su embajador.” con ambos hechos SUPPORTED.
 - “Algunas de las fuentes consultadas describieron el episodio como uno de los conflictos bilaterales más graves de los últimos años.” (caracterización ya atribuida).
 - No exijas “según varias fuentes” delante de cada hecho confirmado.
-- Hechos ordinarios respaldados por `source_contexts` aunque no haya Claim: hora, lugar, secuencia, cifras secundarias de un documento. No marques “el martes en Carolina del Norte” ni “informó deudas por $98,08 millones” si esa cifra ya está en las fuentes y no es una afirmación materialmente sensible.
-- `source_contexts` no sustituyen un Claim para afirmaciones materialmente sensibles (declaraciones, acusaciones, causalidad, controversia, caracterizaciones que deban atribuirse, cifras cuya comprobación externa cambiaría la noticia) escritas como hecho o voz propia.
+- Hechos ordinarios respaldados por excerpts o claims evaluados: hora, lugar, secuencia, cifras secundarias de un documento. No marques “el martes en Carolina del Norte” ni “informó deudas por $98,08 millones” si esa cifra ya está en las fuentes evaluadas y no es una afirmación materialmente sensible.
+- `source_contexts` no sustituyen un Claim para afirmaciones materialmente sensibles (declaraciones, acusaciones, causalidad, controversia, caracterizaciones que deban atribuirse, vigencia de normas, estado procesal, cifras cuya comprobación externa cambiaría la noticia) escritas como hecho o voz propia.
+- “Según LN+” sobre un hecho que no está en el snapshot → UNSUPPORTED_CLAIM. No cierres un coverage_gap atribuyendo el hecho central.
 
 Annotations (`body_blocks`):
 

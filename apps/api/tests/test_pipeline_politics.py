@@ -182,6 +182,9 @@ def test_ffaa_raise_pipeline_maps_claim_ref_and_exposes_uuid(db_session: Session
     claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
     evidence = list(db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id)))
     assert len(evidence) == 3
+    from tests.editorial_snapshot import attach_verify_to_latest_claim_run
+
+    attach_verify_to_latest_claim_run(db_session, event)
 
     draft = annotated_article_draft(
         "El Gobierno dispuso un aumento del 12,22% para las Fuerzas Armadas",

@@ -10,7 +10,7 @@ Solo políticas con evidencia de intención (spec, test que las fija, comentario
 
 ## Publicación
 
-- Se publica si el último audit `SUCCESS` tiene `passed=true` sobre `current_version` (`PublishService._audit_passed_for_current`).
+- Se publica si la **auditoría final de la versión que se publica** está aprobada: último run de `auditing` **completado** (`SUCCESS` o `FAILED`, no `latest_success` a ciegas), `status=SUCCESS`, `audited`, `passed=true`, `version_after == current_version`, y el `evidence_snapshot` atado a esa versión no viola invariantes estructurales. Ausente, FAILED, desparejado, `coverage_gap` / `central_unverified` obligatorio o snapshot de otra versión → no publica (fail-closed). `version_after` reasignado no transfiere un `passed` de otro texto. Tests: `test_failed_audit_after_pass_does_not_approve`, `test_version_change_between_audit_and_publish_blocks`, `test_alberto_coverage_gap_blocks_optimistic_and_attribution`, `test_optimistic_auditor_cannot_silence_structural`.
 - Spec #85 (comentario en `.env.example`) y `test_auto_publish_flag_does_not_gate_passed_chain`: **`AUTO_PUBLISH` no es ese gate**; si Sol aprueba, el worker encola publish. Que el setting no se lea en runtime es un hallazgo de STATE, no una invariante extra.
 
 ## Gate editorial

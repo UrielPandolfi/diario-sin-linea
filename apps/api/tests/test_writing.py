@@ -312,6 +312,8 @@ def test_context_omits_html_and_event_body(db_session: Session) -> None:
     assert "no conviertas otro hecho del mismo día en el titular" in prompt
     assert "confirmed_claims" in prompt
     assert "status_after" in prompt
+    assert "expected_central" in prompt
+    assert "decision_by_claim_id" in prompt
     assert "source_contexts" in prompt
     assert "claim_refs" in prompt
     assert "C1" in prompt

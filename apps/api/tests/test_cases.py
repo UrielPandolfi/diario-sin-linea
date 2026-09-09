@@ -28,6 +28,7 @@ from app.services.event_service import EventService
 from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
+from tests.editorial_snapshot import persist_version_snapshot
 from tests.origin import ADMIN_ORIGIN
 
 
@@ -110,6 +111,7 @@ def _seed_published(session: Session, *, with_claims: bool = True):
             body_blocks=blocks,
         )
     )
+    persist_version_snapshot(session, event, article)
     AuditService(
         session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
     ).audit(event.id, trigger="test")
@@ -354,6 +356,7 @@ def test_editorial_revise_claims_conflict_history_and_hold(db_session: Session, 
         )
         article.status = ArticleStatus.DRAFT
         db_session.commit()
+        persist_version_snapshot(db_session, event, article)
         AuditService(
             db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
         ).audit(event.id, trigger="test")
