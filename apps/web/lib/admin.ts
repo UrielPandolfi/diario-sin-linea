@@ -189,7 +189,7 @@ export type AdminEvent = {
   started_at: string | null;
   pipeline_stage?: string | null;
   pipeline_run_status?: string | null;
-  tokens_total?: number;
+  tokens_total?: number | null;
 };
 
 export type AdminEventDetail = AdminEvent & {
@@ -241,6 +241,24 @@ export type AdminEventDetail = AdminEvent & {
       source_url: string | null;
       excerpt: string;
     }[];
+    presentation?: {
+      verification_label: string;
+      limitation: string | null;
+      coverage: string;
+      explanation: string | null;
+      evidence_detail: {
+        evidence_type: string;
+        stance: string;
+        name: string | null;
+        url: string | null;
+      }[];
+      basis_known: boolean;
+      demotion: string | null;
+      documents_consulted: number | null;
+      documents_reporting: number | null;
+      known_independent_count: number | null;
+      unknown_group_count: number | null;
+    };
   }[];
   article: {
     id: string;

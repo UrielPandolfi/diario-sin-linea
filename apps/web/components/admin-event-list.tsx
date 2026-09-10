@@ -34,7 +34,7 @@ export function AdminEventList({ events, empty }: AdminEventListProps) {
                       : ""
                   }`
                 : ""}
-              {typeof event.tokens_total === "number" && event.tokens_total > 0
+              {typeof event.tokens_total === "number"
                 ? ` · ${formatTokens(event.tokens_total)} tok`
                 : ""}
               {event.locality ? ` · ${event.locality}` : ""}

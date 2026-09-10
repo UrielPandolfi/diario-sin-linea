@@ -12,9 +12,9 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.text import normalize_name, usable_text
+from app.core.text import is_person_name_suffix, normalize_name, usable_text
 from app.core.usage_context import attribution_scope, update_usage_context, usage_scope
-from app.domain.enums import EventSourceRelation, PipelineStatus, SourceItemStatus
+from app.domain.enums import EntityType, EventSourceRelation, PipelineStatus, SourceItemStatus
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
 from app.models.event import EMBEDDING_DIMENSIONS
 from app.providers.base import EmbeddingProvider, ProviderNotConfiguredError, StructuredLLMProvider
@@ -494,6 +494,10 @@ class DetectionService:
                 continue
             key = (normalized, extracted.entity_type)
             entity = linked.get(key)
+            if entity is None and extracted.entity_type == EntityType.PERSON:
+                entity = _matching_person(linked, normalized)
+                if entity is not None:
+                    _prefer_longer_person_name(entity, extracted.name.strip(), linked)
             if entity is None:
                 entity = Entity(
                     name=extracted.name.strip(),
@@ -502,6 +506,8 @@ class DetectionService:
                 )
                 self.entities.add(entity)
                 self.session.flush()
+                linked[key] = entity
+            else:
                 linked[key] = entity
             role = (extracted.role or "mencionado")[:64]
             if (entity.id, role) in existing_roles:
@@ -527,6 +533,31 @@ class DetectionService:
             )
         self.events.upsert_embedding(event.id, vector, embedder.model)
         self.session.flush()
+
+
+def _matching_person(linked: dict, normalized: str):
+    for (name, entity_type), entity in linked.items():
+        if entity_type != EntityType.PERSON:
+            continue
+        if is_person_name_suffix(name, normalized):
+            return entity
+    return None
+
+
+def _prefer_longer_person_name(entity: Entity, incoming_name: str, linked: dict) -> None:
+    incoming = incoming_name.strip()
+    if not incoming:
+        return
+    current = entity.normalized_name or ""
+    incoming_norm = normalize_name(incoming)
+    if len(incoming_norm) <= len(current):
+        return
+    old_key = (entity.normalized_name, entity.entity_type)
+    entity.name = incoming
+    entity.normalized_name = incoming_norm
+    if old_key in linked:
+        linked.pop(old_key, None)
+    linked[(incoming_norm, entity.entity_type)] = entity
 
 
 def _is_transient(exc: BaseException) -> bool:

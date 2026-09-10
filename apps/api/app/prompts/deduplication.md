@@ -10,4 +10,5 @@ Devolvé JSON:
 - reason: una frase concreta
 
 EXISTING_EVENT solo si es el mismo hecho (mismo suceso, no un tema parecido).
+Dos PERSON del mismo suceso pueden aparecer como nombre completo vs apellido (Myriam Bregman / Bregman): eso no las hace hechos distintos.
 Si hay duda razonable de que sean hechos distintos, NEW_EVENT.

@@ -2,43 +2,43 @@
 
 Reemplazar este archivo al cerrar una tarea o al continuar en otro chat. No es un diario de sesiones.
 
-**Fecha:** 2026-09-09  
-**Tarea:** Redacción, auditoría y bloqueo de publicación (etapa 2). Contrato de evidencia de etapa 1 atado a la versión. Sin UI de coverage, sin eval paga, sin migración.
+**Fecha:** 2026-09-10  
+**Tarea:** Etapa 3 — tarjeta pública de fuentes (`status` + `support_basis` + `demotion`). Sin migración, sin eval paga, sin republicar notas.
 
 ## Objetivo de este chat
 
-Writing captura el contrato de entrada **antes** del LLM. Audit y publish operan sobre ese snapshot de la versión. Invariantes estructurales (par, `coverage_gap`, centrales no verificados) bloquean sin heurística de texto. Atribuir no cierra un gap ni valida un hecho inventado.
+Que el popover público muestre el contrato de evidencia (consultados vs respaldan, reprints ≠ orígenes) y no `source_count` / `llm_reason`. Histórico sin par: cobertura desconocida.
 
 ## Avances
 
-- Snapshot: `evidence_snapshot.py` (`capture` antes de `generate_structured`, `evidence_snapshot_for_version`, no caer al par vigente).
-- Context enriquecido: `expected_central`, `decision_by_claim_id`, `support_basis`, `verification_incomplete`, `central_unverified`. Prompts writing/audit: `source_contexts` no autorizan hechos materiales nuevos; atribución solo con evidencia evaluada.
-- `audit_policy.py`: estructurales vs semánticos; `merge_audit_result` sobrevive a LLM `passed=true`/`issues=[]`. Rewrite no corre si hay bloqueo estructural. Cap 2 intacto.
-- Publish: `latest_completed` (SUCCESS|FAILED); exige `audited`, `passed`, `version_after` y snapshot de **esa** versión. FAILED posterior no recicla SUCCESS. Locks write/audit/publish existentes.
-- Tests: `test_audit_policy.py` (Alberto, paráfrasis, `central_unverified`, par desparejado, secundario diferido, SINGLE_SOURCE, snapshot post-write, cambio de versión, FAILED posterior, atribución inventada, Bregman vía LLM). Seeds de audit/publish/cases/public con snapshot de versión.
+- `claim_card_presentation.py` arma el DTO; `compact_public_claims` y Admin claims lo serializan. El frontend no recalcula independencia.
+- Popover: labels editoriales, resultado+limitación, cobertura en el dialog, `<details>` por tipo. `SINGLE_SOURCE` ya no se pinta como “UNA FUENTE”.
+- Admin: `INITIAL` = inicial (ingesta); `tokens_total` null si `calls==0`; claims con `verification_label` + `demotion`.
+- Dedupe PERSON sufijo intra-evento; prompt de extracción: GOVERNMENT≠medio, organismo≠norma, `short_summary` sin invertir cualificadores.
+- Script de lectura `scripts/list_legacy_single_source_cards.py` (no publica ni crea Correction).
 
 ## Limitaciones
 
-- Eval real Luna/Sol **no** corrida. UI Admin de `support_basis`/coverage **no**. Track B de detección/link sigue abierto. RELATED_CONTEXT no se adjunta.
+Eval real no corrida. Dashboard Admin de `expected_central` diferido. Track B sigue abierto. Notas live: el serializer actualiza la card; Correction solo si el texto es material.
 
-## Pendientes (etapa 3)
+## Pendientes
 
-Ver [`docs/mvp/editorial-02-handoff.md`](../mvp/editorial-02-handoff.md).
+Tratamiento de notas antiguas (revisar salida del script; reaudit del texto ≠ cambiar copy). Track B. Eval paga. Coverage Admin completa.
 
 ## Archivos relevantes
 
-`services/{writing,audit,publish}_service.py`, `services/audit_policy.py`, `services/evidence_snapshot.py`, `services/article_context.py`, `schemas/auditing.py`, `schemas/writing.py`, `prompts/{article_writing,article_audit}.md`, `tests/test_audit_policy.py`, `tests/editorial_snapshot.py`.
+`services/claim_card_presentation.py`, `services/feed_ranking.py`, `features/article/article-body.tsx`, `api/admin.py`, `prompts/event_extraction.md`, `tests/test_claim_card_presentation.py`.
 
 ## Pruebas
 
 Desde `apps/api` (Postgres+Redis):
 
 ```
-python -m pytest
+python -m pytest tests/test_claim_card_presentation.py tests/test_editorial_label_policy.py tests/test_editorial_evidence.py tests/test_detection.py tests/test_llm_usage.py tests/test_prompt_payloads.py
 ```
 
-389 passed (2026-09-09). Incluye `test_audit_policy` y la suite previa de etapa 1.
+Frontend: `npm run lint` y `npm run typecheck` en `apps/web`.
 
 ## Siguiente paso
 
-Etapa 3: UI de coverage/`support_basis`; eval paga con alcance/costo explícitos. No reintroducir «dos dominios = independientes». No sustituir el snapshot de la versión por el par vigente.
+Correr el script de notas `SINGLE_SOURCE` con varios `source_item`. Si el cuerpo/titular sigue mal, `EditorialService.revise`; si solo la card mentía, el serializer basta. No declarar el MVP aprobado.

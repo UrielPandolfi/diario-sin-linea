@@ -281,11 +281,41 @@ def test_compact_public_claims_includes_editorial_payload(db_session: Session) -
                 "selected": [{"claim_id": cid, "reasons": ["policy:documento"]}],
                 "skipped_search": [],
                 "primary_source_supports_claim": {cid: True},
-                "sol": [{"claim_id": cid, "status_after": "SUPPORTED", "unresolved": False, "reason": "primaria"}],
+                "sol": [
+                    {
+                        "claim_id": cid,
+                        "status_after": "SUPPORTED",
+                        "unresolved": False,
+                        "reason": "primaria",
+                        "llm_reason": "varias fuentes independientes confirman",
+                    }
+                ],
+                "decision_by_claim_id": {
+                    cid: {
+                        "claim_id": cid,
+                        "status": "SUPPORTED",
+                        "unresolved": False,
+                        "llm_reason": "varias fuentes independientes confirman",
+                        "support_basis": {
+                            "known_independent_count": 2,
+                            "unknown_group_count": 0,
+                            "documents_consulted": 1,
+                            "documents_supporting": 1,
+                            "demotion": "none",
+                        },
+                    }
+                },
             },
         )
     )
     db_session.flush()
     rows = compact_public_claims(db_session, event)
+    from app.services.claim_card_presentation import contains_llm_reason
+
     assert rows[0]["editorial_labels"] == ["CHECKED"]
     assert rows[0]["false_assertions"] == []
+    assert "llm_reason" not in (rows[0].get("verification") or {})
+    assert rows[0]["verification"] is None or "reason" not in (rows[0]["verification"] or {})
+    assert not contains_llm_reason(rows)
+    assert rows[0]["presentation"]["verification_label"] == "Corroborado"
+    assert rows[0]["presentation"]["basis_known"] is True

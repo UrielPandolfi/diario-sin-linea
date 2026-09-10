@@ -1,9 +1,10 @@
 import time
 from typing import Any, TypeVar
 
-from openai import BadRequestError, OpenAI
+from openai import BadRequestError, RateLimitError, OpenAI
 from pydantic import BaseModel, ValidationError
 
+from app.providers.rate_limit import with_rate_limit_retry
 from app.providers.structured_format import format_schema_retry_feedback, openai_json_schema_format
 
 T = TypeVar("T", bound=BaseModel)
@@ -45,7 +46,7 @@ class OpenAIStructuredProvider:
         if client is not None:
             self.client = client
         else:
-            kwargs: dict = {"api_key": api_key}
+            kwargs: dict = {"api_key": api_key, "max_retries": 0}
             if base_url:
                 kwargs["base_url"] = base_url
             self.client = OpenAI(**kwargs)
@@ -108,9 +109,16 @@ class OpenAIStructuredProvider:
         raise last_error or RuntimeError("structured output failed")
 
     def _create_completion(self, create_kwargs: dict) -> tuple[Any, int]:
+        return with_rate_limit_retry(lambda: self._create_completion_once(create_kwargs))
+
+    def _create_completion_once(self, create_kwargs: dict) -> tuple[Any, int]:
         started = time.perf_counter()
         try:
             response = self.client.chat.completions.create(**create_kwargs)
+        except RateLimitError:
+            failed_ms = int((time.perf_counter() - started) * 1000)
+            self._record_failed_attempt(duration_ms=failed_ms)
+            raise
         except BadRequestError as exc:
             failed_ms = int((time.perf_counter() - started) * 1000)
             self._record_failed_attempt(duration_ms=failed_ms)
@@ -132,7 +140,12 @@ class OpenAIStructuredProvider:
             if not stripped:
                 raise
             started = time.perf_counter()
-            response = self.client.chat.completions.create(**create_kwargs)
+            try:
+                response = self.client.chat.completions.create(**create_kwargs)
+            except RateLimitError:
+                failed_ms = int((time.perf_counter() - started) * 1000)
+                self._record_failed_attempt(duration_ms=failed_ms)
+                raise
         duration_ms = int((time.perf_counter() - started) * 1000)
         return response, duration_ms
 

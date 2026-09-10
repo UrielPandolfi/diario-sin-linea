@@ -259,6 +259,60 @@ def test_entities_are_not_merged_across_events(db_session: Session) -> None:
     assert entity_count == 2
 
 
+def test_person_suffix_unifies_inside_the_same_event(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/bregman",
+        title="Bregman habló",
+        body="Myriam Bregman habló en el recinto",
+        content_hash="brg",
+    )
+    short = ExtractedEntity(name="Bregman", entity_type=EntityType.PERSON, role="protagonista")
+    full = ExtractedEntity(name="Myriam Bregman", entity_type=EntityType.PERSON, role="protagonista")
+    llm = FakeStructuredLLM(
+        {
+            "EventCandidate": _candidate(
+                what_happened="Myriam Bregman habló en el recinto",
+                short_summary="Bregman habló en el recinto",
+                entities=[short, full],
+            )
+        }
+    )
+    service = DetectionService(db_session, light_llm=llm, embeddings=FakeEmbeddingProvider())
+    result = service.detect(item.id)
+    assert result["created"] is True
+    names = list(db_session.execute(text("SELECT name FROM entities")).scalars().all())
+    assert names == ["Myriam Bregman"]
+
+
+def test_juan_prefix_is_not_a_person_suffix(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://www.ejemplo.test/juan",
+        title="Declaró Pérez",
+        body="Juan Pérez habló",
+        content_hash="jp",
+    )
+    first = ExtractedEntity(name="Juan", entity_type=EntityType.PERSON, role="protagonista")
+    full = ExtractedEntity(name="Juan Pérez", entity_type=EntityType.PERSON, role="testigo")
+    llm = FakeStructuredLLM(
+        {
+            "EventCandidate": _candidate(
+                what_happened="Juan Pérez habló del caso",
+                entities=[first, full],
+            )
+        }
+    )
+    service = DetectionService(db_session, light_llm=llm, embeddings=FakeEmbeddingProvider())
+    service.detect(item.id)
+    names = set(db_session.execute(text("SELECT name FROM entities")).scalars().all())
+    assert names == {"Juan", "Juan Pérez"}
+
+
 def test_content_update_of_same_item_does_not_create_another_event(db_session: Session) -> None:
     source = _source(db_session)
     items = SourceItemService(db_session)
@@ -667,3 +721,13 @@ def test_missing_ultra_config_uses_light_processing(db_session: Session, monkeyp
     result = DetectionService(db_session, embeddings=FakeEmbeddingProvider()).detect(item.id)
     assert result["created"] is True
     assert light.calls == ["EventCandidate"]
+
+
+def test_person_name_suffix_is_lastname_not_prefix() -> None:
+    from app.core.text import is_person_name_suffix
+
+    assert is_person_name_suffix("Bregman", "Myriam Bregman")
+    assert is_person_name_suffix("Myriam Bregman", "Bregman")
+    assert is_person_name_suffix("Bregman", "Myriam Bregman") is True
+    assert not is_person_name_suffix("Juan", "Juan Pérez")
+    assert not is_person_name_suffix("Juan Pérez", "Ana Pérez")

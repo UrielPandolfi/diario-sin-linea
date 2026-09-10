@@ -16,6 +16,7 @@ from app.core.usage_context import bind_model_role, usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
 from app.models import Article, Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
+from app.providers.rate_limit import is_quota_error, is_transient_rate_limit, openai_error_code
 from app.providers.registry import ModelRole, get_structured_provider
 from app.repositories import ArticleRepository, EntityRepository, PipelineRunRepository
 from app.schemas import ArticleContentUpdate
@@ -118,13 +119,28 @@ class AuditService:
         except ProviderNotConfiguredError as exc:
             return self._fail(run, event, original_status, str(exc))
         except Exception as exc:
-            return self._fail(run, event, original_status, str(exc))
+            extra: dict[str, Any] = {"technical_ok": False, "passed": None, "audited": False}
+            if is_quota_error(exc):
+                extra["reason"] = "insufficient_quota"
+            elif is_transient_rate_limit(exc) or openai_error_code(exc) == "rate_limit_exceeded":
+                extra["reason"] = "rate_limit_exceeded"
+            return self._fail(run, event, original_status, str(exc), extra=extra)
 
-    def _fail(self, run: PipelineRun, event: Event, original_status: Any, message: str) -> dict:
+    def _fail(
+        self,
+        run: PipelineRun,
+        event: Event,
+        original_status: Any,
+        message: str,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> dict:
         run.status = PipelineStatus.FAILED
         run.error_message = message
         run.finished_at = utc_now()
         event.status = original_status
+        meta = {**(run.metadata_json or {}), **(extra or {})}
+        run.metadata_json = meta
         self.session.flush()
         self.session.commit()
         return {
@@ -132,6 +148,8 @@ class AuditService:
             "event_id": str(event.id),
             "audited": False,
             "error": message,
+            "passed": None,
+            **{key: meta[key] for key in ("reason", "technical_ok") if key in meta},
         }
 
     def _load_event(self, event_id: UUID) -> Event | None:
@@ -190,9 +208,11 @@ class AuditService:
         while True:
             bind_model_role(ModelRole.AUDITING.value, provider=self.settings.auditing_provider)
             structural = structural_findings(snapshot, article)
+            user_prompt = self._audit_user_prompt(article_context, article, snapshot, structural)
+            self.session.commit()
             llm_result = auditor.generate_structured(
                 system_prompt=load_prompt("article_audit.md"),
-                user_prompt=self._audit_user_prompt(article_context, article, snapshot, structural),
+                user_prompt=user_prompt,
                 schema=ArticleAuditResult,
             )
             result = normalize_audit_result(llm_result, structural=structural)
@@ -247,9 +267,11 @@ class AuditService:
             bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
             if article_context is None:
                 raise RuntimeError("article_context_missing_for_rewrite")
+            rewrite_prompt = self._rewrite_user_prompt(article_context, article, rewrite_issues)
+            self.session.commit()
             draft = writer.generate_structured(
                 system_prompt=load_prompt("article_writing.md"),
-                user_prompt=self._rewrite_user_prompt(article_context, article, rewrite_issues),
+                user_prompt=rewrite_prompt,
                 schema=ArticleDraft,
             )
             body, body_blocks = resolve_article_draft(

@@ -730,6 +730,21 @@ def test_sol_optimistic_keeps_policy_reason_and_resolved_false(db_session: Sessi
     assert decision["unresolved"] is False
     assert decision["llm_reason"] == sol_row["llm_reason"]
     assert decision["status"] == ClaimStatus.SINGLE_SOURCE.value
+    from app.services.claim_card_presentation import (
+        contains_llm_reason,
+        contradicts_single_source_independence,
+        presentation_for_claim,
+    )
+    from app.services.feed_ranking import compact_public_claims
+    from app.services.verification_outcome import verification_view_for_event
+
+    _run, view = verification_view_for_event(db_session, event.id)
+    card = presentation_for_claim(claim, view)
+    assert contradicts_single_source_independence(claim.status.value, card) is False
+    assert card.verification_label != "Corroborado"
+    rows = compact_public_claims(db_session, event)
+    assert not contains_llm_reason(rows)
+    assert (rows[0].get("verification") or {}).get("reason") is None
 
 
 def test_attributed_report_is_not_authentic_primary() -> None:

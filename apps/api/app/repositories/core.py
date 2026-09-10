@@ -643,15 +643,19 @@ class LlmUsageRepository:
             for role, stage, prompt, completion, total, calls in self.session.execute(stmt)
         ]
 
-    def totals_for_events(self, event_ids: list[UUID]) -> dict[UUID, int]:
+    def totals_for_events(self, event_ids: list[UUID]) -> dict[UUID, dict[str, int]]:
         if not event_ids:
             return {}
         stmt = (
-            select(LlmUsage.event_id, func.coalesce(func.sum(LlmUsage.total_tokens), 0))
+            select(LlmUsage.event_id, func.coalesce(func.sum(LlmUsage.total_tokens), 0), func.count())
             .where(LlmUsage.event_id.in_(event_ids))
             .group_by(LlmUsage.event_id)
         )
-        return {event_id: int(total) for event_id, total in self.session.execute(stmt) if event_id}
+        return {
+            event_id: {"total_tokens": int(total), "calls": int(calls)}
+            for event_id, total, calls in self.session.execute(stmt)
+            if event_id
+        }
 
 
 class ArticleRepository:

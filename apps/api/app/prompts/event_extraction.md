@@ -11,8 +11,11 @@ Devolvé JSON con este esquema:
 - location_confidence: número 0–1 según cuán clara es la ubicación en el texto (1 = localidad explícita, 0 = no se puede saber)
 - entities: lista de {name, entity_type, role}
   - entity_type: PERSON | ORGANIZATION | COMPANY | GOVERNMENT | PLACE | OTHER
+  - GOVERNMENT es un organismo del Estado (ministerio, municipio, Congreso, Boletín Oficial, ente regulador). Un medio de prensa, diario, portal, radio o canal NO es GOVERNMENT; usá ORGANIZATION o COMPANY.
   - role: protagonista | lugar | organismo | testigo | mencionado
-- short_summary: resumen corto, informativo, sin juicio
+  - role organismo: solo actores institucionales (ministerio, ente, poder del Estado). Una ley, un régimen penal, un decreto o una norma NO van con role organismo.
+  - Si una PERSON es solo el apellido u otro sufijo tokenizado de otra PERSON del mismo texto (p. ej. Bregman y Myriam Bregman), listá una sola, la forma más completa.
+- short_summary: resumen corto, informativo, sin juicio. No inviertas cualificadores de edad, alcance o vigencia. Si el texto dice que algo no se aplica a menores, o que rige desde una fecha, el resumen no debe afirmar lo contrario. Este resumen alimenta la investigación y la redacción.
 - editorial_scope: uno de
   - GENERAL_NEWS: suceso factual que no es deporte de fandom ni publicidad
   - SPORTS_ONLY: resultado, fixture, transferencia, crónica de partido o contenido de hinchada sin impacto público/político

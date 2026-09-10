@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from openai import RateLimitError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,7 @@ from app.main import app
 from app.models import Article, ArticleVersion, Claim, ClaimEvidence, PipelineRun
 from app.providers.base import ProviderNotConfiguredError
 from app.providers.fakes import FakeStructuredLLM
+from app.providers.openai_provider import OpenAIStructuredProvider
 from app.providers.registry import ModelRole, get_structured_provider
 from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
 from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSeverity, AuditIssueType
@@ -833,3 +836,120 @@ def test_audit_rewrite_remaps_claim_refs_to_uuid(db_session: Session) -> None:
     segment = article.body_blocks[0]["segments"][0]
     assert segment["claim_ids"] == [str(claim.id)]
     assert "claim_refs" not in segment
+
+
+def _openai_rate_limit(*, message: str, code: str = "rate_limit_exceeded", retry_after: str | None = "1") -> RateLimitError:
+    headers = {}
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    payload = {"error": {"message": message, "type": code, "code": code}}
+    response = httpx.Response(429, request=request, headers=headers, json=payload)
+    return RateLimitError(message, response=response, body=payload)
+
+
+def _openai_completion(content: str):
+    return SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+    )
+
+
+def _openai_audit_client(outcomes: list):
+    pending = list(outcomes)
+
+    class Completions:
+        def create(self, **kwargs):
+            item = pending.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return _openai_completion(item)
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+
+
+def test_rate_limit_after_rewrite_retries_call_without_new_version(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    monkeypatch.setattr("app.providers.rate_limit.get_settings", lambda: SimpleNamespace(job_max_retries=3))
+    monkeypatch.setattr("app.providers.rate_limit._jitter", lambda wait: 0.0)
+    delays: list[float] = []
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", delays.append)
+    event, article = _seed_draft(db_session)
+    version_before = article.current_version
+    client = _openai_audit_client(
+        [
+            _fail_audit().model_dump_json(),
+            _draft(headline="Draft corregido").model_dump_json(),
+            _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
+            _pass_audit().model_dump_json(),
+        ]
+    )
+    llm = OpenAIStructuredProvider(api_key="k", model="gpt-4o", client=client)
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert result["passed"] is True
+    assert result["rewrite_count"] == 1
+    assert article.current_version == version_before + 1
+    assert article.headline == "Draft corregido"
+    assert delays == [20.0]
+    published = PublishService(db_session).publish(event.id, trigger="test")
+    assert published["published"] is True
+
+
+def test_rate_limit_exhausted_after_rewrite_does_not_duplicate_or_publish(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    monkeypatch.setattr("app.providers.rate_limit.get_settings", lambda: SimpleNamespace(job_max_retries=1))
+    monkeypatch.setattr("app.providers.rate_limit._jitter", lambda wait: 0.0)
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", lambda _s: None)
+    event, article = _seed_draft(db_session)
+    client = _openai_audit_client(
+        [
+            _fail_audit().model_dump_json(),
+            _draft(headline="Draft corregido").model_dump_json(),
+            _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
+            _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
+        ]
+    )
+    llm = OpenAIStructuredProvider(api_key="k", model="gpt-4o", client=client)
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    runs = list(
+        db_session.scalars(
+            select(PipelineRun)
+            .where(PipelineRun.event_id == event.id, PipelineRun.stage == AUDITING_STAGE)
+            .order_by(PipelineRun.started_at)
+        )
+    )
+    assert result["audited"] is False
+    assert result.get("passed") is not True
+    assert result.get("reason") == "rate_limit_exceeded"
+    assert article.current_version == 2
+    assert article.headline == "Draft corregido"
+    assert runs[-1].status == PipelineStatus.FAILED
+    assert runs[-1].error_message
+    assert PublishService(db_session).publish(event.id, trigger="test")["reason"] == "audit_not_passed"
+
+
+def test_insufficient_quota_does_not_retry_or_count_as_editorial(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    delays: list[float] = []
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", delays.append)
+    event, article = _seed_draft(db_session)
+    version = article.current_version
+    client = _openai_audit_client(
+        [
+            _openai_rate_limit(
+                message="You exceeded your current quota",
+                code="insufficient_quota",
+                retry_after="1",
+            )
+        ]
+    )
+    llm = OpenAIStructuredProvider(api_key="k", model="gpt-4o", client=client)
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert delays == []
+    assert result["audited"] is False
+    assert result.get("reason") == "insufficient_quota"
+    assert article.current_version == version
+    assert PublishService(db_session).publish(event.id, trigger="test")["reason"] == "audit_not_passed"

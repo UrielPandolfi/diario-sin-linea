@@ -54,6 +54,22 @@ def token_set(value: str) -> set[str]:
     return {token for token in re.findall(r"[a-z0-9áéíóúüñ]{3,}", value.lower())}
 
 
+def name_tokens(value: str, *, min_len: int = 3) -> list[str]:
+    return [token for token in normalize_name(value).split() if len(token) >= min_len]
+
+
+def is_person_name_suffix(left: str, right: str) -> bool:
+    """True if one PERSON name is a token suffix of the other (Bregman ⊂ Myriam Bregman)."""
+    first, other = name_tokens(left), name_tokens(right)
+    if not first or not other or first == other:
+        return False
+    if len(first) < len(other):
+        return other[-len(first) :] == first
+    if len(other) < len(first):
+        return first[-len(other) :] == other
+    return False
+
+
 _PLACEHOLDER_VALUES = {"null", "none", "undefined", "nil", "n/a", "na", "unknown", "desconocido"}
 
 

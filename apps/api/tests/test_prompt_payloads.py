@@ -17,6 +17,16 @@ from app.services.detection_service import DetectionService
 from app.services.research_service import ResearchService
 
 
+def test_event_extraction_prompt_blocks_scope_and_outlet_mixups() -> None:
+    from app.core.prompts import load_prompt
+
+    prompt = load_prompt("event_extraction.md")
+    assert "Un medio de prensa" in prompt
+    assert "No inviertas cualificadores" in prompt
+    assert "role organismo" in prompt
+    assert "sufijo tokenizado" in prompt
+
+
 def test_relevance_prompt_omits_max_queries() -> None:
     svc = object.__new__(ResearchService)
     event = SimpleNamespace(

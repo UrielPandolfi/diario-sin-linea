@@ -1,7 +1,7 @@
 "use client";
 
-import { claimsForIds, claimStatusLabel, editorialLabelCopy } from "@/features/article/claim-status";
-import type { ArticleBodyBlock, ArticleClaim } from "@/lib/api/types";
+import { claimsForIds, editorialLabelCopy } from "@/features/article/claim-status";
+import type { ArticleBodyBlock, ArticleClaim, ClaimCardPresentation } from "@/lib/api/types";
 import { useEffect, useId, useRef, useState } from "react";
 
 function splitPlainBody(body: string): string[] {
@@ -153,8 +153,8 @@ function ClaimSegment({
         <span
           id={popoverId}
           role="dialog"
-          aria-label="Información del claim"
-          className="absolute left-0 top-full z-30 mt-1.5 w-72 max-w-[min(18rem,calc(100vw-2rem))] rounded-md border border-border bg-surface p-3 shadow-lg"
+          aria-label="Información de la afirmación"
+          className="absolute left-0 top-full z-30 mt-1.5 w-80 max-w-[min(20.5rem,calc(100vw-2rem))] rounded-md border border-border bg-surface p-3 shadow-lg"
           onMouseEnter={clearCloseTimer}
           onMouseLeave={scheduleClose}
         >
@@ -168,18 +168,12 @@ function ClaimSegment({
 }
 
 function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: boolean }) {
-  const verificationBits: string[] = [];
-  if (claim.verification?.status_after) {
-    verificationBits.push(claimStatusLabel(claim.verification.status_after));
-  }
-  if (claim.verification?.unresolved) {
-    verificationBits.push("Sin resolver");
-  }
-  if (claim.verification?.reason) {
-    verificationBits.push(claim.verification.reason);
-  }
+  const card = claim.presentation;
   const editorialLabels = claim.editorial_labels ?? [];
   const falseAssertions = claim.false_assertions ?? [];
+  const verificationLabel = card?.verification_label ?? "Independencia desconocida";
+  const coverage = card?.coverage ?? "No hay desglose de independencia para esta verificación.";
+  const details = card?.evidence_detail ?? [];
 
   return (
     <span className={divided ? "mt-3 block border-t border-border pt-3" : "block"}>
@@ -196,22 +190,60 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
           ))}
         </span>
       ) : null}
-      <span className="mt-1.5 block font-sans text-[11px] uppercase tracking-[0.12em] text-accent-petrol">
-        {claimStatusLabel(claim.status)}
-      </span>
-      <span className="mt-1 block font-sans text-xs text-muted">
-        {claim.source_count} {claim.source_count === 1 ? "fuente" : "fuentes"}
-        {" · "}
-        {claim.evidence_count} {claim.evidence_count === 1 ? "evidencia" : "evidencias"}
-      </span>
+      <span className="mt-1.5 block font-sans text-sm leading-snug text-accent-petrol">{verificationLabel}</span>
+      {card?.limitation ? (
+        <span className="mt-1 block font-sans text-xs leading-snug text-secondary">{card.limitation}</span>
+      ) : null}
+      <span className="mt-1.5 block font-sans text-xs leading-snug text-secondary">{coverage}</span>
+      {card?.explanation ? (
+        <span className="mt-1 block font-sans text-xs leading-snug text-secondary">{card.explanation}</span>
+      ) : null}
+      {claim.verification?.unresolved ? (
+        <span className="mt-1 block font-sans text-xs text-secondary">Sin resolver</span>
+      ) : null}
       {falseAssertions.map((row) => (
         <span key={row.source_item_id} className="mt-1.5 block font-sans text-xs leading-snug text-secondary">
           {row.source_name}: “{row.excerpt}”
         </span>
       ))}
-      {verificationBits.length > 0 ? (
-        <span className="mt-1.5 block font-sans text-xs leading-snug text-secondary">{verificationBits.join(" · ")}</span>
-      ) : null}
+      {details.length > 0 ? <EvidenceDetails details={details} documentNoun={card?.document_noun} /> : null}
     </span>
+  );
+}
+
+function EvidenceDetails({
+  details,
+  documentNoun,
+}: {
+  details: NonNullable<ClaimCardPresentation["evidence_detail"]>;
+  documentNoun?: string;
+}) {
+  const noun = documentNoun === "medios" ? "medios" : "documentos";
+  return (
+    <details
+      className="mt-2"
+      onClick={(event) => event.stopPropagation()}
+      onKeyDown={(event) => event.stopPropagation()}
+    >
+      <summary className="cursor-pointer font-sans text-xs text-accent-petrol">
+        Detalle de {noun} consultados
+      </summary>
+      <ul className="mt-1.5 list-disc space-y-1 pl-4">
+        {details.map((row, index) => (
+          <li key={`${row.url ?? row.name ?? index}-${row.evidence_type}`} className="font-sans text-xs leading-snug text-secondary">
+            <span className="text-primary">{row.stance}</span>
+            {row.name ? ` · ${row.name}` : ""}
+            {row.url ? (
+              <>
+                {" · "}
+                <a href={row.url} className="text-accent-petrol underline" target="_blank" rel="noreferrer">
+                  ver
+                </a>
+              </>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }

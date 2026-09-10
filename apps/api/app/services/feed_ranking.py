@@ -22,6 +22,11 @@ from app.models import (
     SourceItem,
 )
 from app.repositories import ArticleRepository, EventRepository
+from app.services.claim_card_presentation import (
+    presentation_for_claim,
+    public_presentation_payload,
+    public_verification_payload,
+)
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.verification_outcome import verification_view_for_event
 
@@ -113,26 +118,21 @@ def compact_public_claims(
 ) -> list[dict]:
     _run, view = verification_view_for_event(session, event.id)
     editorials = labels_for_event_claims(list(event.claims), view)
-    sol_by_id: dict[str, dict] = {}
-    for cid, sol in view.sol_by_id.items():
-        sol_by_id[cid] = {
-            "status_after": sol.get("status_after"),
-            "unresolved": sol.get("unresolved"),
-            "reason": sol.get("reason"),
-        }
     rows: list[dict] = []
     for claim in event.claims:
         if allowed_ids is not None and str(claim.id) not in allowed_ids:
             continue
         source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
+        card = presentation_for_claim(claim, view)
         payload = {
             "id": str(claim.id),
             "canonical_text": claim.canonical_text,
             "status": claim.status.value,
             "importance": claim.importance.value,
             "source_count": len(source_ids),
-            "evidence_count": len(claim.evidence),
-            "verification": sol_by_id.get(str(claim.id)),
+            "evidence_count": len(source_ids),
+            "presentation": public_presentation_payload(card),
+            "verification": public_verification_payload(view.sol_by_id.get(str(claim.id))),
         }
         payload.update(editorial_public_payload(editorials.get(str(claim.id))))
         rows.append(payload)

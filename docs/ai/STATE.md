@@ -1,12 +1,12 @@
 # Estado
 
-Revisión: 2026-09-09. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto. Etapa 1 (`editorial-evidence-1`) y etapa 2 (snapshot de writing, invariantes de audit, bloqueo de publish) están en código y tests con dobles. UI Admin de `support_basis`/coverage y eval paga **no**.
+Revisión: 2026-09-10. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto. Etapa 1 (`editorial-evidence-1`) y etapa 2 (snapshot de writing, invariantes de audit, bloqueo de publish) están en código y tests con dobles. Etapa 3 (tarjeta pública de evidencia / DTO de `support_basis`) está en código y tests de matriz; eval paga **no**. Dashboard Admin de `expected_central` queda diferido. 429 temporal de OpenAI en LLM estructurado se reintenta en el cliente (no en Celery ni en el SDK).
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → research → claims → verify → write → audit → publish (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`).
+Pipeline Celery: poll → detect → research → claims → verify → write → audit → publish (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`). Claims del artículo: `compact_public_claims` serializa el DTO de presentación (`claim_card_presentation`: `status` + `support_basis` + `demotion`); no `llm_reason` ni `sol.reason` como veredicto.
 
 Ingesta RSS (HTML no soportado en `ingestion_service.py`). Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
@@ -14,7 +14,7 @@ Admin Track A: `/admin/publications` (estado actual vs ejecuciones de período),
 
 Casos de lectores y revisión editorial: routers en `main.py`, migración `0013_reader_cases`, UI `/contacto`, `/seguimiento/[token]`, `/admin/cases`. **No** pasan por Celery. `EditorialService.revise` no usa el gate de audit/publish.
 
-Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `support_basis`, `verification_incomplete`, `central_unverified`) **antes** del LLM y lo ata a la versión. Audit lee ese snapshot (`evidence_snapshot_for_version`), no un `ArticleContext` reconstruido. Publish usa `latest_completed` de auditing y exige snapshot + `version_after` de **esa** versión.
+Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `support_basis`, `verification_incomplete`, `central_unverified`) **antes** del LLM y lo ata a la versión. Audit lee ese snapshot (`evidence_snapshot_for_version`), no un `ArticleContext` reconstruido. Publish usa `latest_completed` de auditing y exige snapshot + `version_after` de **esa** versión. Un 429 `rate_limit_exceeded` se reintenta en `OpenAIStructuredProvider` (`max_retries=0` en el SDK; tope `JOB_MAX_RETRIES` y presupuesto de espera derivado). `insufficient_quota` no se reintenta. Agotar deja `FAILED` técnico (`audited=false`); el historial de runs se conserva.
 
 ## Tests que existen (no = pasados ahora)
 
@@ -36,7 +36,7 @@ Hasta B, “fuente agregada” >> “actualización publicada” es el cableado 
 
 En código: contrato versionado en `metadata_json`, par claim↔verify, coverage/recovery, split de compuestos, packet claim-primero, independencia por `information_origin`, primaria auténtica de utterance. Tests de política con dobles (Alberto/Bregman extract-verify, y ahora write/audit/publish: gap, par desparejado, snapshot de versión, FAILED posterior). **No** demuestran que Luna/Sol reales dejen de confundir proposiciones; eval con modelos reales queda fuera (`scripts/run_editorial_eval.py`).
 
-Etapa 3 (siguiente): Admin UI de `support_basis` / coverage; eval paga no corrida. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`.
+Etapa 3 (tarjeta pública): DTO de `support_basis`/`demotion` en `compact_public_claims` y visor mínimo Admin del mismo DTO. Eval paga no corrida. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`. Dashboard Admin de `expected_central`/presupuesto **no**.
 
 ## Parcial / stub / posible defecto
 

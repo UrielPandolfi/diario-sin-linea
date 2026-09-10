@@ -35,6 +35,29 @@ export type FalseAssertion = {
   excerpt: string;
 };
 
+export type ClaimEvidenceDetail = {
+  evidence_type: string;
+  stance: string;
+  name: string | null;
+  url: string | null;
+};
+
+export type ClaimCardPresentation = {
+  verification_label: string;
+  limitation: string | null;
+  coverage: string;
+  explanation: string | null;
+  evidence_detail: ClaimEvidenceDetail[];
+  basis_known: boolean;
+  demotion: string | null;
+  documents_consulted: number | null;
+  documents_reporting: number | null;
+  known_independent_count: number | null;
+  unknown_group_count: number | null;
+  reprint_collapsed_count?: number | null;
+  document_noun?: string;
+};
+
 export type ArticleClaim = {
   id: string;
   canonical_text: string;
@@ -44,10 +67,11 @@ export type ArticleClaim = {
   evidence_count: number;
   editorial_labels?: string[];
   false_assertions?: FalseAssertion[];
+  presentation?: ClaimCardPresentation;
   verification: {
-    status_after: string | null;
-    unresolved: boolean | null;
-    reason: string | null;
+    unresolved?: boolean | null;
+    status_after?: string | null;
+    reason?: string | null;
   } | null;
 };
 
