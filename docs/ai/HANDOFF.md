@@ -3,42 +3,39 @@
 Reemplazar este archivo al cerrar una tarea o al continuar en otro chat. No es un diario de sesiones.
 
 **Fecha:** 2026-09-10  
-**Tarea:** Etapa 3 — tarjeta pública de fuentes (`status` + `support_basis` + `demotion`). Sin migración, sin eval paga, sin republicar notas.
+**Tarea:** Auditor lingüístico (payload mínimo) + claim/cobertura de la declaración de la jueza. Sin ampliar alcance, sin eval paga.
 
 ## Objetivo de este chat
 
-Que el popover público muestre el contrato de evidencia (consultados vs respaldan, reprints ≠ orígenes) y no `source_count` / `llm_reason`. Histórico sin par: cobertura desconocida.
+1. Sol solo detecta sesgo de lenguaje. El modelo no recibe ArticleContext, claims, Verification ni cobertura.
+2. La declaración de la jueza es un claim distinto de la resolución; excerpt literal del documento; cobertura incompleta si falta ese respaldo.
 
 ## Avances
 
-- `claim_card_presentation.py` arma el DTO; `compact_public_claims` y Admin claims lo serializan. El frontend no recalcula independencia.
-- Popover: labels editoriales, resultado+limitación, cobertura en el dialog, `<details>` por tipo. `SINGLE_SOURCE` ya no se pinta como “UNA FUENTE”.
-- Admin: `INITIAL` = inicial (ingesta); `tokens_total` null si `calls==0`; claims con `verification_label` + `demotion`.
-- Dedupe PERSON sufijo intra-evento; prompt de extracción: GOVERNMENT≠medio, organismo≠norma, `short_summary` sin invertir cualificadores.
-- Script de lectura `scripts/list_legacy_single_source_cards.py` (no publica ni crea Correction).
+- `article_audit.md` y `_audit_user_prompt`: titular, bajada, cuerpo, `body_blocks`. Rewrite conserva el cap y pide preservar datos/citas.
+- `structural_findings` + `merge_audit_result` siguen en código. Aprobar lenguaje ≠ certificar hechos.
+- Extract: split resolución vs dicho; `salvage_excerpt` si el excerpt del LLM no está en el cuerpo (sin relajar `excerpt_in_source`). Expected central del utterance no se cierra con la condena ni con la misma persona.
 
 ## Limitaciones
 
-Eval real no corrida. Dashboard Admin de `expected_central` diferido. Track B sigue abierto. Notas live: el serializer actualiza la card; Correction solo si el texto es material.
+No se llamó a un LLM real de auditoría. Track B sigue abierto.
 
 ## Pendientes
 
-Tratamiento de notas antiguas (revisar salida del script; reaudit del texto ≠ cambiar copy). Track B. Eval paga. Coverage Admin completa.
+Track B. Eval paga. Dashboard Admin de `expected_central`.
 
 ## Archivos relevantes
 
-`services/claim_card_presentation.py`, `services/feed_ranking.py`, `features/article/article-body.tsx`, `api/admin.py`, `prompts/event_extraction.md`, `tests/test_claim_card_presentation.py`.
+`prompts/article_audit.md`, `services/audit_service.py`, `services/claim_coverage.py`, `services/claim_service.py`, `prompts/claim_extraction.md`, `tests/test_audit.py`, `tests/test_editorial_evidence.py`.
 
 ## Pruebas
 
 Desde `apps/api` (Postgres+Redis):
 
 ```
-python -m pytest tests/test_claim_card_presentation.py tests/test_editorial_label_policy.py tests/test_editorial_evidence.py tests/test_detection.py tests/test_llm_usage.py tests/test_prompt_payloads.py
+python -m pytest tests/test_audit.py tests/test_audit_policy.py tests/test_editorial_evidence.py tests/test_verification_plan.py tests/test_claims.py
 ```
-
-Frontend: `npm run lint` y `npm run typecheck` en `apps/web`.
 
 ## Siguiente paso
 
-Correr el script de notas `SINGLE_SOURCE` con varios `source_item`. Si el cuerpo/titular sigue mal, `EditorialService.revise`; si solo la card mentía, el serializer basta. No declarar el MVP aprobado.
+No reabrir el auditor para hechos. Si la nota de la jueza ya está publicada, republicar solo si el texto o los claims de esa versión cambian.

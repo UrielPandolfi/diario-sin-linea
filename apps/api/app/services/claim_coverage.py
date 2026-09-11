@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from uuid import UUID
 
 from app.core.source_content import body_source_from_item
-from app.core.text import normalize_name, sha256_text, token_set
+from app.core.text import excerpt_in_source, normalize_name, sha256_text, token_set
 from app.core.urls import canonicalize_url
 from app.domain.enums import ClaimImportance, EventSourceRelation, EvidenceType
 from app.models import Claim, Event, SourceItem
@@ -79,6 +79,22 @@ _ACCUSATION_TRUTH_MARKERS = (
     "es culpable",
     "traicionó",
     "traiciono",
+)
+_JUDICIAL_MARKERS = (
+    "suspendió",
+    "suspendio",
+    "hizo lugar",
+    "medida cautelar",
+    "dictó sentencia",
+    "dicto sentencia",
+    "condenó a",
+    "condeno a",
+    "condenó al",
+    "condeno al",
+)
+_SAID_SPLIT_RE = re.compile(
+    r"\s+(?:y\s+)?(?:dijo|afirmó|afirmo|declaró|declaro|sostuvo|señaló|senalo|aseguró|aseguro)\b",
+    re.IGNORECASE,
 )
 _FRAME_SKIP = (
     "defendió a los delincuentes",
@@ -193,11 +209,18 @@ def proposition_role_for(claim: Claim | ExtractedClaim | str, claim_type: str | 
 
 def is_mixed_proposition(text: str, claim_type: str | None = None) -> bool:
     folded = normalize_name(text)
-    utterance = canonicalize_claim_type(claim_type) == "declaracion" or _has_any(folded, _UTTERANCE_MARKERS)
+    quote = bool(_QUOTE_RE.search(text or ""))
+    utterance = (
+        canonicalize_claim_type(claim_type) == "declaracion"
+        or _has_any(folded, _UTTERANCE_MARKERS)
+        or quote
+    )
     extra = _has_any(folded, _EFFECTIVE_MARKERS) or _has_any(folded, _SCOPE_MARKERS)
     existence = _has_any(folded, _EXISTENCE_MARKERS)
-    quote = bool(_QUOTE_RE.search(text or ""))
+    judicial = _has_any(normalize_name(_QUOTE_RE.sub(" ", text or "")), _JUDICIAL_MARKERS)
     if utterance and extra:
+        return True
+    if utterance and judicial:
         return True
     if existence and quote and _has_any(folded, _UTTERANCE_MARKERS):
         return True
@@ -229,7 +252,7 @@ def split_compound_extracted(raw: ExtractedClaim) -> list[ExtractedClaim]:
             )
         )
 
-    if _has_any(folded, _UTTERANCE_MARKERS) or canonicalize_claim_type(raw.claim_type) == "declaracion":
+    if _has_any(folded, _UTTERANCE_MARKERS) or canonicalize_claim_type(raw.claim_type) == "declaracion" or _QUOTE_RE.search(text):
         said = text
         if re.search(r"\s+y\s+", text) and _has_any(folded, _EFFECTIVE_MARKERS + _SCOPE_MARKERS):
             said = re.split(r"\s+y\s+", text, maxsplit=1)[0].strip()
@@ -237,6 +260,8 @@ def split_compound_extracted(raw: ExtractedClaim) -> list[ExtractedClaim]:
         said = re.split(r"(?i)\s+que el r[eé]gimen se aplica.*", said)[0].strip()
         if _has_any(normalize_name(said), _EFFECTIVE_MARKERS + _SCOPE_MARKERS):
             said = f"{raw.subject or 'La figura pública'} hizo una declaración pública"
+        if _has_any(folded, _JUDICIAL_MARKERS):
+            said = _utterance_span(text, raw.subject)
         _copy(
             canonical=said,
             claim_type="declaracion",
@@ -244,6 +269,16 @@ def split_compound_extracted(raw: ExtractedClaim) -> list[ExtractedClaim]:
             predicate="dijo",
             object_text=said,
         )
+    if _has_any(folded, _JUDICIAL_MARKERS):
+        ruling = _ruling_span(text)
+        if ruling and _has_any(normalize_name(ruling), _JUDICIAL_MARKERS):
+            _copy(
+                canonical=ruling,
+                claim_type="hecho",
+                subject=raw.subject,
+                predicate="resolucion",
+                object_text=ruling,
+            )
     if _has_any(folded, _EFFECTIVE_MARKERS):
         effective = "La norma entra en vigencia"
         if "mes" in folded:
@@ -306,11 +341,53 @@ def _act_bucket(text: str) -> str:
         return "effective_date"
     if _has_any(folded, _SCOPE_MARKERS):
         return "normative_scope"
+    if _has_any(folded, _JUDICIAL_MARKERS):
+        return "judicial_decision"
     if _has_any(folded, _UTTERANCE_MARKERS) or _QUOTE_RE.search(text or ""):
         return "utterance"
     if _has_any(folded, _ACCUSATION_TRUTH_MARKERS):
         return "accusation_truth"
     return "other"
+
+
+def _ruling_span(text: str) -> str:
+    ruling = _SAID_SPLIT_RE.split(text, maxsplit=1)[0]
+    ruling = re.sub(r"(?i)\s+y$", "", ruling).strip(" ,;:")
+    return ruling
+
+
+def _utterance_span(text: str, subject: str | None) -> str:
+    quoted = _QUOTE_RE.search(text or "")
+    who = (subject or "").strip() or "La jueza"
+    if quoted:
+        return f"{who} dijo: {quoted.group(0)}"
+    parts = _SAID_SPLIT_RE.split(text, maxsplit=1)
+    if len(parts) == 2:
+        tail = parts[1].strip(" :")
+        return f"{who} dijo {tail}".strip()
+    return text
+
+
+def _atomic_propositions(text: str) -> list[str]:
+    cleaned = " ".join((text or "").split())
+    if len(cleaned) < 12:
+        return []
+    spans: list[str] = []
+    for sentence in re.split(r"(?<=[.!?])\s+", cleaned):
+        sentence = sentence.strip()
+        if len(sentence) < 12:
+            continue
+        if is_mixed_proposition(sentence):
+            dummy = ExtractedClaim(
+                canonical_text=sentence,
+                claim_type="hecho",
+                importance=ClaimImportance.HIGH,
+                evidence=[],
+            )
+            spans.extend(part.canonical_text for part in split_compound_extracted(dummy) if part.canonical_text)
+        else:
+            spans.append(sentence)
+    return spans
 
 
 def propositions_equivalent(expected: str, claim_text: str, *, expected_role: PropositionRole | None = None) -> CoverageMatch:
@@ -364,13 +441,12 @@ def expected_centrals_from_event(event: Event) -> list[ExpectedCentral]:
             )
         )
 
-    _add(event.title_internal or "", CoverageSignal.TITLE)
+    for span in _atomic_propositions(event.title_internal or ""):
+        _add(span, CoverageSignal.TITLE)
     lead = _lead_text(event)
     if lead and normalize_name(lead) != normalize_name(event.title_internal or ""):
-        bucket = _act_bucket(lead)
-        if bucket != "other":
-            sentence = lead.split(".")[0].strip()
-            _add(sentence or lead[:240], CoverageSignal.LEAD)
+        for span in _atomic_propositions(lead):
+            _add(span, CoverageSignal.LEAD)
     return rows
 
 
@@ -516,16 +592,21 @@ def recover_from_source_body(
                 PropositionRole.UTTERANCE,
                 PropositionRole.EFFECTIVE_DATE,
                 PropositionRole.NORMATIVE_SCOPE,
-            }:
+            } and row.act != "judicial_decision":
                 continue
-            if propositions_equivalent(row.proposition, sentence, expected_role=row.role) == CoverageMatch.NONE:
-                if row.role == PropositionRole.EXISTENCE and "denuncia" not in normalize_name(sentence):
+            match = propositions_equivalent(row.proposition, sentence, expected_role=row.role)
+            if match == CoverageMatch.NONE:
+                if row.role == PropositionRole.EXISTENCE and "denuncia" in normalize_name(sentence):
+                    pass
+                else:
                     continue
             idx = sources.index(item) + 1
             recovered.append(
                 ExtractedClaim(
                     canonical_text=row.proposition,
-                    claim_type="hecho" if row.role == PropositionRole.EXISTENCE else "declaracion",
+                    claim_type="hecho"
+                    if row.role == PropositionRole.EXISTENCE or row.act == "judicial_decision"
+                    else "declaracion",
                     importance=ClaimImportance.HIGH,
                     subject=None,
                     predicate=row.act,
@@ -550,13 +631,51 @@ def _sentence_with_markers(body: str, proposition: str) -> str | None:
     sentences = re.split(r"(?<=[.!?])\s+", body)
     for sentence in sentences:
         folded = normalize_name(sentence)
-        if act != "other" and _act_bucket(sentence) != act and act not in folded:
-            if act == "existence" and "denuncia" not in folded and "denunciado" not in folded:
+        sent_act = _act_bucket(sentence)
+        if act != "other" and sent_act != "other" and act != sent_act:
+            if not (act == "existence" and "denuncia" in folded):
                 continue
         hits = sum(1 for token in folded_needles if token in folded)
         if hits >= min(3, max(1, len(folded_needles) // 4)) and len(sentence.strip()) >= 20:
             return sentence.strip()
     return None
+
+
+def salvage_excerpt(canonical: str, *blobs: str | None) -> str | None:
+    parts = tuple(part for part in blobs if part)
+    if not canonical.strip() or not parts:
+        return None
+    body = "\n".join(parts)
+    want = _act_bucket(canonical)
+    role = proposition_role_for(canonical)
+    candidates: list[str] = []
+    sentence = _sentence_with_markers(body, canonical)
+    if sentence:
+        candidates.append(sentence)
+    for match in _QUOTE_RE.finditer(body):
+        quoted = match.group(0)
+        if len(quoted) >= 12:
+            candidates.append(quoted)
+    ranked: list[tuple[int, int, str]] = []
+    for raw in candidates:
+        fragment = " ".join(raw.split())
+        if len(fragment) < 12:
+            continue
+        if len(fragment) > 240:
+            fragment = fragment[:240].rstrip()
+        if not excerpt_in_source(fragment, *parts):
+            continue
+        got = _act_bucket(fragment)
+        if want != "other" and got != "other" and want != got:
+            continue
+        match = propositions_equivalent(canonical, fragment, expected_role=role)
+        if match == CoverageMatch.NONE:
+            continue
+        ranked.append((0 if match == CoverageMatch.EQUIVALENT else 1, len(fragment), fragment))
+    if not ranked:
+        return None
+    ranked.sort()
+    return ranked[0][2]
 
 
 def cited_primary_urls(*blobs: str | None) -> list[str]:

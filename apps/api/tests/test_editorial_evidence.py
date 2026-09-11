@@ -12,7 +12,7 @@ from app.domain.enums import (
     IngestionMethod,
     PipelineStatus,
 )
-from app.models import Claim, PipelineRun
+from app.models import Claim, ClaimEvidence, PipelineRun
 from app.providers.base import SearchHit
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM, RecordingFetcher
 from app.schemas import EventCreate, SourceCreate, SourceItemCreate
@@ -34,7 +34,7 @@ from app.schemas.verification import (
     VerificationTarget,
 )
 from app.services.article_context import compact_verification
-from app.services.claim_coverage import split_compound_extracted
+from app.services.claim_coverage import propositions_equivalent, salvage_excerpt, split_compound_extracted
 from app.services.claim_service import CLAIM_STAGE, ClaimService
 from app.services.editorial_label_policy import is_checked
 from app.services.event_service import EventService
@@ -778,3 +778,160 @@ def test_attributed_report_is_not_authentic_primary() -> None:
     from app.services.claim_service import clamp_supported_status
 
     assert clamp_supported_status(claim, ClaimStatus.SUPPORTED) == ClaimStatus.SINGLE_SOURCE
+
+
+def test_split_judge_ruling_from_utterance() -> None:
+    raw = ExtractedClaim(
+        canonical_text=(
+            "La jueza María Servini suspendió la Ley 27.801 y dijo: "
+            "«Esta norma es inconstitucional»"
+        ),
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        subject="Servini",
+        evidence=[
+            ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="suspendió la Ley")
+        ],
+    )
+    parts = split_compound_extracted(raw)
+    assert len(parts) >= 2
+    predicados = {row.predicate for row in parts}
+    assert "dijo" in predicados
+    assert "resolucion" in predicados
+    ruling = next(row for row in parts if row.predicate == "resolucion")
+    said = next(row for row in parts if row.predicate == "dijo")
+    assert "suspend" in ruling.canonical_text.lower()
+    assert "inconstitucional" in said.canonical_text.lower()
+    assert "dijo" not in ruling.canonical_text.lower()
+
+
+def test_judge_utterance_is_not_covered_by_ruling() -> None:
+    ruling = "La jueza María Servini suspendió la Ley 27.801 de reiterancia"
+    said = "La jueza María Servini dijo: «Esta norma es inconstitucional»"
+    assert propositions_equivalent(said, ruling) == CoverageMatch.NONE
+    assert propositions_equivalent(ruling, said) == CoverageMatch.NONE
+
+
+def test_salvage_excerpt_requires_literal_body_fragment() -> None:
+    body = (
+        "La jueza María Servini hizo lugar a un amparo y suspendió la Ley 27.801. "
+        "«Esta norma es inconstitucional», afirmó la magistrada."
+    )
+    found = salvage_excerpt("Servini dijo: «Esta norma es inconstitucional»", body)
+    assert found is not None
+    assert "inconstitucional" in found.lower()
+    assert found in body
+    assert salvage_excerpt("Hubo doce muertos en el acto", body) is None
+
+
+def test_judge_utterance_kept_when_excerpt_is_in_body(db_session: Session) -> None:
+    source = _source(db_session)
+    title = "Una jueza suspendió la Ley 27.801 y dijo: «Esta norma es inconstitucional»"
+    quote = "«Esta norma es inconstitucional»"
+    body = (
+        "La jueza federal María Servini hizo lugar a un amparo y suspendió la Ley 27.801 de reiterancia. "
+        f"{quote}, afirmó la magistrada al leer los fundamentos. "
+        "La decisión no está firme."
+    )
+    item = _item(db_session, source.id, url="https://medio.test/jueza", title=title, body=body, content_hash="j1")
+    event = _event(
+        db_session,
+        item,
+        title_internal=title,
+        event_type="judicial",
+        short_summary="Una jueza suspendió la Ley 27.801",
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[
+                    _extracted(
+                        text=(
+                            "La jueza María Servini suspendió la Ley 27.801 y dijo que "
+                            "la norma es inconstitucional"
+                        ),
+                        claim_type="hecho",
+                        excerpt="la jueza kirchnerista fulminó la polémica ley",
+                        subject="Servini",
+                        predicate="resolvio",
+                    )
+                ]
+            ),
+            "ClaimResolutionBatch": _resolution("resolucion", "dicho"),
+        }
+    )
+    result = ClaimService(db_session, extractor_llm=llm, resolver_llm=llm).resolve(event.id, trigger="admin")
+    claims = list(db_session.scalars(select(Claim).where(Claim.event_id == event.id)))
+    texts = [claim.canonical_text.lower() for claim in claims]
+    assert any("inconstitucional" in text and "dijo" in text for text in texts)
+    assert any("suspend" in text for text in texts)
+    utterance = next(
+        claim
+        for claim in claims
+        if "inconstitucional" in claim.canonical_text.lower() and "dijo" in claim.canonical_text.lower()
+    )
+    excerpts = [
+        row.excerpt or ""
+        for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == utterance.id))
+    ]
+    assert excerpts
+    assert any(excerpt and excerpt in body for excerpt in excerpts)
+    coverage = result["coverage"]
+    utterance_expected = [
+        row
+        for row in coverage["expected_central"]
+        if row.get("act") == "utterance" or "inconstitucional" in (row.get("proposition") or "").lower()
+    ]
+    assert utterance_expected
+    assert all(row.get("match") == CoverageMatch.EQUIVALENT.value for row in utterance_expected)
+    assert coverage["coverage_gap"] is False
+    assert {claim.status for claim in claims} == {ClaimStatus.SINGLE_SOURCE}
+
+
+def test_judge_utterance_coverage_gap_without_body_excerpt(db_session: Session) -> None:
+    source = _source(db_session)
+    title = "Una jueza suspendió la Ley 27.801 y dijo: «Esta norma es inconstitucional»"
+    body = (
+        "La jueza federal María Servini hizo lugar a un amparo y suspendió la Ley 27.801 de reiterancia. "
+        "La decisión no está firme."
+    )
+    item = _item(db_session, source.id, url="https://medio.test/jueza2", title=title, body=body, content_hash="j2")
+    event = _event(
+        db_session,
+        item,
+        title_internal=title,
+        event_type="judicial",
+        short_summary="Una jueza suspendió la Ley 27.801",
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[
+                    _extracted(
+                        text="La jueza María Servini suspendió la Ley 27.801 de reiterancia",
+                        claim_type="hecho",
+                        excerpt="suspendió la Ley 27.801 de reiterancia",
+                        subject="Servini",
+                        predicate="resolucion",
+                    )
+                ]
+            ),
+            "ClaimResolutionBatch": _resolution("resolucion"),
+        }
+    )
+    result = ClaimService(db_session, extractor_llm=llm, resolver_llm=llm).resolve(event.id, trigger="admin")
+    claims = list(db_session.scalars(select(Claim).where(Claim.event_id == event.id)))
+    coverage = result["coverage"]
+    assert coverage["coverage_gap"] is True
+    utterance_expected = [
+        row
+        for row in coverage["expected_central"]
+        if row.get("act") == "utterance" or "inconstitucional" in (row.get("proposition") or "").lower()
+    ]
+    assert utterance_expected
+    assert all(row.get("match") != CoverageMatch.EQUIVALENT.value for row in utterance_expected)
+    assert not any(
+        "inconstitucional" in claim.canonical_text.lower() and "dijo" in claim.canonical_text.lower()
+        for claim in claims
+    )
+    assert {claim.status for claim in claims} <= {ClaimStatus.SINGLE_SOURCE}

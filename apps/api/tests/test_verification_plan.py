@@ -61,6 +61,7 @@ def test_extraction_keeps_accusation_discards_vague_and_splits_compound() -> Non
     assert "sectores afines" in prompt
     assert "separalas" in folded
     assert "decisión judicial" in folded
+    assert "declaración de la jueza" in folded or "quien dicta" in folded
     assert "detalles probatorios secundarios" in folded
     assert "comparación matemática la resuelve código" in folded
     assert "benchmark factual" in folded
@@ -73,7 +74,8 @@ def test_writing_and_audit_block_unattributed_single_source() -> None:
     audit = load_prompt("article_audit.md")
     assert "NUNCA se convierte en hecho afirmado por Sin Línea" in writing
     assert "Según [fuente], en 2009 fue nombrada subsecretaria" in writing
-    assert "Si el draft lo afirma como hecho de Sin Línea, reportá ATTRIBUTION" in audit
+    assert "No verifiques hechos" in audit
+    assert "ATTRIBUTION" not in audit or "No uses NUMBER, NAME, DATE, ATTRIBUTION" in audit
 
 
 def test_denuncia_is_not_guilt_in_resolution_and_assessment_prompts() -> None:

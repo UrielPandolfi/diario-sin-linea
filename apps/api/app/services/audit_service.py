@@ -24,7 +24,6 @@ from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSever
 from app.schemas.writing import ArticleContext, ArticleDraft
 from app.services.article_service import ArticleService
 from app.services.audit_policy import (
-    heuristic_signals,
     merge_audit_result,
     structural_blocks_rewrite,
     structural_findings,
@@ -208,7 +207,7 @@ class AuditService:
         while True:
             bind_model_role(ModelRole.AUDITING.value, provider=self.settings.auditing_provider)
             structural = structural_findings(snapshot, article)
-            user_prompt = self._audit_user_prompt(article_context, article, snapshot, structural)
+            user_prompt = self._audit_user_prompt(article)
             self.session.commit()
             llm_result = auditor.generate_structured(
                 system_prompt=load_prompt("article_audit.md"),
@@ -305,70 +304,18 @@ class AuditService:
 
         raise RuntimeError("audit_loop_escaped")
 
-    def _audit_user_prompt(
-        self,
-        article_context: ArticleContext | None,
-        article: Article,
-        snapshot: dict | None,
-        structural: list[AuditIssue],
-    ) -> str:
-        context_payload = json.loads(article_context.model_dump_json()) if article_context is not None else None
-        evidence_meta = None
-        if snapshot is not None:
-            evidence_meta = {
-                key: snapshot.get(key)
-                for key in (
-                    "contract_version",
-                    "coverage_run_id",
-                    "verification_run_id",
-                    "based_on_claim_run_id",
-                    "claims_fingerprint",
-                    "coverage",
-                    "decision_by_claim_id",
-                    "verification_incomplete",
-                    "central_unverified",
-                    "stale_verification",
-                    "version",
-                )
-            }
+    def _audit_user_prompt(self, article: Article) -> str:
         payload = {
-            "context": context_payload,
-            "draft": {
-                "headline": article.headline,
-                "summary": article.summary,
-                "body": article.body,
-                "body_blocks": article.body_blocks,
-            },
-            "evidence_snapshot": evidence_meta,
-            "structural_findings": [issue.model_dump(mode="json") for issue in structural],
-            "heuristic_signals": heuristic_signals(article),
+            "headline": article.headline,
+            "summary": article.summary,
+            "body": article.body,
+            "body_blocks": article.body_blocks,
         }
-        weak = []
-        if article_context is not None:
-            weak = [
-                f"{claim.ref} ({claim.status.value}): {claim.canonical_text}"
-                for claim in (*article_context.single_source_claims, *article_context.uncertain_claims)
-            ]
-        reminder = (
-            "Los findings estructurales ya están decididos: no los silencies. "
-            "heuristic_signals son pistas: respetá negación, atribución y alcance; no las trates como HIGH automáticos. "
-            "source_contexts no autorizan hechos materiales nuevos. "
-            "Atribuir no valida un hecho si el snapshot no tiene claim/evidencia pertinente. "
-            "No recalcules SUPPORTED/SINGLE_SOURCE: usá decision_by_claim_id y support_basis.\n"
-        )
-        if weak:
-            reminder += (
-                "Claims SINGLE_SOURCE o UNCERTAIN: si el draft los afirma como hecho de Sin Línea "
-                "sin atribución explícita ni incertidumbre, reportá ATTRIBUTION.\n"
-                + "\n".join(weak)
-                + "\n\n"
-            )
         return (
-            "Audita este draft contra el snapshot de evidencia de ESTA versión. "
+            "Audita solo el lenguaje y el sesgo de este texto. "
+            "No verifiques hechos, cifras, evidencia ni cobertura. "
             "No reescribas el artículo; devolvé passed e issues. "
-            "Revisá también body_blocks y las annotations de claims.\n"
-            + reminder
-            + "\n"
+            "Si no hay sesgo de lenguaje, passed=true e issues=[].\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
@@ -384,11 +331,10 @@ class AuditService:
             "issues": [issue.model_dump(mode="json") for issue in issues],
         }
         return (
-            "Corregí el draft según estos issues de auditoría. "
-            "No inventes claims fuera del context. "
-            "Asociá a un claim/evidencia ya evaluada, retiralo, o dejalo para revisión. "
-            "Anteponer 'según X' solo vale si el snapshot prueba que esa fuente dijo o reportó lo afirmado. "
-            "Atribuir no cierra un coverage_gap central. "
+            "Corregí solo el sesgo de lenguaje señalado. "
+            "Preservá datos, citas literales y atribuciones. "
+            "No neutralices declaraciones claramente atribuidas. "
+            "No inventes hechos ni uses el context para reabrir verificación factual. "
             "Devolvé body_blocks con claim_refs C1/C2, nunca UUIDs.\n\n"
             + json.dumps(payload, ensure_ascii=False)
         )

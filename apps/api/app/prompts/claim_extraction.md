@@ -83,7 +83,9 @@ Ejemplo: Natalia Laura Federman tuvo acceso total a información estratégica de
 
 Noticias judiciales:
 
-Priorizá proposiciones en este orden: 1) la decisión judicial; 2) el estado procesal (sobreseimiento, condena, procesamiento, rechazo de recurso); 3) la consecuencia jurídica (firmeza, vía de impugnación restante); 4) acusaciones o hechos materiales del caso si siguen siendo centrales.
+Priorizá proposiciones en este orden: 1) la decisión judicial; 2) el estado procesal (sobreseimiento, condena, procesamiento, rechazo de recurso); 3) la consecuencia jurídica (firmeza, vía de impugnación restante); 4) la declaración de quien dicta (jueza, tribunal, fiscal) si es central; 5) acusaciones o hechos materiales del caso si siguen siendo centrales.
+
+La declaración de la jueza (u otra autoridad que dicta) es un Claim distinto de la resolución. Extraé el dicho como `declaracion` HIGH si es central, con un `excerpt` literal del snippet. El excerpt de una condena, una suspensión o el fallo no respalda lo que la jueza habría dicho. No mezcles decisión + declaración en un solo Claim.
 
 Detalles probatorios secundarios (informes médicos, pericias, “lesiones inespecíficas”, testimonios de contexto, cronología accesoria) tienen menor prioridad. No los extraigas como Claim HIGH si ya hay decisión, estado procesal o consecuencia jurídica. Si los extraés, usá LOW.
 

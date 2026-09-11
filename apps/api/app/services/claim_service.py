@@ -46,6 +46,7 @@ from app.services.claim_coverage import (
     record_drop,
     recover_expected_from_dropped,
     recover_from_source_body,
+    salvage_excerpt,
     split_compound_extracted,
 )
 from app.services.information_origin import assess_origins, has_support_evidence
@@ -490,6 +491,18 @@ class ClaimService:
                 dropped_raw.append((raw, DropReason.EMPTY_CANONICAL.value))
                 continue
             valid_evidence = self._valid_evidence(raw.evidence, sources, require_body=require_body)
+            if not valid_evidence:
+                repaired: list[ExtractedEvidence] = []
+                for row in raw.evidence:
+                    if row.source_ref < 1 or row.source_ref > len(sources):
+                        continue
+                    item = sources[row.source_ref - 1]
+                    salvaged = salvage_excerpt(canonical, item.clean_text)
+                    if not salvaged:
+                        continue
+                    repaired.append(row.model_copy(update={"excerpt": salvaged}))
+                if repaired:
+                    valid_evidence = self._valid_evidence(repaired, sources, require_body=require_body)
             if not valid_evidence:
                 dropped.append(
                     record_drop(canonical_text=canonical, reason=DropReason.INVALID_EXCERPT.value)

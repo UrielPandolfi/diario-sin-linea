@@ -259,24 +259,35 @@ def test_audit_low_only_passes_without_rewrite(db_session: Session) -> None:
     assert llm.calls == ["ArticleAuditResult"]
 
 
-def test_audit_prompt_has_context_and_draft_not_html(db_session: Session) -> None:
+def test_audit_payload_is_language_only(db_session: Session) -> None:
     html = "<html><body><article>SECRETO raw_text no debe ir al prompt</article></body></html>"
     event, article = _seed_draft(db_session, raw_text=html)
     llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
     result = _service(db_session, llm).audit(event.id, trigger="admin")
     prompt = llm.user_prompts[0]
+    dumped = prompt.casefold()
     assert result["passed"] is True
     assert article.headline in prompt
+    assert article.summary in prompt
     assert "Un colectivo chocó en Pellegrini" in prompt
-    assert "confirmed_claims" in prompt
     assert "body_blocks" in prompt
-    assert "evidence_snapshot" in prompt
-    assert "structural_findings" in prompt
     assert html not in prompt
     assert "raw_text" not in prompt
     assert "SECRETO" not in prompt
     assert "ANTHROPIC_API_KEY" not in prompt
     assert "DETECTED" not in prompt
+    for forbidden in (
+        "confirmed_claims",
+        "evidence_snapshot",
+        "structural_findings",
+        "heuristic_signals",
+        "decision_by_claim_id",
+        "articlecontext",
+        "coverage_gap",
+        "support_basis",
+        "central_unverified",
+    ):
+        assert forbidden not in dumped
     assert llm.calls == ["ArticleAuditResult"]
 
 
@@ -663,22 +674,23 @@ def test_published_second_audit_does_not_create_article(db_session: Session) -> 
     assert article.id
 
 
-def test_audit_prompt_covers_unattributed_characterization_and_causality() -> None:
+def test_audit_prompt_covers_language_bias_not_verification() -> None:
     prompt = load_prompt("article_audit.md")
+    folded = prompt.casefold()
     assert "UNATTRIBUTED_CHARACTERIZATION" in prompt
-    assert "SUPPORTED no significa que cualquier formulación" in prompt
-    assert "mayor crisis diplomática entre Argentina y Brasil" in prompt
-    assert "Algunas de las fuentes consultadas describieron el episodio" in prompt
-    assert "desataron la crisis diplomática" in prompt
-    assert "Tras los dichos de Milei, Brasil llamó a consultas a su embajador" in prompt
-    assert "Julio Bitelli" in prompt
+    assert "voz de Sin Línea" in prompt or "voz de sin línea" in folded
+    assert "citas y declaraciones claramente atribuidas" in folded
+    assert "no las neutralices" in folded
+    assert "no verifiques hechos" in folded
+    assert "no apliques una lista ciega" in folded
+    assert "una muerte" in folded and "condena" in folded
+    assert "supported no significa" not in folded
+    assert "coverage_gap" not in folded
+    assert "decision_by_claim_id" not in folded
+    assert "si el draft lo afirma como hecho de sin línea, reportá attribution" not in folded
+    assert "$98,08 millones" not in prompt
     assert "Nunca uses un type OTHER" in prompt
-    assert "Causalidad más fuerte que la evidencia → CAUSALITY" in prompt
-    assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
-    assert "el martes en Carolina del Norte" in prompt
-    assert "$98,08 millones" in prompt
-    assert "No exijas annotation de contexto ordinario" in prompt
-    assert "Si el draft lo afirma como hecho de Sin Línea, reportá ATTRIBUTION" in prompt
+    assert "NUMBER" in prompt and "No uses NUMBER" in prompt
 
 
 def test_writing_prompt_covers_characterization_and_causality() -> None:
@@ -757,6 +769,87 @@ def test_unattributed_characterization_low_does_not_block() -> None:
         ],
     )
     assert normalize_audit_result(result).passed is True
+
+
+def test_audit_flags_evaluative_voice_and_rewrites(db_session: Session) -> None:
+    event, article = _seed_draft(
+        db_session,
+        headline="La escandalosa decisión de la jueza kirchnerista",
+    )
+    article.summary = "Una polémica magistrada fulminó la ley."
+    article.body = (
+        "La escandalosa decisión de la jueza kirchnerista suspendió la norma. "
+        "Según la jueza, «esta norma es inconstitucional»."
+    )
+    db_session.flush()
+    blocking = ArticleAuditResult(
+        passed=False,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.ADJECTIVE,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="escandalosa decisión de la jueza kirchnerista",
+                explanation="adjetivación valorativa y etiqueta partidaria en voz de Sin Línea",
+                suggested_fix="La jueza suspendió la norma.",
+            )
+        ],
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": [blocking, _pass_audit()],
+            "ArticleDraft": [_draft(headline="Una jueza suspendió la norma")],
+        }
+    )
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    audit_prompt = llm.user_prompts[0]
+    assert "escandalosa decisión de la jueza kirchnerista" in audit_prompt
+    assert "decision_by_claim_id" not in audit_prompt.casefold()
+    assert result["rewrite_count"] == 1
+    assert result["passed"] is True
+    db_session.refresh(article)
+    assert article.headline == "Una jueza suspendió la norma"
+
+
+def test_audit_respects_attributed_quote_without_verification_objections(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    article.headline = "Una jueza suspendió la Ley 27.801"
+    article.summary = "La magistrada cuestionó la constitucionalidad de la norma."
+    article.body = (
+        "La jueza María Servini suspendió la Ley 27.801. "
+        "Según la jueza, «esta norma es inconstitucional porque anula garantías básicas»."
+    )
+    db_session.flush()
+    llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    prompt = load_prompt("article_audit.md").casefold()
+    user = llm.user_prompts[0]
+    assert "según la jueza" in user.casefold()
+    assert "no las neutralices" in prompt
+    assert result["passed"] is True
+    assert result["issues"] == []
+    assert result["rewrite_count"] == 0
+    assert "unsupported_claim" not in user.casefold()
+    assert "verific" not in user.casefold() or "no verifiques" in llm.user_prompts[0].casefold()
+
+
+def test_audit_approves_neutral_text_without_verification_objections(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    article.headline = "Una jueza suspendió la Ley 27.801"
+    article.summary = "La resolución no está firme."
+    article.body = (
+        "La jueza María Servini hizo lugar a un amparo y suspendió la Ley 27.801. "
+        "La decisión no está firme."
+    )
+    db_session.flush()
+    llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    user = llm.user_prompts[0].casefold()
+    assert result["passed"] is True
+    assert result["issues"] == []
+    assert "coverage" not in user
+    assert "número" not in user
+    assert "single_source" not in user
+    assert "no verifiques hechos" in user
 
 
 def test_unattributed_characterization_medium_triggers_rewrite_loop(db_session: Session) -> None:
