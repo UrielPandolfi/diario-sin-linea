@@ -1,8 +1,9 @@
 "use client";
 
 import { claimsForIds, editorialLabelCopy } from "@/features/article/claim-status";
+import { claimPopoverCopy, officialDocumentDetailIndex } from "@/features/article/claim-popover-copy";
 import type { ArticleBodyBlock, ArticleClaim, ClaimCardPresentation } from "@/lib/api/types";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 function splitPlainBody(body: string): string[] {
   return body
@@ -48,7 +49,7 @@ export function ArticleBody({
   return (
     <div className="mt-6 space-y-4">
       {bodyBlocks.map((block, blockIndex) => (
-        <p key={blockIndex} className="font-sans text-[17px] leading-[1.65] text-primary">
+        <div key={blockIndex} className="font-sans text-[17px] leading-[1.65] text-primary">
           {(block.segments ?? []).map((segment, segmentIndex) => {
             const key = `${blockIndex}-${segmentIndex}`;
             const matched = claimsForIds(segment.claim_ids ?? [], claims);
@@ -68,7 +69,7 @@ export function ArticleBody({
               />
             );
           })}
-        </p>
+        </div>
       ))}
     </div>
   );
@@ -92,7 +93,8 @@ function ClaimSegment({
   onToggle: () => void;
 }) {
   const popoverId = useId();
-  const rootRef = useRef<HTMLSpanElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | null>(null);
 
   function clearCloseTimer() {
@@ -109,6 +111,22 @@ function ClaimSegment({
 
   useEffect(() => () => clearCloseTimer(), []);
 
+  useLayoutEffect(() => {
+    if (!open) return;
+    function alignPopover() {
+      const popover = popoverRef.current;
+      if (!popover) return;
+      popover.style.transform = "";
+      const rect = popover.getBoundingClientRect();
+      const rightEdge = document.documentElement.clientWidth - 16;
+      const offset = Math.max(16 - rect.left, Math.min(0, rightEdge - rect.right));
+      popover.style.transform = `translateX(${offset}px)`;
+    }
+    alignPopover();
+    window.addEventListener("resize", alignPopover);
+    return () => window.removeEventListener("resize", alignPopover);
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     function onPointerDown(event: PointerEvent) {
@@ -121,7 +139,7 @@ function ClaimSegment({
   }, [open, onClose]);
 
   return (
-    <span ref={rootRef} className="relative inline">
+    <div ref={rootRef} className="relative inline">
       <span
         tabIndex={0}
         role="button"
@@ -150,7 +168,8 @@ function ClaimSegment({
         {text}
       </span>
       {open ? (
-        <span
+        <div
+          ref={popoverRef}
           id={popoverId}
           role="dialog"
           aria-label="Información de la afirmación"
@@ -161,9 +180,9 @@ function ClaimSegment({
           {claims.map((claim, index) => (
             <ClaimPopoverItem key={claim.id} claim={claim} divided={index > 0} />
           ))}
-        </span>
+        </div>
       ) : null}
-    </span>
+    </div>
   );
 }
 
@@ -171,13 +190,19 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
   const card = claim.presentation;
   const editorialLabels = claim.editorial_labels ?? [];
   const falseAssertions = claim.false_assertions ?? [];
-  const verificationLabel = card?.verification_label ?? "Independencia desconocida";
-  const coverage = card?.coverage ?? "No hay desglose de independencia para esta verificación.";
+  const copy = claimPopoverCopy(claim);
   const details = card?.evidence_detail ?? [];
 
   return (
-    <span className={divided ? "mt-3 block border-t border-border pt-3" : "block"}>
-      <span className="block font-sans text-sm leading-snug text-primary">{claim.canonical_text}</span>
+    <div className={divided ? "mt-3 border-t border-border pt-3" : ""}>
+      <span className="block font-sans text-sm font-semibold leading-snug text-primary">{copy.heading}</span>
+      <span className="mt-2 block font-sans text-xs leading-relaxed text-primary">{copy.coverage}</span>
+      {copy.limitation ? (
+        <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{copy.limitation}</span>
+      ) : null}
+      {copy.explanation ? (
+        <span className="mt-1 block font-sans text-xs leading-relaxed text-secondary">{copy.explanation}</span>
+      ) : null}
       {editorialLabels.length > 0 ? (
         <span className="mt-1.5 flex flex-wrap gap-1">
           {editorialLabels.map((label) => (
@@ -190,14 +215,6 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
           ))}
         </span>
       ) : null}
-      <span className="mt-1.5 block font-sans text-sm leading-snug text-accent-petrol">{verificationLabel}</span>
-      {card?.limitation ? (
-        <span className="mt-1 block font-sans text-xs leading-snug text-secondary">{card.limitation}</span>
-      ) : null}
-      <span className="mt-1.5 block font-sans text-xs leading-snug text-secondary">{coverage}</span>
-      {card?.explanation ? (
-        <span className="mt-1 block font-sans text-xs leading-snug text-secondary">{card.explanation}</span>
-      ) : null}
       {claim.verification?.unresolved ? (
         <span className="mt-1 block font-sans text-xs text-secondary">Sin resolver</span>
       ) : null}
@@ -206,44 +223,59 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
           {row.source_name}: “{row.excerpt}”
         </span>
       ))}
-      {details.length > 0 ? <EvidenceDetails details={details} documentNoun={card?.document_noun} /> : null}
-    </span>
+      <EvidenceDetails
+        details={details}
+        canonicalText={claim.canonical_text}
+        documentaryLimitation={copy.documentaryLimitation}
+      />
+    </div>
   );
 }
 
 function EvidenceDetails({
   details,
-  documentNoun,
+  canonicalText,
+  documentaryLimitation,
 }: {
   details: NonNullable<ClaimCardPresentation["evidence_detail"]>;
-  documentNoun?: string;
+  canonicalText: string;
+  documentaryLimitation: string | null;
 }) {
-  const noun = documentNoun === "medios" ? "medios" : "documentos";
+  const officialDocumentIndex = documentaryLimitation ? officialDocumentDetailIndex(details) : -1;
   return (
     <details
-      className="mt-2"
+      className="mt-3 border-t border-border pt-2"
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
-      <summary className="cursor-pointer font-sans text-xs text-accent-petrol">
-        Detalle de {noun} consultados
+      <summary className="cursor-pointer font-sans text-xs font-medium text-secondary hover:text-primary">
+        Ver documentos y detalles del respaldo
       </summary>
-      <ul className="mt-1.5 list-disc space-y-1 pl-4">
-        {details.map((row, index) => (
-          <li key={`${row.url ?? row.name ?? index}-${row.evidence_type}`} className="font-sans text-xs leading-snug text-secondary">
-            <span className="text-primary">{row.stance}</span>
-            {row.name ? ` · ${row.name}` : ""}
-            {row.url ? (
-              <>
-                {" · "}
-                <a href={row.url} className="text-accent-petrol underline" target="_blank" rel="noreferrer">
-                  ver
-                </a>
-              </>
-            ) : null}
-          </li>
-        ))}
-      </ul>
+      <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{canonicalText}</span>
+      {details.length > 0 ? (
+        <ul className="mt-2 list-disc space-y-2 pl-4">
+          {details.map((row, index) => (
+            <li key={`${row.url ?? row.name ?? index}-${row.evidence_type}`} className="font-sans text-xs leading-snug text-secondary">
+              <span className="text-primary">{row.stance}</span>
+              {row.name ? ` · ${row.name}` : ""}
+              {row.url ? (
+                <>
+                  {" · "}
+                  <a href={row.url} className="text-accent-petrol underline" target="_blank" rel="noreferrer">
+                    ver
+                  </a>
+                </>
+              ) : null}
+              {index === officialDocumentIndex ? (
+                <span className="mt-1 block">{documentaryLimitation}</span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {documentaryLimitation && officialDocumentIndex === -1 ? (
+        <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{documentaryLimitation}</span>
+      ) : null}
     </details>
   );
 }
