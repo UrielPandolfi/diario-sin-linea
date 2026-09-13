@@ -94,7 +94,7 @@ def test_exa_search_sends_query_and_limit(monkeypatch) -> None:
 
     monkeypatch.setattr("app.providers.exa.httpx.Client", FakeClient)
     hits = ExaSearchProvider(api_key="secret-key").search(
-        SearchQuery(text="choque colectivos rosario", count=3, freshness="pw")
+        SearchQuery(text="choque colectivos rosario", count=3, freshness="pw", include_domains=["argentina.gob.ar", "boletinoficial.gob.ar"])
     )
     assert captured["url"] == "https://api.exa.ai/search"
     assert captured["headers"]["Authorization"] == "Bearer secret-key"
@@ -102,6 +102,7 @@ def test_exa_search_sends_query_and_limit(monkeypatch) -> None:
     assert captured["json"]["numResults"] == 3
     assert captured["json"]["type"] == "auto"
     assert captured["json"]["contents"] == {"highlights": True}
+    assert captured["json"]["includeDomains"] == ["argentina.gob.ar", "boletinoficial.gob.ar"]
     assert "startPublishedDate" in captured["json"]
     assert len(hits) == 2
     assert hits[0].snippet == "snip"
@@ -135,6 +136,7 @@ def test_exa_search_clamps_num_results(monkeypatch) -> None:
     monkeypatch.setattr("app.providers.exa.httpx.Client", FakeClient)
     ExaSearchProvider(api_key="k").search(SearchQuery(text="q", count=500))
     assert captured["json"]["numResults"] == 100
+    assert "includeDomains" not in captured["json"]
     ExaSearchProvider(api_key="k").search(SearchQuery(text="q", count=0))
     assert captured["json"]["numResults"] == 1
 

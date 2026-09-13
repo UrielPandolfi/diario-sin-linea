@@ -259,7 +259,7 @@ def test_audit_low_only_passes_without_rewrite(db_session: Session) -> None:
     assert llm.calls == ["ArticleAuditResult"]
 
 
-def test_audit_payload_is_language_only(db_session: Session) -> None:
+def test_audit_payload_keeps_raw_sources_out_and_receives_compact_posture(db_session: Session) -> None:
     html = "<html><body><article>SECRETO raw_text no debe ir al prompt</article></body></html>"
     event, article = _seed_draft(db_session, raw_text=html)
     llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
@@ -284,10 +284,11 @@ def test_audit_payload_is_language_only(db_session: Session) -> None:
         "decision_by_claim_id",
         "articlecontext",
         "coverage_gap",
-        "support_basis",
         "central_unverified",
     ):
         assert forbidden not in dumped
+    assert "evidence_posture" in prompt
+    assert "headline_claim_candidates" in prompt
     assert llm.calls == ["ArticleAuditResult"]
 
 

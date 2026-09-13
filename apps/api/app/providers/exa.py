@@ -60,6 +60,8 @@ def _build_payload(query: SearchQuery) -> dict[str, Any]:
         "contents": {"highlights": True},
     }
     start = _start_published_date(query)
+    if query.include_domains:
+        payload["includeDomains"] = query.include_domains
     if start:
         payload["startPublishedDate"] = start
     end = _end_published_date(query)

@@ -6,7 +6,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ClaimStatus, EvidenceType
-from app.schemas.editorial_evidence import Demotion, PrimaryAccess, StatementEvidenceClass, SupportBasis
+from app.schemas.editorial_evidence import Demotion, PrimaryAccess, StatementEvidenceClass, SupportBasis, SupportKind
 from app.services.verification_outcome import VerificationView
 
 UNKNOWN_COVERAGE = "No hay desglose de independencia para esta verificación."
@@ -222,9 +222,27 @@ def _verification_label(*, status: str, basis_known: bool, basis: SupportBasis |
         return _UNKNOWN_LABELS.get(status, status)
     if (basis.statement_evidence_class or "") == StatementEvidenceClass.AUTHENTIC_PRIMARY.value:
         return AUTHENTIC_PRIMARY_LABEL
+    kind = basis.kind or ""
+    if status == ClaimStatus.SUPPORTED.value and kind == SupportKind.PRIMARY_SOURCE.value:
+        return "Respaldado por fuente primaria"
+    if status == ClaimStatus.SUPPORTED.value and kind == SupportKind.INDEPENDENT_REPORTING.value:
+        return "Corroborado"
     if status == ClaimStatus.SUPPORTED.value and basis.known_independent_count >= 2:
         return "Corroborado"
     if status == ClaimStatus.SINGLE_SOURCE.value:
+        if kind == SupportKind.SINGLE_REPORT.value:
+            demotion = basis.demotion
+            if demotion == Demotion.UNPROVEN_INDEPENDENCE.value:
+                return "Sin corroboración independiente"
+            if demotion == Demotion.INSUFFICIENT_INDEPENDENCE.value:
+                return "Un solo origen"
+            if demotion == Demotion.MISSING_DOCUMENTARY_PRIMARY.value:
+                return "Sin respaldo documental suficiente"
+            if demotion == Demotion.MISSING_AUTHENTIC_PRIMARY.value:
+                return "Sin publicación original del dicho"
+            if basis.known_independent_count == 1:
+                return "Un solo origen"
+            return "Reportado por una única fuente"
         demotion = basis.demotion
         if demotion == Demotion.UNPROVEN_INDEPENDENCE.value:
             return "Sin corroboración independiente"
@@ -245,7 +263,17 @@ def _limitation(*, basis_known: bool, basis: SupportBasis | None) -> str | None:
         return None
     access = basis.primary_access or ""
     demotion = basis.demotion
-    if access == PrimaryAccess.FOUND_UNRELATED.value or demotion == Demotion.MISSING_DOCUMENTARY_PRIMARY.value:
+    if demotion == Demotion.MISSING_DOCUMENTARY_PRIMARY.value:
+        if access == PrimaryAccess.NOT_FOUND.value:
+            return "No se localizó una fuente primaria que permita comprobar la afirmación."
+        if access == PrimaryAccess.ACCESS_FAILED.value:
+            return "No se pudo acceder al contenido de la fuente primaria."
+        if access == PrimaryAccess.FOUND_UNRELATED.value:
+            return UNRELATED_PRIMARY_LIMITATION
+        return UNRELATED_PRIMARY_LIMITATION
+    if access == PrimaryAccess.ACCESS_FAILED.value and demotion == Demotion.MISSING_AUTHENTIC_PRIMARY.value:
+        return "No se pudo acceder al contenido de la fuente primaria."
+    if access == PrimaryAccess.FOUND_UNRELATED.value:
         return UNRELATED_PRIMARY_LIMITATION
     if demotion == Demotion.MISSING_AUTHENTIC_PRIMARY.value:
         return "No hay publicación original auténtica del dicho."
@@ -285,6 +313,12 @@ def _explanation(*, status: str, basis_known: bool, basis: SupportBasis | None) 
         return None
     if (basis.statement_evidence_class or "") == StatementEvidenceClass.AUTHENTIC_PRIMARY.value:
         return None
+    if status == ClaimStatus.SUPPORTED.value and (basis.kind or "") == SupportKind.INDEPENDENT_REPORTING.value:
+        return "Corroborado por cobertura periodística independiente."
+    if status == ClaimStatus.SUPPORTED.value and (basis.kind or "") == SupportKind.PRIMARY_SOURCE.value:
+        return "Respaldado por fuente primaria."
+    if status != ClaimStatus.SUPPORTED.value and basis.unknown_group_count > 0 and basis.known_independent_count < 2:
+        return "No se pudo establecer que aporten confirmaciones independientes."
     demotion = basis.demotion
     if demotion == Demotion.UNPROVEN_INDEPENDENCE.value:
         return "No se pudo establecer que aporten confirmaciones independientes."

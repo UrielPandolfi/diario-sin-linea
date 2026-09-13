@@ -166,7 +166,7 @@ def parse_verification_run(run: PipelineRun | None, *, paired: bool = False) -> 
     return view_from_mapping(meta, finished_at=run.finished_at, paired=paired or has_pair)
 
 
-def is_strong_verification(claim_id: UUID | str, view: VerificationView) -> bool:
+def is_strong_verification(claim_id: UUID | str, view: VerificationView, *, claim: Any = None) -> bool:
     cid = str(claim_id)
     if cid not in view.selected_ids:
         return False
@@ -182,15 +182,37 @@ def is_strong_verification(claim_id: UUID | str, view: VerificationView) -> bool
     role = decision.get("proposition_role")
     basis = decision.get("support_basis") or {}
     if role == "utterance":
-        return (
+        if (
             status_after == ClaimStatus.SUPPORTED.value
             and basis.get("statement_evidence_class") == StatementEvidenceClass.AUTHENTIC_PRIMARY.value
-        )
-    if status_after == ClaimStatus.SUPPORTED.value and not view.primary_source_supports.get(cid):
+        ):
+            return True
+        return _independent_reporting_is_checked(claim, basis, status_after)
+    if status_after == ClaimStatus.SUPPORTED.value and view.primary_source_supports.get(cid):
+        return True
+    if status_after == ClaimStatus.SUPPORTED.value:
         if basis.get("statement_evidence_class") == StatementEvidenceClass.AUTHENTIC_PRIMARY.value:
             return True
         if basis.get("primary_access") == "found_relevant":
             return True
+        if basis.get("kind") == "primary_source":
+            return True
+        return _independent_reporting_is_checked(claim, basis, status_after)
+    return True
+
+
+def _independent_reporting_is_checked(claim: Any, basis: dict[str, Any], status_after: str) -> bool:
+    if status_after != ClaimStatus.SUPPORTED.value:
+        return False
+    kind = basis.get("kind")
+    known = int(basis.get("known_independent_count") or 0)
+    if kind != "independent_reporting" and not (kind is None and known >= 2):
+        return False
+    if claim is None:
+        return False
+    from app.services.verification_policy import looks_sensitive_accusation, requires_authoritative_source
+
+    if requires_authoritative_source(claim) or looks_sensitive_accusation(claim):
         return False
     return True
 
@@ -218,7 +240,7 @@ def is_verification_locked(
 ) -> bool:
     if run is None or not view.paired:
         return False
-    if not is_strong_verification(claim.id, view):
+    if not is_strong_verification(claim.id, view, claim=claim):
         return False
     return not has_new_material_evidence(claim, siblings, run)
 

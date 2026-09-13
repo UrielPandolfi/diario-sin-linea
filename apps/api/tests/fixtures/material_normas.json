@@ -1,0 +1,9 @@
+{
+  "statement": "Milei afirmó que su Gobierno eliminó unas 17.000 normas.",
+  "fact": "El Gobierno de Milei eliminó unas 17.000 normas.",
+  "reports": ["https://a.test/normas", "https://b.test/normas", "https://c.test/normas"],
+  "attributed_with_limitation": "Milei afirmó que su Gobierno eliminó unas 17.000 normas. La cifra fue recogida por tres publicaciones; Sin Línea no localizó un registro público que permita corroborar ese total de forma independiente.",
+  "expected_factual_status": "SINGLE_SOURCE",
+  "expected_primary_access": "not_found",
+  "expected_known_independent_count": 0
+}

@@ -4,6 +4,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ClaimStatus, EvidenceType
+from app.schemas.evidence_comparison import EvidenceComparison
 
 
 class VerificationTarget(StrEnum):
@@ -19,6 +20,7 @@ class VerificationTarget(StrEnum):
 
 
 class TemporalScope(StrEnum):
+    UNKNOWN_PERIOD = "UNKNOWN_PERIOD"
     CURRENT = "CURRENT"
     RECENT = "RECENT"
     HISTORICAL = "HISTORICAL"
@@ -80,6 +82,7 @@ class CheapEvidenceJudgement(BaseModel):
     excerpt: str | None = None
     confidence: float | None = None
     reason: str | None = None
+    comparison: EvidenceComparison | None = None
 
 
 class CheapClaimEvidenceAssessment(BaseModel):
@@ -93,6 +96,7 @@ class VerificationEvidence(BaseModel):
     evidence_type: EvidenceType
     excerpt: str | None = None
     confidence: float | None = None
+    comparison: EvidenceComparison | None = None
 
 
 class VerificationResult(BaseModel):

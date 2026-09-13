@@ -203,7 +203,7 @@ def test_policy_selects_declaration_hard_types_and_aliases() -> None:
 
 def test_policy_m5_flag_selects_unless_vetoed() -> None:
     flagged = _ns(claim_type="hecho", importance=ClaimImportance.MEDIUM, status=ClaimStatus.UNCERTAIN)
-    vetoed = _ns(claim_type="hecho", importance=ClaimImportance.LOW, status=ClaimStatus.SINGLE_SOURCE)
+    vetoed = _ns(claim_type="hecho", importance=ClaimImportance.LOW, status=ClaimStatus.OUTDATED)
     selected, skipped = select_claims(
         [flagged, vetoed],
         flagged_ids={flagged.id, vetoed.id},
@@ -690,7 +690,11 @@ def test_official_site_query_falls_back_to_general_search(db_session: Session) -
     )
     general_url = "https://diario.test/nota"
     hits_by_query: dict[str, list[SearchHit]] = {}
-    search = FakeSearchProvider(hits_by_query)
+    class DirectedFakeSearch(FakeSearchProvider):
+        def search(self, query):
+            self.queries.append(query)
+            return [] if query.include_domains else hits_by_query.get(query.text, [])
+    search = DirectedFakeSearch()
     llm = FakeStructuredLLM(
         {"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True, reason="sin primaria")}
     )
@@ -706,8 +710,8 @@ def test_official_site_query_falls_back_to_general_search(db_session: Session) -
         else:
             hits_by_query[query] = [SearchHit(title="Nota", url=general_url, snippet="mencionan la designación")]
     result = _service(db_session, llm, search).verify(event.id, trigger="admin")
-    assert any("site:boletinoficial.gob.ar" in query.text for query in search.queries)
-    assert any("site:" not in query.text for query in search.queries)
+    assert any("boletinoficial.gob.ar" in (query.include_domains or []) for query in search.queries)
+    assert any(not query.include_domains for query in search.queries)
     assert result["queries"][str(claim.id)]
     assert any("site:" not in query for query in result["queries"][str(claim.id)])
 
@@ -884,7 +888,7 @@ def test_sol_cannot_mark_supported_without_required_primary(db_session: Session)
     assert claim.status != ClaimStatus.SUPPORTED
 
 
-def test_strong_verification_disproves_incompatible_sibling(db_session: Session) -> None:
+def test_strong_verification_does_not_disprove_sibling_without_its_own_comparison(db_session: Session) -> None:
     source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
     source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
     item_a = _item(
@@ -937,7 +941,7 @@ def test_strong_verification_disproves_incompatible_sibling(db_session: Session)
     service = VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))
     service._reconcile_verified_competitors([loser, winner], payload)
     assert winner.status == ClaimStatus.SUPPORTED
-    assert loser.status == ClaimStatus.DISPROVEN
+    assert loser.status == ClaimStatus.CONFLICTING
 
 
 def test_strong_verification_does_not_disprove_temporal_update(db_session: Session) -> None:

@@ -15,7 +15,8 @@ from app.domain.enums import (
     IngestionMethod,
 )
 from app.main import app
-from app.models import Article, Claim, ClaimEvidence, Event
+from app.models import Article, Claim, ClaimEvidence, Event, PipelineRun
+from app.services.article_context import build_article_context
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
 from app.schemas import SourceCreate, SourceItemCreate
 from app.schemas.auditing import ArticleAuditResult
@@ -178,20 +179,26 @@ def test_ffaa_raise_pipeline_maps_claim_ref_and_exposes_uuid(db_session: Session
     extracted = ClaimService(db_session, extractor_llm=claims_llm, resolver_llm=claims_llm).resolve(
         event.id, trigger="detection"
     )
-    assert extracted["persisted"] == 1
-    claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
+    claims = list(db_session.scalars(select(Claim).where(Claim.event_id == event.id)))
+    assert extracted["persisted"] == len(claims)
+    claim = next(row for row in claims if "12,22" in (row.canonical_text or "") and row.claim_type == "cifra")
     evidence = list(db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id)))
     assert len(evidence) == 3
     from tests.editorial_snapshot import attach_verify_to_latest_claim_run
 
     attach_verify_to_latest_claim_run(db_session, event)
+    db_session.refresh(event)
+    db_session.expire(event, ["claims"])
+    runs = list(db_session.scalars(select(PipelineRun).where(PipelineRun.event_id == event.id)))
+    context = build_article_context(event, pipeline_runs=runs)
+    claim_ref = next(ref for ref, cid in context.claim_refs.items() if cid == str(claim.id))
 
     draft = annotated_article_draft(
         "El Gobierno dispuso un aumento del 12,22% para las Fuerzas Armadas",
         "El Ejecutivo anunció un incremento salarial del 12,22% para las Fuerzas Armadas.",
         paragraphs=[
             [("El anuncio se hizo durante una conferencia de prensa.", [])],
-            [("El aumento dispuesto es del 12,22%.", ["C1"])],
+            [("El aumento dispuesto es del 12,22%.", [claim_ref])],
             [("Las tres fuentes coinciden en el porcentaje informado.", [])],
         ],
     )

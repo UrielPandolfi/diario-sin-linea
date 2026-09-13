@@ -101,13 +101,7 @@ def compact_verification(
         basis_raw = row.get("support_basis") if isinstance(row.get("support_basis"), dict) else None
         basis = None
         if basis_raw is not None:
-            basis = ContextSupportBasis(
-                known_independent_count=int(basis_raw.get("known_independent_count") or 0),
-                unknown_group_count=int(basis_raw.get("unknown_group_count") or 0),
-                statement_evidence_class=basis_raw.get("statement_evidence_class"),
-                primary_access=basis_raw.get("primary_access"),
-                demotion=basis_raw.get("demotion"),
-            )
+            basis = ContextSupportBasis.model_validate(basis_raw)
         decisions[str(key)] = ContextClaimDecision(
             claim_id=str(row.get("claim_id") or key),
             status=row.get("status"),
@@ -176,6 +170,7 @@ def _to_context_claim(
     item_id_to_ref: dict,
     url_to_ref: dict[str, int],
     decision: ContextClaimDecision | None = None,
+    related_claim_ids: list[str] | None = None,
 ) -> ContextClaim:
     evidence = []
     for row in claim.evidence:
@@ -213,6 +208,7 @@ def _to_context_claim(
         proposition_role=decision.proposition_role if decision is not None else None,
         final_reason=decision.final_reason if decision is not None else None,
         support_basis=decision.support_basis if decision is not None else None,
+        related_claim_ids=related_claim_ids or [],
     )
 
 
@@ -360,6 +356,12 @@ def build_article_context(
     )
 
     selected = select_context_claims(list(event.claims), limit=max_claims)
+    related: dict[str, list[str]] = {}
+    for pair in ((claim_run.metadata_json if claim_run is not None else None) or {}).get("attribution_pairs", []):
+        a, b = pair.get("attribution_claim_id"), pair.get("factual_claim_id")
+        if a and b:
+            related.setdefault(a, []).append(b)
+            related.setdefault(b, []).append(a)
     sources, item_id_to_ref, url_to_ref = _sources(event, limit=max_sources)
     claim_refs: dict[str, str] = {}
     buckets: dict[str, list[ContextClaim]] = {name: [] for name in _STATUS_BUCKET.values()}
@@ -377,6 +379,7 @@ def build_article_context(
                 item_id_to_ref=item_id_to_ref,
                 url_to_ref=url_to_ref,
                 decision=verification.decision_by_claim_id.get(str(claim.id)),
+                related_claim_ids=related.get(str(claim.id)),
             )
         )
     return ArticleContext(

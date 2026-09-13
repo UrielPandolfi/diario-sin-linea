@@ -34,9 +34,21 @@ Hasta B, “fuente agregada” >> “actualización publicada” es el cableado 
 
 ## Claims / verify / audit — etapas 1–2 en código; UI y eval no
 
+2026-09-12: Claims/Verification incorpora `proposition-comparison-1`: conserva atribución y trayectorias, usa UNKNOWN_PERIOD sin inventar fechas y exige contradicción pertinente antes de DISPROVEN. Recheck por ID conserva runs y no publica. 149 tests focalizados pasaron en base separada; reevaluación real del claim `925ddcf5-e07a-47c6-a30e-e39477ea06e2`: DISPROVEN → SINGLE_SOURCE de la atribución transmitida por La Derecha Diario, sin acreditar la comparación económica. Auditor sin cambios. Evidencias, límites y runs en [diagnóstico del claim](claim-925ddcf5-verification.md).
+
 En código: contrato versionado en `metadata_json`, par claim↔verify, coverage/recovery, split de compuestos, packet claim-primero, independencia por `information_origin`, primaria auténtica de utterance. Tests de política con dobles (Alberto/Bregman extract-verify, y ahora write/audit/publish: gap, par desparejado, snapshot de versión, FAILED posterior). **No** demuestran que Luna/Sol reales dejen de confundir proposiciones; eval con modelos reales queda fuera (`scripts/run_editorial_eval.py`).
 
 Etapa 3 (tarjeta pública): DTO de `support_basis`/`demotion` en `compact_public_claims` y visor mínimo Admin del mismo DTO. Eval paga no corrida. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`. Dashboard Admin de `expected_central`/presupuesto **no**.
+
+## Independencia periodística — 2026-09-13
+
+En código: `reporting:{source_id|host}` cuenta como procedencia demostrada (HTML extraído, fetch no fallido). Origen común explícito (`wire:` / `comunicado:` / `attributed:`) prevalece sobre dominio distinto. Reprint colapsa por excerpt y por fingerprint **del cuerpo**. `requires_authoritative_source` estrecha la primaria: recuento observable y presentación de denuncia no la exigen; designación, tarifa, fallo, cifra material y acusación de verdad sí. CHECKED por `independent_reporting` fail-closed sin `claim=` y si hay acusación sensible o primaria requerida. Contrato: `SupportKind` opcional en `SupportBasis` (snapshots viejos siguen validando).
+
+Tests de política: `test_independent_reporting.py` (14). Ajustes: snippets unknown en `test_three_unknown_documents`; denuncia sin `primary_source_required`; reprints `count≤1`; `test_evidence_posture` `known_independent_count≤1`; `test_pipeline_politics` elige el claim de cifra (recovery de cobertura crea un segundo claim por «reconoció» en el lead; no es relajación de independencia). Suite API 2026-09-13: 474 passed.
+
+Reevaluación de techos (sin eval paga, sin recheck del claim `925ddcf5`): Federman designación/traición, tarifas, sobreseimiento Mendoza y «17.000 normas» siguen `requires_authoritative_source` + plan con primaria. Un solo medio o reprint/agencia → SINGLE_SOURCE. La presentación de denuncia ya no exige primaria. El diagnóstico de `925ddcf5` (atribución SINGLE_SOURCE, sin acreditar la comparación económica) no se reabre: utterance vs hecho subyacente se conserva; reporting no confirma el dato de The Economist.
+
+Eval con modelos reales sigue fuera (`scripts/run_editorial_eval.py`).
 
 ## Parcial / stub / posible defecto
 

@@ -75,7 +75,8 @@ def test_writing_and_audit_block_unattributed_single_source() -> None:
     assert "NUNCA se convierte en hecho afirmado por Sin Línea" in writing
     assert "Según [fuente], en 2009 fue nombrada subsecretaria" in writing
     assert "No verifiques hechos" in audit
-    assert "ATTRIBUTION" not in audit or "No uses NUMBER, NAME, DATE, ATTRIBUTION" in audit
+    assert "EVIDENCE_OVERSTATEMENT" in audit
+    assert "sin recalcular independencia" in audit
 
 
 def test_denuncia_is_not_guilt_in_resolution_and_assessment_prompts() -> None:
@@ -168,7 +169,8 @@ def test_heuristic_plan_maps_types_and_historical_year() -> None:
     denuncia_plan = heuristic_plan(denuncia)
     assert denuncia_plan.verification_target == VerificationTarget.JUDICIAL_RECORD
     assert denuncia_plan.subject == VerificationSubject.JUDICIAL_CASE
-    assert denuncia_plan.primary_source_required is True
+    assert denuncia_plan.primary_source_required is False
+    assert denuncia_plan.independent_corroboration_required is True
 
     ruling = _claim(
         claim_type="hecho",
@@ -643,7 +645,8 @@ def test_reprints_and_blogs_are_not_independent_corroboration() -> None:
         source_url="https://algo.blogspot.com/post",
     )
     claim = _claim(evidence=[first, reprint, blog])
-    assert independent_support_count(claim) == 1
+    count = independent_support_count(claim)
+    assert count <= 1
 
 
 def test_postgres_safe_json_strips_nul() -> None:

@@ -12,7 +12,7 @@ from app.core.source_content import (
     body_source_from_item,
     has_extracted_body,
 )
-from app.core.text import normalize_name, token_set
+from app.core.text import normalize_name, token_set, content_fingerprint
 from app.core.urls import canonicalize_url, url_domain
 from app.domain.enums import EvidenceType
 from app.models import Claim
@@ -22,6 +22,7 @@ from app.schemas.editorial_evidence import (
     PropositionRole,
     StatementEvidenceClass,
     SupportBasis,
+    SupportKind,
 )
 from app.services.claim_coverage import cited_primary_urls, is_mixed_proposition, proposition_role_for
 
@@ -65,6 +66,46 @@ _CONSTITUTIVE_HOSTS = (
 )
 _VIDEO_ID_RE = re.compile(r"(?:v=|/embed/|/shorts/|/watch/)?([A-Za-z0-9_-]{11})")
 _YOUTUBE_HOSTS = ("youtube.com", "youtu.be")
+_AUTHORITATIVE_PREFIXES = ("cited:", "constitutive:", "youtube:", "vimeo:")
+_WIRE_AGENCIES = (
+    ("telam", "telam"),
+    ("reuters", "reuters"),
+    ("associated press", "ap"),
+    ("agence france-presse", "afp"),
+    (" agence france presse", "afp"),
+    ("noticias argentinas", "na"),
+    ("diarios y noticias", "dyn"),
+)
+_WIRE_SHORT = (
+    (re.compile(r"\bafp\b", re.I), "afp"),
+    (re.compile(r"\befe\b", re.I), "efe"),
+    (re.compile(r"\bdyn\b", re.I), "dyn"),
+)
+_WIRE_FRAME = (
+    "segun ",
+    "según ",
+    "informo ",
+    "informó ",
+    "reporto ",
+    "reportó ",
+    "reprodujo ",
+    "agencia ",
+    "de la agencia ",
+)
+_COMUNICADO_RE = re.compile(
+    r"(?:seg[uú]n|reprodu(?:jo|cen)|difundi[oó]|inform[oó])\s+"
+    r"(?:un |el |la )?(comunicado|parte oficial|gacetilla)"
+    r"(?:\s+(?:de|del|de la)\s+([^.,;:]{3,50}))?",
+    re.I,
+)
+_NAMED_SOURCE_RE = re.compile(
+    r"\bseg[uú]n\s+(?:la |el |las |los )?"
+    r"((?:ministerio|secretar[ií]a|indec|polic[ií]a federal|gendarmer[ií]a|"
+    r"prefectura|casa rosada|jefatura de gabinete|ente regulador|enre|enargas|"
+    r"bolet[ií]n oficial)[^.,;:]{0,40})",
+    re.I,
+)
+_BODY_REPRINT_MIN_TOKENS = 40
 
 
 def _canonicalize_claim_type(raw: str | None) -> str:
@@ -168,6 +209,13 @@ def _host_matches(host: str, candidates: tuple[str, ...]) -> bool:
 
 
 def information_origin_for_row(claim: Claim, row) -> str | None:
+    from app.services.claim_meaning import attributed_statement
+    # A publication repeating a statement does not independently observe its
+    # underlying fact, even when it links to the interview or a press release.
+    role = proposition_role_for(claim)
+    excerpt = getattr(row, "excerpt", None) or ""
+    if role != PropositionRole.UTTERANCE and attributed_statement(excerpt):
+        return None
     key = document_key(row)
     blobs = _blobs(row)
     cited = cited_primary_urls(*blobs)
@@ -181,7 +229,6 @@ def information_origin_for_row(claim: Claim, row) -> str | None:
         host = _host(url)
         if host and not _is_weak_independent_host(host):
             return f"cited:{canonicalize_url(url)}"
-    role = proposition_role_for(claim)
     host = _host(key or "")
     item = getattr(row, "source_item", None)
     body_source = usable_body_source(item)
@@ -198,8 +245,69 @@ def information_origin_for_row(claim: Claim, row) -> str | None:
         and _host_matches(host, _CONSTITUTIVE_HOSTS)
         and kind in {"documento", "cifra"}
         and body_source == BODY_SOURCE_EXTRACTED_HTML
+        and not _has_attribution(getattr(row, "excerpt", None) or "")
     ):
         return f"constitutive:{key}"
+    shared = _explicit_shared_origin(role, blobs)
+    if shared:
+        return shared
+    return _reporting_origin(row)
+
+
+def _explicit_shared_origin(role: PropositionRole, blobs: tuple[str | None, ...]) -> str | None:
+    """Named wire, comunicado or attributed record. Distinct domains do not override this."""
+    blob = " ".join(part for part in blobs if part)
+    if not blob.strip():
+        return None
+    folded = normalize_name(blob)
+    lowered = blob.casefold()
+    for name, key in _WIRE_AGENCIES:
+        if name in folded and _framed_as_source(folded, name):
+            return f"wire:{key}"
+    for pattern, key in _WIRE_SHORT:
+        if pattern.search(blob) and any(frame.strip() in lowered for frame in _WIRE_FRAME):
+            return f"wire:{key}"
+    comunicado = _COMUNICADO_RE.search(blob)
+    if comunicado:
+        org = (comunicado.group(2) or "").strip()
+        if org:
+            return f"comunicado:{normalize_name(org)[:48]}"
+    if role != PropositionRole.UTTERANCE:
+        named = _NAMED_SOURCE_RE.search(blob)
+        if named:
+            token = normalize_name(named.group(1) or "")[:48]
+            if token:
+                return f"attributed:{token}"
+    return None
+
+
+def _framed_as_source(folded: str, name: str) -> bool:
+    if f"segun {name}" in folded or f"agencia {name}" in folded:
+        return True
+    if f"informo {name}" in folded or f"{name} informo" in folded:
+        return True
+    if f"reporto {name}" in folded or f"reprodujo {name}" in folded:
+        return True
+    if f"de {name}" in folded and any(token in folded for token in ("segun", "informo", "agencia", "cable")):
+        return True
+    return False
+
+
+def _reporting_origin(row) -> str | None:
+    item = getattr(row, "source_item", None)
+    if usable_body_source(item) != BODY_SOURCE_EXTRACTED_HTML:
+        return None
+    if fetch_ok_from_item(item) is False:
+        return None
+    host = _host(document_key(row) or "")
+    if host and _is_weak_independent_host(host):
+        return None
+    src = getattr(item, "source", None) if item is not None else None
+    source_id = getattr(src, "id", None) if src is not None else None
+    if source_id:
+        return f"reporting:{source_id}"
+    if host:
+        return f"reporting:{host}"
     return None
 
 
@@ -214,6 +322,32 @@ def _reprint_of(tokens_a: set[str], tokens_b: set[str], excerpt_a: str, excerpt_
     return overlap / min(len(tokens_a), len(tokens_b)) >= _REPRINT_CONTAINMENT
 
 
+def _row_body_fingerprint(row) -> str | None:
+    item = getattr(row, "source_item", None)
+    body = (getattr(item, "clean_text", None) if item is not None else None) or ""
+    if not body.strip():
+        return None
+    return content_fingerprint(title="", body=body)
+
+
+def _body_tokens(row) -> set[str]:
+    item = getattr(row, "source_item", None)
+    body = (getattr(item, "clean_text", None) if item is not None else None) or ""
+    return token_set(body)
+
+
+def _same_material_copy(row, group: dict) -> bool:
+    fp = _row_body_fingerprint(row)
+    if fp and group.get("fingerprint") and fp == group["fingerprint"]:
+        return True
+    body_tokens = _body_tokens(row)
+    other = group.get("body_tokens") or set()
+    if len(body_tokens) >= _BODY_REPRINT_MIN_TOKENS and len(other) >= _BODY_REPRINT_MIN_TOKENS:
+        overlap = len(body_tokens & other)
+        return overlap / min(len(body_tokens), len(other)) >= _REPRINT_CONTAINMENT
+    return False
+
+
 @dataclass
 class OriginAssessment:
     known_independent: int = 0
@@ -221,6 +355,10 @@ class OriginAssessment:
     reprint_collapsed: int = 0
     documents_consulted: int = 0
     documents_supporting: int = 0
+    documents_qualifying: int = 0
+    documents_contradicting: int = 0
+    authoritative_independent: int = 0
+    reporting_independent: int = 0
     document_keys: list[str] = field(default_factory=list)
     information_origins: list[str] = field(default_factory=list)
     statement_evidence_class: StatementEvidenceClass | None = None
@@ -231,6 +369,8 @@ def assess_origins(claim: Claim, *, packet_size: int | None = None) -> OriginAss
     result = OriginAssessment(
         documents_consulted=packet_size if packet_size is not None else len(getattr(claim, "evidence", None) or []),
         documents_supporting=len(supports),
+        documents_qualifying=sum(row.evidence_type == EvidenceType.QUALIFIES for row in (claim.evidence or [])),
+        documents_contradicting=sum(row.evidence_type == EvidenceType.CONTRADICTS for row in (claim.evidence or [])),
     )
     groups: list[dict] = []
     for row in supports:
@@ -246,7 +386,9 @@ def assess_origins(claim: Claim, *, packet_size: int | None = None) -> OriginAss
         placed = False
         for group in groups:
             same_origin = bool(origin and group["origin"] and origin == group["origin"])
-            reprint = _reprint_of(tokens, group["tokens"], excerpt, group["excerpt"])
+            reprint = _reprint_of(tokens, group["tokens"], excerpt, group["excerpt"]) or _same_material_copy(
+                row, group
+            )
             if same_origin or reprint:
                 group["members"] += 1
                 if reprint and not same_origin:
@@ -266,19 +408,24 @@ def assess_origins(claim: Claim, *, packet_size: int | None = None) -> OriginAss
                 "members": 1,
                 "reprint": False,
                 "doc": doc,
+                "fingerprint": _row_body_fingerprint(row),
+                "body_tokens": _body_tokens(row),
             }
         )
     known_ids: set[str] = set()
     unknown = 0
-    for index, group in enumerate(groups):
+    for group in groups:
         if group["origin"]:
             known_ids.add(group["origin"])
-        elif group["reprint"] or group["members"] > 1:
-            known_ids.add(f"reprint:{group['doc'] or index}")
         else:
+            # Recognizing a reproduction does not establish its original source.
             unknown += 1
     result.known_independent = len(known_ids)
     result.unknown_groups = unknown
+    result.authoritative_independent = len(
+        {item for item in known_ids if item.startswith(_AUTHORITATIVE_PREFIXES)}
+    )
+    result.reporting_independent = len({item for item in known_ids if item.startswith("reporting:")})
     result.information_origins = sorted(item for item in known_ids if not item.startswith("reprint:"))
     role = proposition_role_for(claim)
     if _canonicalize_claim_type(getattr(claim, "claim_type", None)) == "declaracion" or role == PropositionRole.UTTERANCE:
@@ -358,6 +505,35 @@ def _has_attribution(text: str) -> bool:
     return any(marker in folded or marker in lowered for marker in _ATTRIBUTION_MARKERS)
 
 
+def support_kind_for(
+    *,
+    status: str,
+    assessment: OriginAssessment,
+    primary_access: str | None,
+    role: PropositionRole | None = None,
+) -> SupportKind:
+    if status == "CONFLICTING":
+        return SupportKind.CONFLICTING_EVIDENCE
+    if status == "UNCERTAIN":
+        return SupportKind.INSUFFICIENT
+    if status == "SUPPORTED":
+        if (
+            assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY
+            or primary_access == "found_relevant"
+            or assessment.authoritative_independent >= 1
+        ):
+            return SupportKind.PRIMARY_SOURCE
+        return SupportKind.INDEPENDENT_REPORTING
+    if (
+        role == PropositionRole.UTTERANCE
+        and assessment.statement_evidence_class == StatementEvidenceClass.ATTRIBUTED_REPORT
+    ):
+        return SupportKind.ATTRIBUTED_STATEMENT
+    if status == "SINGLE_SOURCE":
+        return SupportKind.SINGLE_REPORT
+    return SupportKind.INSUFFICIENT
+
+
 def support_basis_from_assessment(
     claim: Claim,
     assessment: OriginAssessment,
@@ -365,19 +541,33 @@ def support_basis_from_assessment(
     demotion: Demotion = Demotion.NONE,
     evaluated_text: str | None = None,
     primary_access: str | None = None,
+    status: str | None = None,
+    role: PropositionRole | None = None,
 ) -> SupportBasis:
+    final_status = status or getattr(getattr(claim, "status", None), "value", None) or str(
+        getattr(claim, "status", "") or ""
+    )
+    kind = support_kind_for(
+        status=final_status,
+        assessment=assessment,
+        primary_access=primary_access,
+        role=role,
+    )
     return SupportBasis(
         known_independent_count=assessment.known_independent,
         unknown_group_count=assessment.unknown_groups,
         reprint_collapsed_count=assessment.reprint_collapsed,
         documents_consulted=assessment.documents_consulted,
         documents_supporting=assessment.documents_supporting,
+        documents_qualifying=assessment.documents_qualifying,
+        documents_contradicting=assessment.documents_contradicting,
         origin_groups_known=assessment.known_independent,
         origin_groups_unknown=assessment.unknown_groups,
         statement_evidence_class=(
             assessment.statement_evidence_class.value if assessment.statement_evidence_class else None
         ),
         primary_access=primary_access,
+        kind=kind.value,
         demotion=demotion.value,
         evaluated_canonical_text=evaluated_text or claim.canonical_text,
         document_keys=assessment.document_keys,
@@ -430,7 +620,12 @@ def final_reason_for(demotion: Demotion, assessment: OriginAssessment, status: s
     if demotion == Demotion.MIXED_CLAIM_NO_EXCEPTION:
         return "La proposición sigue mixta; no se aplicó la excepción de declaración."
     if assessment.known_independent >= 2:
-        return f"{assessment.known_independent} orígenes informativos distintos sostienen la proposición."
+        if assessment.authoritative_independent:
+            return f"{assessment.known_independent} orígenes informativos distintos sostienen la proposición."
+        return (
+            f"{assessment.known_independent} coberturas periodísticas independientes "
+            "sostienen la proposición."
+        )
     if assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
         return "Una fuente primaria auténtica documenta el dicho, no el contenido de lo afirmado."
     if assessment.known_independent == 1:

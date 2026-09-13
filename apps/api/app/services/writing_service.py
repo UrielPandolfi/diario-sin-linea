@@ -126,7 +126,10 @@ class WritingService:
         return self.session.scalars(stmt).first()
 
     def _run(self, event: Event, *, trigger: str) -> dict:
-        claims_snapshot = snapshot_claims(list(event.claims))
+        pipeline_runs = self.pipeline.list_for_event(event.id, limit=50)
+        claim_run, verify_run = pair_from_runs(list(pipeline_runs))
+        decisions = ((verify_run.metadata_json if verify_run is not None else None) or {}).get("decision_by_claim_id") or {}
+        claims_snapshot = snapshot_claims(list(event.claims), decisions=decisions)
         base = {
             "trigger": trigger,
             "claims_snapshot": claims_snapshot,
@@ -166,7 +169,6 @@ class WritingService:
             base["material_reasons"] = change.reasons
             return base
 
-        pipeline_runs = self.pipeline.list_for_event(event.id, limit=50)
         article_context = build_article_context(
             event,
             entities=self.entities.list_for_event(event.id),

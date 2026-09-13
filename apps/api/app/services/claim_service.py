@@ -50,6 +50,7 @@ from app.services.claim_coverage import (
     split_compound_extracted,
 )
 from app.services.information_origin import assess_origins, has_support_evidence
+from app.services.claim_meaning import preserve_extracted_meaning, split_attributed_content
 from app.services.verification_outcome import (
     is_verification_locked,
     verification_view_for_event,
@@ -239,7 +240,7 @@ class ClaimService:
         self.resolver_llm = resolver_llm
         self.escalated_resolver_llm = escalated_resolver_llm
 
-    def resolve(self, event_id: UUID, *, trigger: str, context: dict | None = None) -> dict:
+    def resolve(self, event_id: UUID, *, trigger: str, context: dict | None = None, claim_id: UUID | None = None) -> dict:
         event = self._load_event(event_id)
         if event is None:
             raise ValueError("event_not_found")
@@ -257,7 +258,7 @@ class ClaimService:
             event_id=event.id,
             stage=CLAIM_STAGE,
             status=PipelineStatus.RUNNING,
-            metadata_json={"trigger": trigger, "context": context or {}},
+            metadata_json={"trigger": trigger, "context": context or {}, "target_claim_id": str(claim_id) if claim_id else None},
         )
         self.pipeline.add(run)
         try:
@@ -278,7 +279,11 @@ class ClaimService:
                 event_id=event.id,
                 pipeline_run_id=run.id,
             ):
-                result = self._run(event)
+                if claim_id:
+                    with self.session.begin_nested():
+                        result = self._run(event, claim_id=claim_id)
+                else:
+                    result = self._run(event)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}
@@ -317,7 +322,9 @@ class ClaimService:
         )
         return self.session.scalars(stmt).first()
 
-    def _run(self, event: Event) -> dict:
+    def _run(self, event: Event, *, claim_id: UUID | None = None) -> dict:
+        if claim_id is not None:
+            return self._reextract_one(event, claim_id)
         sources = self._numbered_sources(event)
         if not sources:
             return {
@@ -336,8 +343,14 @@ class ClaimService:
             schema=ClaimExtractionBatch,
         )
         split_claims: list[ExtractedClaim] = []
+        pair_keys: list[tuple[str, str]] = []
         for raw in batch.claims:
-            split_claims.extend(split_compound_extracted(raw))
+            raw = preserve_extracted_meaning(raw, sources)
+            layers = [preserve_extracted_meaning(layer, sources) for layer in split_attributed_content(raw)]
+            if len(layers) == 2:
+                pair_keys.append((assertion_key_for(layers[0]), assertion_key_for(layers[1])))
+            for layer in layers:
+                split_claims.extend(split_compound_extracted(layer))
         outcome = self._merge_extracted(split_claims, sources)
         claims = self._persist(event, outcome.pending)
         self.session.flush()
@@ -372,7 +385,13 @@ class ClaimService:
                     elif recovered:
                         row.gap_reason = row.gap_reason or GapReason.RECOVERY_FAILED.value
         fingerprint = claims_fingerprint(claims)
+        ids_by_key = {assertion_key_for(claim): str(claim.id) for claim in claims}
+        attribution_pairs = [
+            {"attribution_claim_id": ids_by_key[a], "factual_claim_id": ids_by_key[b]}
+            for a, b in dict.fromkeys(pair_keys) if a in ids_by_key and b in ids_by_key
+        ]
         empty = {
+            "attribution_pairs": attribution_pairs,
             "extracted": len(batch.claims),
             "persisted": len(claims),
             "resolved": 0,
@@ -421,10 +440,58 @@ class ClaimService:
             "resolved": len(claims),
             "needs_external_verification": needs,
             "escalated_claim_refs": escalated_done,
+            "attribution_pairs": attribution_pairs,
             "contract_version": CONTRACT_VERSION,
             "claims_fingerprint": fingerprint,
             "coverage": coverage.model_dump(mode="json"),
         }
+
+    def _reextract_one(self, event: Event, claim_id: UUID) -> dict:
+        """Explicit recheck through extraction/resolution, preserving identity and runs."""
+        target = self.session.get(Claim, claim_id)
+        if target is None or target.event_id != event.id:
+            raise ValueError("claim_not_in_event")
+        before = {key: getattr(target, key) for key in (
+            "canonical_text", "claim_type", "subject", "predicate", "object_text", "normalized_value", "unit"
+        )}
+        before["status"] = target.status.value
+        before["evidence"] = [
+            {"source_item_id": str(ev.source_item_id), "evidence_type": ev.evidence_type.value,
+             "excerpt": ev.excerpt, "confidence": ev.confidence} for ev in target.evidence
+        ]
+        sources = self._numbered_sources(event)
+        prompt = self._extraction_prompt(event, sources) + (
+            "\nReextraé exclusivamente esta proposición, manteniendo su atribución y su identidad. "
+            "No extraigas otros claims ni conviertas el dicho en su contenido factual. "
+            f"Devolvé exactamente un claim: {target.canonical_text}"
+        )
+        extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+        batch = extractor.generate_structured(system_prompt=load_prompt("claim_extraction.md"),
+                                               user_prompt=prompt, schema=ClaimExtractionBatch)
+        if len(batch.claims) != 1:
+            raise ValueError("targeted_extraction_requires_one_claim")
+        raw = preserve_extracted_meaning(batch.claims[0], sources)
+        # A targeted extraction cannot silently change speech into a world fact.
+        from app.services.claim_meaning import attributed_statement
+        if attributed_statement(target.canonical_text) and not attributed_statement(raw.canonical_text):
+            raise ValueError("targeted_extraction_lost_attribution")
+        outcome = self._merge_extracted([raw], sources)
+        if len(outcome.pending) != 1:
+            raise ValueError("targeted_extraction_invalid_evidence")
+        self._persist(event, outcome.pending, target_claim=target)
+        resolver = self.resolver_llm or get_claim_resolution_provider(escalated=False)
+        resolution = resolver.generate_structured(system_prompt=load_prompt("claim_resolution.md"),
+                                                  user_prompt=self._resolution_prompt(event, [target]),
+                                                  schema=ClaimResolutionBatch)
+        needs = self._apply_resolution([target], resolution, event_id=event.id, recheck=True)
+        self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        return {"extracted": 1, "persisted": 1, "resolved": 1, "needs_external_verification": needs,
+                "escalated_claim_refs": [], "contract_version": CONTRACT_VERSION,
+                "claims_fingerprint": claims_fingerprint(claims), "coverage": coverage.model_dump(mode="json"),
+                "claim_before": before, "extraction": raw.model_dump(mode="json"),
+                "resolution": resolution.model_dump(mode="json")}
 
     def _numbered_sources(self, event: Event) -> list[SourceItem]:
         links = [link for link in event.event_sources if link.source_item is not None]
@@ -590,7 +657,7 @@ class ClaimService:
                 valid[item.id] = pending
         return valid
 
-    def _persist(self, event: Event, pending_by_key: dict[str, _PendingClaim]) -> list[Claim]:
+    def _persist(self, event: Event, pending_by_key: dict[str, _PendingClaim], *, target_claim: Claim | None = None) -> list[Claim]:
         existing_rows = list(
             self.session.scalars(
                 select(Claim)
@@ -601,7 +668,7 @@ class ClaimService:
         existing = {assertion_key_for(claim): claim for claim in existing_rows}
         persisted: list[Claim] = []
         for key, pending in pending_by_key.items():
-            claim = existing.get(key)
+            claim = target_claim or existing.get(key)
             if claim is None:
                 claim = Claim(
                     event_id=event.id,
@@ -716,6 +783,7 @@ class ClaimService:
         batch: ClaimResolutionBatch,
         *,
         event_id: UUID,
+        recheck: bool = False,
     ) -> list[dict]:
         verify_run, view = verification_view_for_event(self.session, event_id)
         groups: dict[str, list[Claim]] = defaultdict(list)
@@ -726,7 +794,7 @@ class ClaimService:
         for index, claim in enumerate(claims, start=1):
             item = by_ref.get(index)
             members = groups[comparison_key_for(claim)]
-            if is_verification_locked(claim, members, view, verify_run):
+            if not recheck and is_verification_locked(claim, members, view, verify_run):
                 if item is not None and item.needs_external_verification:
                     needs.append({"claim_id": str(claim.id), "claim_ref": index})
                 continue
@@ -734,6 +802,11 @@ class ClaimService:
             if status is None:
                 status = self._heuristic_status(claim)
             status = self._clamp_supported(claim, status)
+            if status == ClaimStatus.DISPROVEN:
+                # Claims resolution has no grounded contradiction contract.
+                # Verification must establish relevance before declaring falsehood.
+                status = ClaimStatus.UNCERTAIN
+                needs.append({"claim_id": str(claim.id), "claim_ref": index})
             types = {row.evidence_type for row in claim.evidence}
             if EvidenceType.SUPPORTS in types and EvidenceType.CONTRADICTS in types:
                 status = ClaimStatus.CONFLICTING
@@ -794,6 +867,7 @@ def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
     if status != ClaimStatus.SUPPORTED:
         return status
     from app.schemas.editorial_evidence import PropositionRole, StatementEvidenceClass
+    from app.services.verification_policy import requires_authoritative_source
 
     assessment = assess_origins(claim)
     role = None
@@ -805,6 +879,12 @@ def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
         role = None
     if role == PropositionRole.UTTERANCE and assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
         return ClaimStatus.SUPPORTED
+    if requires_authoritative_source(claim):
+        if assessment.authoritative_independent >= 2:
+            return ClaimStatus.SUPPORTED
+        if has_support_evidence(claim) or assessment.unknown_groups or assessment.known_independent == 1:
+            return ClaimStatus.SINGLE_SOURCE
+        return ClaimStatus.UNCERTAIN
     if assessment.known_independent >= 2:
         return ClaimStatus.SUPPORTED
     if has_support_evidence(claim) or assessment.unknown_groups or assessment.known_independent == 1:

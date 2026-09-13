@@ -20,9 +20,10 @@ def _enum_value(value: object) -> str:
     return value.value if hasattr(value, "value") else str(value)
 
 
-def snapshot_claims(claims: Sequence[Claim]) -> list[dict]:
+def snapshot_claims(claims: Sequence[Claim], *, decisions: dict | None = None) -> list[dict]:
     rows: list[dict] = []
     for claim in sorted(claims, key=lambda row: str(row.id)):
+        basis = ((decisions or {}).get(str(claim.id)) or {}).get("support_basis") or {}
         rows.append(
             {
                 "id": str(claim.id),
@@ -31,6 +32,10 @@ def snapshot_claims(claims: Sequence[Claim]) -> list[dict]:
                 "importance": _enum_value(claim.importance),
                 "normalized_value": claim.normalized_value,
                 "claim_type": claim.claim_type,
+                "evidence_posture": {key: basis.get(key) for key in (
+                    "documents_supporting", "documents_qualifying", "documents_contradicting",
+                    "known_independent_count", "unknown_group_count", "reprint_collapsed_count", "primary_access", "kind",
+                )} if basis else None,
             }
         )
     return rows
@@ -74,6 +79,9 @@ def detect_material_change(
                 reasons.append("new_medium_claim")
             continue
         before = prev_by_id[claim_id]
+        if (row.get("importance") != ClaimImportance.LOW
+                and row.get("evidence_posture") != before.get("evidence_posture")):
+            reasons.append("evidence_posture_changed")
         before_status = _status(before["status"])
         after_status = _status(row["status"])
         if before_status == ClaimStatus.CONFLICTING and after_status in _RESOLVED:

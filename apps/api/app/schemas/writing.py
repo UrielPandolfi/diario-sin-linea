@@ -4,6 +4,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ClaimImportance, ClaimStatus, EntityType, EventSourceRelation, EvidenceType
+from app.schemas.editorial_evidence import SupportBasis
 
 
 class ArticleDraftSegment(BaseModel):
@@ -58,11 +59,8 @@ class ContextSourceText(BaseModel):
     text: str
 
 
-class ContextSupportBasis(BaseModel):
-    known_independent_count: int = 0
-    unknown_group_count: int = 0
-    statement_evidence_class: str | None = None
-    primary_access: str | None = None
+class ContextSupportBasis(SupportBasis):
+    # Accept older snapshots that explicitly serialized null.
     demotion: str | None = None
 
 
@@ -100,6 +98,7 @@ class ContextClaim(BaseModel):
     proposition_role: str | None = None
     final_reason: str | None = None
     support_basis: ContextSupportBasis | None = None
+    related_claim_ids: list[str] = Field(default_factory=list)
 
 
 class ContextEntity(BaseModel):

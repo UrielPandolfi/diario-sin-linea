@@ -207,7 +207,7 @@ class AuditService:
         while True:
             bind_model_role(ModelRole.AUDITING.value, provider=self.settings.auditing_provider)
             structural = structural_findings(snapshot, article)
-            user_prompt = self._audit_user_prompt(article)
+            user_prompt = self._audit_user_prompt(article, article_context)
             self.session.commit()
             llm_result = auditor.generate_structured(
                 system_prompt=load_prompt("article_audit.md"),
@@ -304,18 +304,37 @@ class AuditService:
 
         raise RuntimeError("audit_loop_escaped")
 
-    def _audit_user_prompt(self, article: Article) -> str:
+    def _audit_user_prompt(self, article: Article, article_context: ArticleContext | None = None) -> str:
         payload = {
             "headline": article.headline,
             "summary": article.summary,
             "body": article.body,
             "body_blocks": article.body_blocks,
         }
+        if article_context is not None:
+            from app.services.audit_policy import _claim_ids_from_blocks
+            used = set(_claim_ids_from_blocks(article.body_blocks))
+            claims = [claim for bucket in (article_context.confirmed_claims, article_context.single_source_claims,
+                       article_context.conflicting_claims, article_context.uncertain_claims,
+                       article_context.disproven_claims, article_context.outdated_claims) for claim in bucket]
+            related = {cid for claim in claims if claim.id in used for cid in claim.related_claim_ids}
+            def compact(claim):
+                return {
+                    "claim_id": claim.id, "claim_ref": claim.ref, "canonical_text": claim.canonical_text,
+                    "claim_type": claim.claim_type, "importance": claim.importance.value,
+                    "status": claim.status.value, "proposition_role": claim.proposition_role,
+                    "final_reason": claim.final_reason, "related_claim_ids": claim.related_claim_ids,
+                    "support_basis": claim.support_basis.model_dump(exclude={"document_keys", "information_origins", "evaluated_canonical_text"}) if claim.support_basis else None,
+                }
+            payload["evidence_posture"] = [compact(c) for c in claims if c.id in used | related]
+            # Headline/summary have no claim_refs in the current contract. These
+            # compact candidates let Audit identify their claims without new I/O.
+            payload["headline_claim_candidates"] = [compact(c) for c in claims if c.id not in used | related]
         return (
-            "Audita solo el lenguaje y el sesgo de este texto. "
-            "No verifiques hechos, cifras, evidencia ni cobertura. "
+            "Auditá el lenguaje y que el nivel de certeza respete evidence_posture de esta versión. "
+            "No verifiques hechos ni reevalúes la evidencia o cobertura. "
             "No reescribas el artículo; devolvé passed e issues. "
-            "Si no hay sesgo de lenguaje, passed=true e issues=[].\n"
+            "Los candidatos adicionales solo sirven si se usan en titular/bajada; no exijas incluirlos.\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
@@ -331,7 +350,7 @@ class AuditService:
             "issues": [issue.model_dump(mode="json") for issue in issues],
         }
         return (
-            "Corregí solo el sesgo de lenguaje señalado. "
+            "Corregí el sesgo o el exceso de certeza señalado, respetando el support_basis del snapshot. "
             "Preservá datos, citas literales y atribuciones. "
             "No neutralices declaraciones claramente atribuidas. "
             "No inventes hechos ni uses el context para reabrir verificación factual. "

@@ -79,6 +79,15 @@ class PrimaryAccess(StrEnum):
     ACCESS_FAILED = "access_failed"
 
 
+class SupportKind(StrEnum):
+    PRIMARY_SOURCE = "primary_source"
+    INDEPENDENT_REPORTING = "independent_reporting"
+    SINGLE_REPORT = "single_report"
+    ATTRIBUTED_STATEMENT = "attributed_statement"
+    CONFLICTING_EVIDENCE = "conflicting_evidence"
+    INSUFFICIENT = "insufficient"
+
+
 class ExpectedCentral(BaseModel):
     proposition: str
     role: PropositionRole = PropositionRole.OTHER
@@ -134,10 +143,13 @@ class SupportBasis(BaseModel):
     reprint_collapsed_count: int = 0
     documents_consulted: int = 0
     documents_supporting: int = 0
+    documents_qualifying: int = 0
+    documents_contradicting: int = 0
     origin_groups_known: int = 0
     origin_groups_unknown: int = 0
     statement_evidence_class: str | None = None
     primary_access: str | None = None
+    kind: str | None = None
     demotion: str = Demotion.NONE.value
     evaluated_canonical_text: str | None = None
     document_keys: list[str] = Field(default_factory=list)

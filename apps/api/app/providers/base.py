@@ -16,6 +16,7 @@ class SearchQuery(BaseModel):
     freshness: str | None = None
     since: datetime | None = None
     until: datetime | None = None
+    include_domains: list[str] | None = None
 
 
 class SearchHit(BaseModel):

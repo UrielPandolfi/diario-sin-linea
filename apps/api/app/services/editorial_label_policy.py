@@ -18,7 +18,7 @@ class ClaimEditorial:
 
 
 def is_checked(claim: Claim, view: VerificationView) -> bool:
-    return claim.status == ClaimStatus.SUPPORTED and is_strong_verification(claim.id, view)
+    return claim.status == ClaimStatus.SUPPORTED and is_strong_verification(claim.id, view, claim=claim)
 
 
 def labels_for_event_claims(claims: list[Claim], view: VerificationView) -> dict[str, ClaimEditorial]:

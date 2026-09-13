@@ -29,7 +29,7 @@ class ExtractedEvidence(BaseModel):
     confidence: float | None = None
 
 
-class ExtractedClaim(BaseModel):
+class ExtractedProposition(BaseModel):
     canonical_text: str
     claim_type: str | None = None
     importance: ClaimImportance = ClaimImportance.MEDIUM
@@ -39,7 +39,9 @@ class ExtractedClaim(BaseModel):
     normalized_value: OptionalStr = None
     unit: str | None = None
     occurred_at: datetime | None = None
+class ExtractedClaim(ExtractedProposition):
     evidence: list[ExtractedEvidence] = Field(default_factory=list)
+    factual_content: ExtractedProposition | None = None
 
 
 class ClaimExtractionBatch(BaseModel):

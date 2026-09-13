@@ -35,6 +35,8 @@ _URL_RE = re.compile(r"https?://[^\s\]>)+]+", re.IGNORECASE)
 _QUOTE_RE = re.compile(r"[\"“”«»]([^\"“”«»]{12,})[\"“”«»]")
 
 _UTTERANCE_MARKERS = (
+    "reconoció",
+    "reconocio",
     "dijo",
     "afirmó",
     "afirmo",

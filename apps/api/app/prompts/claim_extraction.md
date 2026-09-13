@@ -57,6 +57,18 @@ Preferí pocos claims HIGH o MEDIUM útiles a muchos LOW.
 
 Claims materiales y atómicos:
 
+Para cada declaración relevante distinguí la atribución de su contenido. Si el contenido es material y objetivamente comprobable, completá `factual_content` con una proposición propia (mismos campos que el claim, sin evidence ni factual_content). El servicio la convierte en otro Claim con las mismas publicaciones como reportes iniciales, sin asumir confirmación. Esto es obligatorio para contenido material sobre cantidades, porcentajes, dinero, estadísticas, fechas relevantes, resultados electorales, cargos, leyes/decretos/regulaciones, presupuestos, registros, acusaciones factuales y hechos históricos. Resolvé pronombres solo con el contexto disponible; conservá aproximaciones y períodos, sin inventarlos.
+
+Ejemplo: “Milei afirmó que su Gobierno eliminó unas 17.000 normas” es `declaracion`, subject=Milei, normalized_value=null. Su factual_content es “El Gobierno de Milei eliminó unas 17.000 normas”, tipo=cifra, subject=Gobierno de Milei, predicate=eliminó, normalized_value="17000", unit=normas, occurred_at=null si no hay fecha propia. Ambas son hipótesis a resolver. No emitas además una copia plana de factual_content.
+
+Usá factual_content=null para opiniones subjetivas, promesas y valoraciones políticas sin criterio objetivo de comparación (“las reformas más importantes/profundas”, “más reformas que todos los gobiernos de los últimos 100 años” sin definir qué cuenta como reforma). La presencia de un número como “100 años” no convierte una valoración en estadística. No confundas una acusación verificable con una culpabilidad confirmada.
+
+Deduplicá paráfrasis: para el mismo conocimiento usá un único claim y combiná evidence. Si dos redacciones equivalentes sobreviven, normalizá al mismo subject, predicate y object_text; esas dimensiones se usan para conservar identidad. “Implementará un paquete de reformas más profundo” y “abrirá una nueva etapa con reformas aún más profundas”, del mismo actor y sin diferencias materiales de fecha, condición o contenido, son una misma promesa. No fusionés atribución con hecho, valores/períodos distintos ni condiciones diferentes.
+
+Una atribución como “The Economist reconoció Y” es una declaración, no la confirmación de Y. Conservá al medio como sujeto y quién nos transmite esa atribución (por ejemplo, “Según La Derecha Diario, The Economist reconoció Y”). La evidencia debe seguir apuntando a la publicación intermediaria; no inventes acceso a The Economist. Si verificar Y también aporta valor, emití otra proposición estadística diferenciada, sin tratar la cita como confirmación del dato.
+
+En una trayectoria “desde valores cercanos a A antes de su llegada al poder hasta alrededor de B”, conservá ambos valores, sus aproximaciones, indicador, unidad, ámbito y las referencias temporales literales. No inventes fechas para esos extremos. No resumas la trayectoria en normalized_value=B: usá normalized_value=null y conservá la trayectoria completa en object_text y canonical_text. No omitas “antes de su llegada al poder”.
+
 Cada Claim representa exactamente una proposición material que pueda verificarse o contradecirse de forma independiente. Si una oración mezcla dicho + vigencia + alcance normativo, o denuncia presentada + culpabilidad, SEPARALAS. No dejes un Claim “ómnibus”.
 
 Incorrecto (un solo Claim compuesto): Myriam Bregman dijo que el régimen se aplica a menores de 14 años y que entra en vigencia el mes próximo.
@@ -127,6 +139,7 @@ Devolvé JSON con este esquema:
   - normalized_value, unit: para cifras u otras magnitudes comparables
   - occurred_at: ISO 8601 si la afirmación tiene fecha propia; si no, null
   - evidence: lista de {source_ref, evidence_type, excerpt, confidence}
+  - factual_content: proposición material comprobable dentro de una declaración, con canonical_text, claim_type, importance, subject, predicate, object_text, normalized_value, unit y occurred_at; null cuando no corresponde
     - evidence_type: SUPPORTS | CONTRADICTS | QUALIFIES | MENTIONS
     - source_ref: entero 1..N de las fuentes numeradas
     - confidence: 0 a 1
