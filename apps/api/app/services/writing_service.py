@@ -257,8 +257,10 @@ class WritingService:
         reminder = ""
         if weak:
             reminder = (
-                "Claims SINGLE_SOURCE o UNCERTAIN: no los escribas como hecho de Sin Línea; "
-                "atribución explícita, incertidumbre, u omisión.\n"
+                "Claims SINGLE_SOURCE o UNCERTAIN: pueden incluirse, pero no los escribas como "
+                "hecho categórico de Sin Línea. En titular, bajada y primer párrafo la atribución "
+                "o el lenguaje epistémico es obligatorio. Combinar dos SINGLE_SOURCE no autoriza "
+                "una síntesis categórica ni eleva la certeza.\n"
                 + "\n".join(weak)
                 + "\n\n"
             )

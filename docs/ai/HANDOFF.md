@@ -3,40 +3,40 @@
 Reemplazar este archivo al cerrar una tarea o al continuar en otro chat. No es un diario de sesiones.
 
 **Fecha:** 2026-09-13  
-**Tarea:** Un hecho reportable puede quedar `SUPPORTED` (y a veces CHECKED) por periodismo independiente, sin exigir fuente primaria a casi todo y sin «dos medios = verdad».
+**Tarea:** Writing/Audit no pueden convertir un `SINGLE_SOURCE` bien calculado en un hecho categórico. Verification no se tocó.
 
 ## Objetivo de este chat
 
-Ajuste de política de resolución/verificación: `reporting:{host}` como procedencia demostrada; primaria solo cuando `requires_authoritative_source`; CHECKED por `independent_reporting` vedado en acusaciones sensibles y claims autoritativos. Conservar `SINGLE_SOURCE`, `CONFLICTING`, `DISPROVEN` endurecido, reprints y atribución vs verdad subyacente.
+Titular, bajada y lead deben conservar el posture. Combinar dos `SINGLE_SOURCE` no eleva certeza. El dato se atribuye, no se borra.
 
 ## Avances
 
-- Origen: HTML extraído + fetch ok → `reporting:`; agencia/comunicado/atribución explícita colapsa; reprint por cuerpo (no título).
-- `requires_authoritative_source` + `heuristic_plan` / `apply_primary_requirement` / `clamp_supported_status`.
-- `is_strong_verification(..., claim=)` fail-closed; tarjeta sin copy universal de primaria ausente; `SupportKind` en el contrato.
-- Tests: `test_independent_reporting.py`; techos de Federman/tarifas/Mendoza/`material_normas` conservados.
+- Prompts de writing/audit: atribución en superficie, regla de composición, elevación semántica (militante ≠ dirigente).
+- Payload de Audit incluye `lead`; el titular se juzga por sí mismo.
+- Tipos existentes: `UNSUPPORTED_CLAIM` / `ATTRIBUTION` / `INFERENCE`.
+- Tests A–G en `test_writing_certainty.py`.
 
 ## Limitaciones
 
-No hay eval paga ni recheck del claim `925ddcf5`. Heurísticas de acusación/cifra material son conservadoras y pueden pedir primaria de más. Detección de cable de agencia depende de encuadre explícito en el texto.
+Sol sigue siendo un LLM: los tests clavan contrato, payload y bloqueo HIGH, no un validador semántico determinista. No se regeneró la nota viva de San José 1111.
 
 ## Pendientes
 
-Track B. Eval paga. Dashboard Admin de `expected_central`. Si se reabre un suceso real, republicar solo si cambia el texto o los claims de esa versión.
+Track B. Eval paga. Hover/copy de tarjetas (fuera de esta corrección). Reescribir la nota real de San José 1111 con writing+audit reales.
 
 ## Archivos relevantes
 
-`services/information_origin.py`, `services/verification_policy.py`, `services/verification_plan.py`, `services/verification_outcome.py`, `services/claim_service.py`, `services/claim_card_presentation.py`, `schemas/editorial_evidence.py`, `prompts/claim_resolution.md`, `prompts/verification.md`, `prompts/verification_plan.md`, `tests/test_independent_reporting.py`, `docs/ai/DECISIONS.md`, `docs/ai/STATE.md`.
+`prompts/article_writing.md`, `prompts/article_audit.md`, `services/writing_service.py`, `services/audit_service.py`, `tests/test_writing_certainty.py`, `docs/ai/DECISIONS.md`, `docs/ai/STATE.md`.
 
 ## Pruebas
 
 Desde `apps/api` (Postgres+Redis):
 
 ```
-python -m pytest tests/test_independent_reporting.py tests/test_verification.py tests/test_verification_plan.py tests/test_editorial_evidence.py tests/test_evidence_posture.py tests/test_pipeline_politics.py
+python -m pytest tests/test_writing_certainty.py tests/test_writing.py tests/test_audit.py tests/test_audit_policy.py tests/test_evidence_posture.py -q --tb=short
 python -m pytest -q --tb=line
 ```
 
 ## Siguiente paso
 
-No relajar `requires_authoritative_source` para designaciones, tarifas, fallos o cifras materiales. No tratar dominio distinto como independencia si el texto nombra agencia, comunicado u origen atribuido.
+No mezclar con el popover. Si se republica San José 1111, el titular debe atribuir; no eliminar Recalde/Calle del artículo.

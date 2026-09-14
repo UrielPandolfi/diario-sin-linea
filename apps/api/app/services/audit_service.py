@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.article_body import context_claim_ref_map, resolve_article_draft
+from app.core.article_body import block_plain_text, context_claim_ref_map, resolve_article_draft, split_body_paragraphs
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
@@ -48,6 +48,16 @@ def normalize_audit_result(
     from app.services.audit_policy import merge_audit_result
 
     return merge_audit_result(result, structural=structural)
+
+
+def _lead_text(article: Article) -> str:
+    blocks = article.body_blocks
+    if isinstance(blocks, list) and blocks:
+        lead = block_plain_text(blocks[0])
+        if lead:
+            return lead
+    parts = split_body_paragraphs(article.body or "")
+    return parts[0] if parts else ""
 
 
 class AuditService:
@@ -330,8 +340,10 @@ class AuditService:
             # Headline/summary have no claim_refs in the current contract. These
             # compact candidates let Audit identify their claims without new I/O.
             payload["headline_claim_candidates"] = [compact(c) for c in claims if c.id not in used | related]
+        payload["lead"] = _lead_text(article)
         return (
             "Auditá el lenguaje y que el nivel de certeza respete evidence_posture de esta versión. "
+            "Juzgá titular, bajada y lead por sí mismos: un cuerpo bien atribuido no sana un titular categórico. "
             "No verifiques hechos ni reevalúes la evidencia o cobertura. "
             "No reescribas el artículo; devolvé passed e issues. "
             "Los candidatos adicionales solo sirven si se usan en titular/bajada; no exijas incluirlos.\n"
@@ -351,6 +363,7 @@ class AuditService:
         }
         return (
             "Corregí el sesgo o el exceso de certeza señalado, respetando el support_basis del snapshot. "
+            "Si el exceso está en titular, bajada o lead, atribuí o calificá ahí; no borres el dato. "
             "Preservá datos, citas literales y atribuciones. "
             "No neutralices declaraciones claramente atribuidas. "
             "No inventes hechos ni uses el context para reabrir verificación factual. "

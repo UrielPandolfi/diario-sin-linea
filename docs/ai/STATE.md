@@ -50,6 +50,10 @@ Reevaluación de techos (sin eval paga, sin recheck del claim `925ddcf5`): Feder
 
 Eval con modelos reales sigue fuera (`scripts/run_editorial_eval.py`).
 
+## Certeza en Writing/Audit — 2026-09-13
+
+Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en titular/lead (p. ej. síntesis «dos dirigentes tienen departamentos…»). Verification no se tocó. Writing ahora exige atribución en titular, bajada y lead y prohíbe elevar certeza al combinar claims débiles. Audit recibe `lead` explícito y debe marcar HIGH con tipos ya existentes; un cuerpo atribuido no sana el titular. Tests: `test_writing_certainty.py`. Suite API: 483 passed. Eval paga no. No se reescribió la nota viva de San José 1111 en esta sesión: el caso quedó recreado en tests.
+
 ## Parcial / stub / posible defecto
 
 - UI “Próximamente”: `/seguidos`, `/notificaciones`, `/guardados`; mapa en local/home; login social en `/entrar`; cuentas en perfil.

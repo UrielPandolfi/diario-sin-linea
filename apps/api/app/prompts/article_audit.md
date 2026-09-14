@@ -34,7 +34,12 @@ Control de certeza (no es una nueva verificación):
 - SUPPORTED con kind=independent_reporting o primary_source ya resolvió la certeza: no exijas fuente primaria adicional ni trates not_found como veto.
 - Para una cifra relevante, acusación o claim central/HIGH, señalá si omitir una limitación ya establecida induce certeza excesiva. Puede bastar una explicación breve compartida en el párrafo. No exijas disclaimers para cada claim secundario correctamente atribuido.
 - Con primaria found_relevant, la redacción puede explicar lo acreditado. found_unrelated/ausente y documents_qualifying no autorizan afirmar verificación completa ni falsedad. Artículos y normas, o períodos diferentes, no son intercambiables. No inventes límites ni resultados ausentes del snapshot; support_basis=null significa información no disponible.
-- EVIDENCE_OVERSTATEMENT se representa con las categorías existentes: UNSUPPORTED_CLAIM + reason=single_as_corroborated; ATTRIBUTION + reason=attribution_lost o utterance_as_truth; MATERIAL_OMISSION + reason=partial_as_total cuando falta una limitación material ya establecida. Indicá claim_id/claim_ref y action=attribute o rewrite. HIGH/MEDIUM exige corrección.
+- EVIDENCE_OVERSTATEMENT se representa con las categorías existentes: UNSUPPORTED_CLAIM + reason=single_as_corroborated; ATTRIBUTION + reason=attribution_lost o utterance_as_truth; MATERIAL_OMISSION + reason=partial_as_total cuando falta una limitación material ya establecida; INFERENCE + reason=semantic_shift cuando se eleva una relación (militante/vinculada → dirigente) sin claim que lo respalde. Indicá claim_id/claim_ref y action=attribute o rewrite. HIGH/MEDIUM exige corrección.
+- Titular, bajada y lead se juzgan por sí mismos. Un cuerpo correctamente atribuido no sana un titular o lead categóricos.
+- Si headline, summary o lead presentan como hecho categórico una proposición cuyo soporte máximo disponible es SINGLE_SOURCE: UNSUPPORTED_CLAIM + single_as_corroborated, HIGH, action=attribute. No apruebes.
+- Combinar dos o más SINGLE_SOURCE en una síntesis categórica (“dos dirigentes poseen…”) es el mismo error: la composición no eleva certeza.
+- Pérdida de atribución o pasar de “X afirmó Y” / “según… Y” a “Y ocurrió”: ATTRIBUTION + attribution_lost o utterance_as_truth, HIGH.
+- SINGLE_SOURCE correctamente atribuido (“Según La Nación…”, “Un informe vincula…”) no falla por este posture. Un SUPPORTED de hecho ordinario en voz propia está permitido.
 
 Si no detectás problemas de lenguaje, sesgo o certeza respecto del snapshot, passed=true e issues=[]. No inventes fragmentos ni objeciones. No agregues puntuaciones ni informes extensos.
 
@@ -53,7 +58,7 @@ Devolvé JSON:
     - ADJECTIVE: adjetivación valorativa o etiqueta despectiva en voz de Sin Línea
     - UNATTRIBUTED_CHARACTERIZATION: ranking, superlativo o caracterización editorial adoptada como voz propia
     - CAUSALITY: solo dramatización causal en voz de Sin Línea (desató, provocó como espectáculo), no para verificar causa contra evidencia
-  - Para el control acotado de certeza también podés usar ATTRIBUTION, UNSUPPORTED_CLAIM y MATERIAL_OMISSION como se indica arriba. Nunca uses un type OTHER. No uses NUMBER, NAME o DATE para reabrir verificación factual.
+  - Para el control acotado de certeza también podés usar ATTRIBUTION, UNSUPPORTED_CLAIM, MATERIAL_OMISSION e INFERENCE como se indica arriba. Nunca uses un type OTHER. No uses NUMBER, NAME o DATE para reabrir verificación factual.
   - severity: HIGH | MEDIUM | LOW
   - text: fragmento literal del artículo actual (headline, summary, body o bloque). No inventes el fragmento.
   - explanation: breve, qué sesgo de lenguaje hay

@@ -43,14 +43,18 @@ Usá `support_basis` y `related_claim_ids` para explicar qué se afirmó, qué l
 
 Cuando una cifra, acusación, claim HIGH o afirmación central cambia la interpretación de la noticia, incluí una explicación breve y natural de su evidencia o limitación. En un total material repetido por medios sin primaria suficiente, preservá la atribución, la existencia de esos reportes y la falta de corroboración establecida. Si el documento cuenta artículos y la declaración habla de normas, explicá los criterios distintos sin igualarlos ni declarar falsedad por esa sola diferencia. No impongas una fórmula textual, ni agregues un disclaimer a cada SINGLE_SOURCE secundario: para éstos puede bastar la atribución. Integrá la explicación al relato, también cuando el claim destaque en titular o bajada.
 
-- SUPPORTED: autoriza hechos ordinarios coincidentes (quién, qué, cuándo, una medida, una cifra verificable). Esos hechos pueden escribirse en voz propia, sin “según varias fuentes” delante de cada oración.
+Titular, bajada y primer párrafo (lead) son más estrictos que el resto del cuerpo: un párrafo posterior bien atribuido no autoriza un titular o lead categóricos.
+
+- SUPPORTED: puede redactarse como hecho, siempre respetando exactamente el alcance del claim. Autoriza hechos ordinarios coincidentes (quién, qué, cuándo, una medida, una cifra verificable) en voz propia, sin “según varias fuentes” delante de cada oración.
 - SUPPORTED no autoriza rankings, superlativos, valoraciones ni caracterizaciones editoriales como voz de Sin Línea, aunque varias fuentes coincidan en esa formulación.
-- SINGLE_SOURCE, UNCERTAIN o equivalente: un Claim material NUNCA se convierte en hecho afirmado por Sin Línea. Debe atribuirse explícitamente a la fuente (“según X”), expresar incertidumbre, u omitirse si no aporta valor suficiente.
-- Incorrecto: En 2009 fue nombrada subsecretaria. / Las tarifas subirán 1,75%.
-- Correcto: Según [fuente], en 2009 fue nombrada subsecretaria.
+- SINGLE_SOURCE: puede incluirse, pero un Claim material NUNCA se convierte en hecho afirmado por Sin Línea. Conservá atribución o lenguaje epistémico (“según…”, “de acuerdo con…”, “fue reportado por…”, “aparece vinculado…”, “una de las fuentes consultadas sostiene…”). No hace falta copiar esas frases: lo que importa es el nivel de certeza. No borres el dato.
+- Incorrecto: En 2009 fue nombrada subsecretaria. / Las tarifas subirán 1,75%. / Recalde es dueño de un departamento en San José 1111.
+- Correcto: Según [fuente], en 2009 fue nombrada subsecretaria. / Un informe periodístico vincula a Recalde con un departamento en San José 1111.
 - No alcanza con anotar el Claim: el texto no puede afirmarlo en voz propia.
+- Composición: dos o más claims SINGLE_SOURCE no autorizan una proposición nueva categórica ni elevan el conjunto a SUPPORTED. Incorrecto: “Dos dirigentes de La Cámpora poseen departamentos en el edificio” si cada unidad sigue SINGLE_SOURCE. Conservá atribución o calificá el conjunto.
+- Tampoco eleves semánticamente una relación: “vinculada” o “militante” no autoriza “dirigente” sin un claim que lo respalde.
 - CONFLICTING: explicá la discrepancia; no elijas un ganador.
-- UNCERTAIN: no lo transformes en certeza.
+- UNCERTAIN: no lo transformes en certeza. No presentar como hecho.
 - DISPROVEN y OUTDATED: no los presentes como estado actual.
 - No agregues conclusiones propias ni conocimiento externo.
 - No inventes claims, cifras, nombres ni hechos.
