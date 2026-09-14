@@ -54,6 +54,10 @@ Eval con modelos reales sigue fuera (`scripts/run_editorial_eval.py`).
 
 Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en titular/lead (p. ej. síntesis «dos dirigentes tienen departamentos…»). Verification no se tocó. Writing ahora exige atribución en titular, bajada y lead y prohíbe elevar certeza al combinar claims débiles. Audit recibe `lead` explícito y debe marcar HIGH con tipos ya existentes; un cuerpo atribuido no sana el titular. Tests: `test_writing_certainty.py`. Suite API: 483 passed. Eval paga no. No se reescribió la nota viva de San José 1111 en esta sesión: el caso quedó recreado en tests.
 
+## Event Extraction — 2026-09-14
+
+`event_type` clasifica solo el suceso principal identificado en `what_happened`, sin exigir actualidad; contexto y antecedentes no determinan el tipo. String libre, `otro` ante duda, sin inventar hechos. Cambios: prompt + nueve casos de contrato. Comando focalizado `test_prompt_payloads.py` + `test_detection.py`: **37 passed, 1 warning** en base separada. Prueba manual de `_extract_candidate` con el texto primario real de San José 1111 y OpenAI `gpt-5-nano`: `propiedad`, asunto concreto, sin hecho inventado ni fallback a Light. No se agregó a CI. Resultado completo y anomalías (`locality="null"`, topic, atribución y roles) en HANDOFF. Event vivo `0ddb9aaa-85c0-4316-8771-67dafa017d86` permanece `homicidio`; corrección manual y eventual invalidación/regeneración de embedding pendientes. No se modificaron sus campos ni embeddings.
+
 ## Parcial / stub / posible defecto
 
 - UI “Próximamente”: `/seguidos`, `/notificaciones`, `/guardados`; mapa en local/home; login social en `/entrar`; cuentas en perfil.

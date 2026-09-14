@@ -30,6 +30,7 @@ Solo políticas con evidencia de intención (spec, test que las fija, comentario
 - Un solo `RUNNING` entre writing, auditing y publishing (índice en `0009_publishing.py`, `pipeline_lock.py`, pre-check admin).
 - Anthropic no es auditor: `registry.py` rechaza `AUDITING` + anthropic; `.env.example` lo documenta.
 - Provider y model ID por env (`core/config.py`); el dominio no hardcodea IDs de vendor.
+- Detection: `event_type` clasifica exclusivamente el suceso principal informado, identificado primero en `what_happened`; no antecedentes, contexto histórico, delitos de fondo, causas anteriores, biografías ni hechos secundarios. No exige actualidad: una muerte antigua determinada como homicidio puede ser `homicidio`; un acto judicial en una causa por homicidio clasifica el acto judicial. Se conserva el string libre y se usa `otro` si el tipo no es seguro, sin inventar hechos. Contrato y ejemplos A–E (incluido San José 1111): `test_prompt_payloads.py`. La validación manual con el provider real se documenta en HANDOFF; no se incorpora a CI ni se reclasifican Events existentes automáticamente.
 
 ## Claims y evidencia (con tests)
 

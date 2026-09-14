@@ -2,6 +2,8 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from app.domain.enums import (
     ClaimImportance,
     ClaimStatus,
@@ -25,6 +27,83 @@ def test_event_extraction_prompt_blocks_scope_and_outlet_mixups() -> None:
     assert "No inviertas cualificadores" in prompt
     assert "role organismo" in prompt
     assert "sufijo tokenizado" in prompt
+
+
+def test_event_extraction_prompt_classifies_only_what_happened() -> None:
+    from app.core.prompts import load_prompt
+
+    prompt = load_prompt("event_extraction.md")
+    assert (
+        "Primero identificá en what_happened qué acontecimiento está informando realmente "
+        "la publicación; después clasificá ESE acontecimiento en event_type."
+    ) in prompt
+    assert "event_type clasifica exclusivamente el SUCESO PRINCIPAL" in prompt
+    assert (
+        "No debe derivarse de antecedentes, contexto histórico, delitos de fondo, "
+        "causas anteriores, biografías ni hechos secundarios."
+    ) in prompt
+    assert "tipo breve en minúsculas del acontecimiento identificado en what_happened" in prompt
+    assert "Ejemplos ilustrativos, no una lista cerrada" in prompt
+    assert "Podés usar un tipo libre más preciso (judicial, propiedad, informe_propiedad, etc.)" in prompt
+    assert "Si no podés determinar un tipo con seguridad, usá otro" in prompt
+    assert "No uses protesta, incendio, accidente ni homicidio si no describen el suceso principal" in prompt
+    assert "Usá homicidio solo cuando describa el suceso principal identificado en what_happened" in prompt
+
+
+def test_event_extraction_prompt_does_not_require_a_recent_event() -> None:
+    from app.core.prompts import load_prompt
+
+    prompt = load_prompt("event_extraction.md")
+    assert "No exijas que el suceso haya ocurrido ahora: puede ser antiguo" in prompt
+    assert "principal y actual" not in prompt
+    assert "hecho principal actual" not in prompt
+
+
+def test_event_extraction_prompt_requires_a_concrete_grounded_event() -> None:
+    from app.core.prompts import load_prompt
+
+    prompt = load_prompt("event_extraction.md")
+    assert 'no te limites a decir "la nota describe..." o "la publicación informa..."' in prompt
+    assert "Conservá la atribución cuando corresponda" in prompt
+    assert "no inventes un acontecimiento para poder asignar una categoría" in prompt
+
+
+@pytest.mark.parametrize(
+    ("example", "required_fragments"),
+    [
+        ("A.", ("tiroteo", "persona asesinada", "suceso principal → homicidio")),
+        (
+            "A2.",
+            ("muerte de hace dos años", "determinada como homicidio", "homicidio puede ser correcto"),
+        ),
+        (
+            "B.",
+            ("apelación en una causa por homicidio", "judicial", "no homicidio", "fallo o procesamiento"),
+        ),
+        (
+            "C.",
+            ("propiedades de actores políticos", "condena por homicidio", "arresto domiciliario", "no homicidio"),
+        ),
+        ("D.", ("no un tipo claro → otro", "sin inventar un hecho")),
+        (
+            "E.",
+            (
+                "San José 1111", "dirigentes", "departamentos", "prisión domiciliaria",
+                "informe_propiedad", "no homicidio", "su atribución",
+                "sin inventar una compraventa, un arresto ni una resolución judicial",
+            ),
+        ),
+    ],
+)
+def test_event_extraction_prompt_main_event_examples(
+    example: str, required_fragments: tuple[str, ...]
+) -> None:
+    from app.core.prompts import load_prompt
+
+    prompt = load_prompt("event_extraction.md")
+    example_line = next(line for line in prompt.splitlines() if line.startswith(f"- {example} "))
+    for fragment in required_fragments:
+        assert fragment in example_line
 
 
 def test_relevance_prompt_omits_max_queries() -> None:
