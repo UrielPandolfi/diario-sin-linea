@@ -170,6 +170,7 @@ class DetectionService:
                         event.id,
                         source_item_id=item.id,
                         not_before=run.started_at,
+                        session=self.session,
                     )
                 return {"event_id": str(event.id), "created": created, "reason": reason}
         except ProviderNotConfiguredError as exc:

@@ -41,7 +41,9 @@ def test_extraction_persists_both_layers_and_reuses_ids(db_session):
     assert results[0] == results[1]
     statement = next(c for c in claims if c.claim_type == "declaracion")
     factual = next(c for c in claims if c.claim_type == "cifra")
-    assert statement.canonical_text == STATEMENT and statement.normalized_value is None
+    assert statement.canonical_text == STATEMENT
+    assert statement.normalized_value == "17000"
+    assert statement.unit == "normas"
     assert factual.canonical_text == FACT and factual.normalized_value == "17000"
     assert factual.unit == "normas" and factual.occurred_at is None
     assert all(c.status == ClaimStatus.SINGLE_SOURCE for c in claims)
@@ -57,6 +59,39 @@ def test_opinion_does_not_get_a_numeric_derivation(text):
     layers = split_attributed_content(raw)
     assert len(layers) == 1 and layers[0].claim_type == "declaracion"
     assert layers[0].normalized_value is None
+
+
+def test_deattributed_figure_restores_speaker_and_keeps_value(db_session):
+    text = "Juan Pérez afirmó que el costo será de 40.000 millones."
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/costo",
+        title="Anuncio",
+        body=text,
+        content_hash="costo40",
+    )
+    event = _event(db_session, item, title_internal="Anuncio fiscal", short_summary=text)
+    raw = ExtractedClaim(
+        canonical_text="El costo fiscal estimado de la reducción impositiva es de 40.000 millones de pesos anuales.",
+        claim_type="cifra",
+        normalized_value="40000",
+        unit="millones de pesos",
+        evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt=text)],
+    )
+    llm = _llm(ClaimExtractionBatch(claims=[raw]), ClaimResolutionBatch())
+    result = _service(db_session, llm).resolve(event.id, trigger="test")
+    assert "error" not in result
+    claims = _event_claims(db_session, event.id)
+    assert len(claims) == 1
+    row = claims[0]
+    assert row.claim_type == "declaracion"
+    assert "Juan Pérez" in row.canonical_text
+    assert "afirmó" in row.canonical_text
+    assert row.normalized_value == "40000"
+    assert row.unit == "millones de pesos"
+    assert row.subject and "Pérez" in row.subject
 
 
 def test_paraphrases_dedupe_using_normalized_dimensions_and_keep_id(db_session):

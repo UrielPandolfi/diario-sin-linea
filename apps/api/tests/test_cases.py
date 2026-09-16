@@ -112,9 +112,8 @@ def _seed_published(session: Session, *, with_claims: bool = True):
         )
     )
     persist_version_snapshot(session, event, article)
-    AuditService(
-        session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-    ).audit(event.id, trigger="test")
+    auditor = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
+    AuditService(session, llm=auditor, writer=auditor).audit(event.id, trigger="test")
     PublishService(session).publish(event.id, trigger="test")
     session.commit()
     session.refresh(article)
@@ -357,9 +356,8 @@ def test_editorial_revise_claims_conflict_history_and_hold(db_session: Session, 
         article.status = ArticleStatus.DRAFT
         db_session.commit()
         persist_version_snapshot(db_session, event, article)
-        AuditService(
-            db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-        ).audit(event.id, trigger="test")
+        auditor = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
+        AuditService(db_session, llm=auditor, writer=auditor).audit(event.id, trigger="test")
         db_session.commit()
 
         denied = _origin_post(client, f"/api/v1/admin/events/{event.id}/publish")

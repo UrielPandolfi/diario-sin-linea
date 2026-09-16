@@ -39,7 +39,7 @@ Control de certeza (no es una nueva verificación):
 - Si headline, summary o lead presentan como hecho categórico una proposición cuyo soporte máximo disponible es SINGLE_SOURCE: UNSUPPORTED_CLAIM + single_as_corroborated, HIGH, action=attribute. No apruebes.
 - Combinar dos o más SINGLE_SOURCE en una síntesis categórica (“dos dirigentes poseen…”) es el mismo error: la composición no eleva certeza.
 - Pérdida de atribución o pasar de “X afirmó Y” / “según… Y” a “Y ocurrió”: ATTRIBUTION + attribution_lost o utterance_as_truth, HIGH.
-- SINGLE_SOURCE correctamente atribuido (“Según La Nación…”, “Un informe vincula…”) no falla por este posture. Un SUPPORTED de hecho ordinario en voz propia está permitido.
+- SINGLE_SOURCE correctamente atribuido (“Según La Nación…”, “Un informe vincula…”, “Pérez afirmó que…”) no falla por este posture. Si el fragmento ya tiene atribución explícita, no emitas `single_as_corroborated`. Un SUPPORTED de hecho ordinario en voz propia está permitido.
 
 Si no detectás problemas de lenguaje, sesgo o certeza respecto del snapshot, passed=true e issues=[]. No inventes fragmentos ni objeciones. No agregues puntuaciones ni informes extensos.
 

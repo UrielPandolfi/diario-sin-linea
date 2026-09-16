@@ -16,6 +16,7 @@ from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCrea
 from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueReason, AuditIssueSeverity, AuditIssueType
 from app.services.article_service import ArticleService
 from app.services.audit_policy import (
+    certainty_findings,
     merge_audit_result,
     signals_plural_corroboration,
     signals_unattributed_effective_date,
@@ -435,3 +436,116 @@ def test_bregman_effective_date_as_fact_blocked_when_llm_reports(db_session: Ses
     result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="test")
     assert result["passed"] is False
     assert PublishService(db_session).publish(event.id, trigger="test")["reason"] == "audit_not_passed"
+
+
+def test_attributed_single_source_is_not_single_as_corroborated(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://prensanorte.test/anuncio",
+        title="Anuncio",
+        body="Según Fuente X, el gobernador afirmó que el costo será de 40.000 millones.",
+        content_hash="ss-attr",
+    )
+    event = _event(db_session, item, title_internal="Anuncio fiscal")
+    claim = _claim(
+        db_session,
+        event,
+        text="Juan Pérez afirmó que el costo será de 40.000 millones.",
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    claim.normalized_value = "40000"
+    headline = "Según Fuente X, el gobernador afirmó que el costo será de 40.000 millones"
+    article = _draft_article(
+        db_session,
+        event,
+        headline=headline,
+        summary="Según Fuente X, Pérez detalló el impacto fiscal.",
+        body="El gobernador afirmó que el costo será de 40.000 millones.",
+    )
+    persist_version_snapshot(db_session, event, article)
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": ArticleAuditResult(
+                passed=False,
+                issues=[
+                    AuditIssue(
+                        type=AuditIssueType.UNSUPPORTED_CLAIM,
+                        severity=AuditIssueSeverity.HIGH,
+                        text=headline,
+                        explanation="atribuí esto",
+                        suggested_fix="atribuí",
+                        reason=AuditIssueReason.SINGLE_AS_CORROBORATED,
+                    )
+                ],
+            )
+        }
+    )
+    result = AuditService(db_session, llm=llm).audit(event.id, trigger="test")
+    assert result["passed"] is True
+    assert result["rewrite_count"] == 0
+    assert not any(issue.get("reason") == AuditIssueReason.SINGLE_AS_CORROBORATED.value for issue in result["issues"])
+
+
+def test_categorical_single_source_is_single_as_corroborated(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://prensanorte.test/cifra",
+        title="Cifra",
+        body="El costo será de 40.000 millones.",
+        content_hash="ss-cat",
+    )
+    event = _event(db_session, item, title_internal="Anuncio fiscal")
+    claim = _claim(
+        db_session,
+        event,
+        text="Juan Pérez afirmó que el costo será de 40.000 millones.",
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    claim.normalized_value = "40000"
+    article = _draft_article(
+        db_session,
+        event,
+        headline="El costo será de 40.000 millones.",
+        summary="La medida tiene impacto fiscal.",
+        body="El costo será de 40.000 millones.",
+    )
+    persist_version_snapshot(db_session, event, article)
+    draft = plain_article_draft(article.headline, article.summary, article.body)
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": ArticleAuditResult(passed=True, issues=[]),
+            "ArticleDraft": [draft, draft],
+        }
+    )
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="test")
+    assert any(issue.get("reason") == AuditIssueReason.SINGLE_AS_CORROBORATED.value for issue in result["issues"])
+    assert result["passed"] is False
+
+
+def test_certainty_findings_flags_unattributed_figure_without_llm() -> None:
+    article = type(
+        "A",
+        (),
+        {
+            "headline": "El costo será de 40.000 millones.",
+            "summary": "La medida tiene impacto fiscal.",
+            "body": "El costo será de 40.000 millones.",
+            "body_blocks": None,
+        },
+    )()
+    snapshot = {
+        "evaluated_claims": [
+            {
+                "claim_id": "c1",
+                "canonical_text": "Juan Pérez afirmó que el costo será de 40.000 millones.",
+                "status": "SINGLE_SOURCE",
+                "normalized_value": "40000",
+            }
+        ]
+    }
+    issues = certainty_findings(article, snapshot)
+    assert any(issue.reason == AuditIssueReason.SINGLE_AS_CORROBORATED for issue in issues)

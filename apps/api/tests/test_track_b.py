@@ -128,18 +128,22 @@ def _publish_track_a(session: Session, event, claims_text: str, *, value: str = 
         session, llm=_verify_llm(ClaimStatus.SINGLE_SOURCE), search=FakeSearchProvider([]), fetcher=RecordingFetcher()
     ).verify(event.id, trigger="claims")
     assert verified.get("error") is None
+    lead = (
+        claims_text
+        if "según" in claims_text.casefold() or "segun" in claims_text.casefold()
+        else f"Según la primera fuente, {claims_text}"
+    )
     draft = annotated_article_draft(
-        "Hubo seis heridos en el choque",
+        "Según la primera fuente, hubo seis heridos en el choque",
         "Un choque en Rosario dejó heridos, según la primera fuente.",
-        [[(claims_text, ["C1"])]],
+        [[(lead, ["C1"])]],
     )
     written = WritingService(session, llm=FakeStructuredLLM({"ArticleDraft": draft})).write(
         event.id, trigger="verification"
     )
     assert written["written"] is True
-    audited = AuditService(
-        session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-    ).audit(event.id, trigger="writing")
+    pass_audit = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
+    audited = AuditService(session, llm=pass_audit, writer=pass_audit).audit(event.id, trigger="writing")
     assert audited["passed"] is True
     published = PublishService(session).publish(event.id, trigger="audit")
     assert published["published"] is True
@@ -306,9 +310,9 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
     writer = FakeStructuredLLM(
         {
             "ArticleDraft": annotated_article_draft(
-                "El tránsito sigue cortado tras el choque",
-                "Hay heridos y el tránsito permanece cortado en Rosario.",
-                [[("El tránsito permanece cortado tras el choque de Rosario.", ["C1"])]],
+                "Según la segunda fuente, el tránsito sigue cortado tras el choque",
+                "Hay heridos y, según esa cobertura, el tránsito permanece cortado en Rosario.",
+                [[("Según la segunda fuente, el tránsito permanece cortado tras el choque de Rosario.", ["C1"])]],
             )
         }
     )
@@ -319,16 +323,15 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
     assert "current_article" in prompt
     assert "knowledge_delta" in prompt
     assert "authoritative_claims" in prompt
-    assert "Hubo seis heridos en el choque" in prompt
+    assert "Según la primera fuente, hubo seis heridos en el choque" in prompt
     assert '"source_contexts": []' in prompt or '"source_contexts":[]' in prompt
     db_session.refresh(article)
     assert article.published_version == v1
     assert article.status == ArticleStatus.DRAFT
     assert article.current_version == 2
 
-    audited = AuditService(
-        db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-    ).audit(event.id, trigger="writing")
+    pass_audit = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
+    audited = AuditService(db_session, llm=pass_audit, writer=pass_audit).audit(event.id, trigger="writing")
     assert audited["passed"] is True
     db_session.refresh(article)
     db_session.refresh(event)
@@ -349,7 +352,7 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
         feed = client.get("/api/v1/feed").json()
         live = client.get("/api/v1/live").json()
         local = client.get("/api/v1/local", params={"locality": "Rosario"}).json()
-    assert payload["headline"] == "Hubo seis heridos en el choque"
+    assert payload["headline"] == "Según la primera fuente, hubo seis heridos en el choque"
     assert payload["published_version"] == v1
     slugs = lambda body: {item["slug"] for item in body["items"]}
     assert article.slug in slugs(feed)
@@ -375,7 +378,7 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
     ) == updates_after_v1 + 1
     with TestClient(app) as client:
         payload = client.get(f"/api/v1/articles/{article.slug}").json()
-    assert payload["headline"] == "El tránsito sigue cortado tras el choque"
+        assert payload["headline"] == "Según la segunda fuente, el tránsito sigue cortado tras el choque"
     assert payload["published_version"] == 2
 
 
@@ -535,16 +538,15 @@ def test_track_b_contradiction_is_material_and_freezes_public_claims(db_session:
     written = WritingService(db_session, llm=writer).write(event.id, trigger="existing_event")
     assert written["written"] is True
     assert written["version"] == 2
-    AuditService(
-        db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-    ).audit(event.id, trigger="writing")
+    pass_audit = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
+    AuditService(db_session, llm=pass_audit, writer=pass_audit).audit(event.id, trigger="writing")
     db_session.refresh(article)
     db_session.commit()
     assert article.published_version == 1
     assert article.status == ArticleStatus.READY_FOR_REVIEW
     with TestClient(app) as client:
         payload = client.get(f"/api/v1/articles/{article.slug}").json()
-    assert payload["headline"] == "Hubo seis heridos en el choque"
+    assert payload["headline"] == "Según la primera fuente, hubo seis heridos en el choque"
     public_ids = {row["id"] for row in payload["claims"]}
     assert str(live_claim.id) in public_ids
     live_row = next(row for row in payload["claims"] if row["id"] == str(live_claim.id))
@@ -589,9 +591,9 @@ def test_track_b_retry_continues_audit_without_v3(db_session: Session) -> None:
     writer = FakeStructuredLLM(
         {
             "ArticleDraft": annotated_article_draft(
-                "El tránsito sigue cortado",
-                "Hay heridos y el tránsito permanece cortado.",
-                [[("El tránsito permanece cortado.", ["C1"])]],
+                "Según la segunda fuente, el tránsito sigue cortado",
+                "Hay heridos y, según esa cobertura, el tránsito permanece cortado.",
+                [[("Según la segunda fuente, el tránsito permanece cortado.", ["C1"])]],
             )
         }
     )
@@ -609,9 +611,8 @@ def test_track_b_retry_continues_audit_without_v3(db_session: Session) -> None:
     assert retry["version"] == 2
     assert retry_writer.calls == []
     assert db_session.scalar(select(func.count()).select_from(ArticleVersion)) == 2
-    audited = AuditService(
-        db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-    ).audit(event.id, trigger="writing")
+    pass_audit = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
+    audited = AuditService(db_session, llm=pass_audit, writer=pass_audit).audit(event.id, trigger="writing")
     assert audited["passed"] is True
     db_session.refresh(article)
     assert article.current_version == 2

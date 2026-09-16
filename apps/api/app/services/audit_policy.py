@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.article_body import block_plain_text, split_body_paragraphs
+from app.core.text import token_set
 from app.models import Article
 from app.schemas.auditing import (
     ArticleAuditResult,
@@ -54,11 +56,56 @@ _ATTRIBUTION_MARKERS = (
     "según ",
     "segun ",
     "de acuerdo con",
-    "afirmó que",
-    "afirmo que",
+    "afirmó",
+    "afirmo",
     "dijo que",
     "sostuvo que",
+    "señaló que",
+    "senalo que",
+    "aseguró que",
+    "aseguro que",
+    "estimó que",
+    "estimo que",
+    "anunció que",
+    "anuncio que",
+    "anunció",
+    "anuncio ",
+    "indicó que",
+    "indico que",
+    "informó que",
+    "informo que",
+    "atribuy",
+    "un informe",
+    "el informe",
+    "la cobertura",
+    "habría anunci",
+    "habria anunci",
 )
+_SINGLE_LIKE = {"SINGLE_SOURCE", "UNCERTAIN"}
+_CLAIM_STOP = {
+    "que",
+    "del",
+    "una",
+    "unos",
+    "unas",
+    "para",
+    "con",
+    "por",
+    "los",
+    "las",
+    "el",
+    "la",
+    "de",
+    "en",
+    "un",
+    "al",
+    "es",
+    "fue",
+    "ser",
+    "como",
+    "su",
+    "sus",
+}
 
 
 def _issue(
@@ -229,9 +276,15 @@ def blocking_issues(issues: list[AuditIssue]) -> list[AuditIssue]:
 def merge_audit_result(
     llm_result: ArticleAuditResult | None,
     structural: list[AuditIssue] | None = None,
+    *,
+    article: Article | None = None,
+    snapshot: dict[str, Any] | None = None,
 ) -> ArticleAuditResult:
     llm_issues = list(llm_result.issues) if llm_result is not None else []
-    issues = list(structural or []) + llm_issues
+    if article is not None:
+        llm_issues = drop_attributed_single_as_corroborated(llm_issues, article)
+    certainty = certainty_findings(article, snapshot) if article is not None else []
+    issues = _dedupe_issues(list(structural or []) + certainty + llm_issues)
     blocking = blocking_issues(issues)
     passed = not blocking
     return ArticleAuditResult(passed=passed, issues=issues, editorial_passed=passed)
@@ -240,6 +293,11 @@ def merge_audit_result(
 def _clause_is_negated(text: str, index: int) -> bool:
     window = text[max(0, index - 36) : index]
     return any(prefix in window for prefix in _NEGATION_PREFIXES)
+
+
+def passage_is_attributed(text: str) -> bool:
+    lowered = (text or "").casefold()
+    return any(marker in lowered for marker in _ATTRIBUTION_MARKERS)
 
 
 def _clause_is_attributed(text: str, index: int) -> bool:
@@ -279,3 +337,142 @@ def heuristic_signals(article: Article) -> list[str]:
     if signals_unattributed_effective_date(blob):
         rows.append("possible_unattributed_effective_date")
     return rows
+
+
+def _status_value(raw: Any) -> str:
+    if hasattr(raw, "value"):
+        return str(raw.value)
+    return str(raw or "")
+
+
+def _claim_id(row: dict[str, Any]) -> str | None:
+    value = row.get("id") or row.get("claim_id")
+    return str(value) if value else None
+
+
+def _single_source_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    context = snapshot.get("article_context") if isinstance(snapshot.get("article_context"), dict) else {}
+    buckets: list[Any] = []
+    for key in ("single_source_claims", "uncertain_claims"):
+        buckets.extend(context.get(key) or [])
+    buckets.extend(snapshot.get("evaluated_claims") or [])
+    for row in buckets:
+        if not isinstance(row, dict):
+            continue
+        status = _status_value(row.get("status"))
+        if status not in _SINGLE_LIKE:
+            continue
+        claim_id = _claim_id(row) or row.get("canonical_text") or ""
+        if claim_id in seen:
+            continue
+        seen.add(str(claim_id))
+        rows.append(row)
+    return rows
+
+
+def _article_surfaces(article: Article) -> list[str]:
+    """Titular, bajada y lead: el cuerpo posterior no sana ni condena esas piezas."""
+    surfaces: list[str] = []
+    for value in (article.headline, article.summary):
+        text = (value or "").strip()
+        if text:
+            surfaces.append(text)
+    lead = ""
+    blocks = article.body_blocks
+    if isinstance(blocks, list) and blocks:
+        lead = (block_plain_text(blocks[0]) or "").strip()
+    if not lead:
+        parts = split_body_paragraphs(article.body or "")
+        lead = parts[0].strip() if parts else ""
+    if lead:
+        surfaces.append(lead)
+    return surfaces
+
+
+def _digits(value: str | None) -> str:
+    return "".join(ch for ch in (value or "") if ch.isdigit())
+
+
+def _surface_mentions_claim(surface: str, claim: dict[str, Any]) -> bool:
+    compact = (surface or "").casefold().replace(" ", "").replace(".", "").replace(",", "")
+    value = _digits(str(claim.get("normalized_value") or ""))
+    text = str(claim.get("canonical_text") or "")
+    if not value:
+        value = _digits(text)
+    if value and len(value) >= 4 and value in compact:
+        return True
+    folded_surface = (surface or "").casefold().strip().rstrip(".")
+    folded_claim = text.casefold()
+    if folded_surface and len(folded_surface) >= 12 and folded_surface in folded_claim:
+        return True
+    tokens = token_set(text) - _CLAIM_STOP
+    if len(tokens) < 2:
+        return False
+    overlap = tokens & token_set(surface)
+    needed = 2 if len(tokens) <= 4 else 3
+    return len(overlap) >= needed
+
+
+def drop_attributed_single_as_corroborated(issues: list[AuditIssue], article: Article) -> list[AuditIssue]:
+    kept: list[AuditIssue] = []
+    surfaces = _article_surfaces(article)
+    for issue in issues:
+        if issue.reason != AuditIssueReason.SINGLE_AS_CORROBORATED:
+            kept.append(issue)
+            continue
+        fragment = (issue.text or "").strip()
+        if passage_is_attributed(fragment):
+            continue
+        attributed_surface = False
+        for surface in surfaces:
+            if fragment and fragment in surface and passage_is_attributed(surface):
+                attributed_surface = True
+                break
+            if surface.strip() == fragment and passage_is_attributed(surface):
+                attributed_surface = True
+                break
+        if not attributed_surface:
+            kept.append(issue)
+    return kept
+
+
+def certainty_findings(article: Article | None, snapshot: dict[str, Any] | None) -> list[AuditIssue]:
+    if article is None or snapshot is None:
+        return []
+    claims = _single_source_rows(snapshot)
+    if not claims:
+        return []
+    issues: list[AuditIssue] = []
+    for surface in _article_surfaces(article):
+        if passage_is_attributed(surface):
+            continue
+        matched = next((claim for claim in claims if _surface_mentions_claim(surface, claim)), None)
+        if matched is None:
+            continue
+        issues.append(
+            _issue(
+                issue_type=AuditIssueType.UNSUPPORTED_CLAIM,
+                reason=AuditIssueReason.SINGLE_AS_CORROBORATED,
+                text=surface,
+                explanation=(
+                    "Proposición SINGLE_SOURCE presentada como hecho categórico, sin atribución explícita."
+                ),
+                action=AuditIssueAction.ATTRIBUTE,
+                claim_id=_claim_id(matched),
+            )
+        )
+    return issues
+
+
+def _dedupe_issues(issues: list[AuditIssue]) -> list[AuditIssue]:
+    seen: set[tuple[Any, ...]] = set()
+    out: list[AuditIssue] = []
+    for issue in issues:
+        key = (issue.reason, issue.type, (issue.text or "").strip()[:240])
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(issue)
+    return out

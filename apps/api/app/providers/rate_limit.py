@@ -59,6 +59,42 @@ def is_transient_rate_limit(exc: BaseException) -> bool:
     return "rate_limit_exceeded" in text or "rate limit reached" in text
 
 
+_TRANSIENT_HTTP = {429, 500, 502, 503, 504}
+_TRANSIENT_EXC_NAMES = {
+    "ConnectError",
+    "ConnectTimeout",
+    "ReadTimeout",
+    "WriteTimeout",
+    "PoolTimeout",
+    "TimeoutException",
+    "RemoteProtocolError",
+}
+
+
+def _http_status(exc: BaseException) -> int | None:
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status
+    response = getattr(exc, "response", None)
+    status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) else None
+
+
+def is_transient_http_error(exc: BaseException) -> bool:
+    if is_quota_error(exc):
+        return False
+    if is_transient_rate_limit(exc):
+        return True
+    if _http_status(exc) in _TRANSIENT_HTTP:
+        return True
+    if type(exc).__name__ in _TRANSIENT_EXC_NAMES:
+        return True
+    if isinstance(exc, (TimeoutError, ConnectionError, ConnectionResetError)):
+        return True
+    text = str(exc).lower()
+    return "timeout" in text or "connection reset" in text or "temporarily unavailable" in text
+
+
 def parse_retry_after(value: str | None) -> float | None:
     if not value:
         return None
@@ -157,5 +193,46 @@ def with_rate_limit_retry(call: Callable[[], T], *, sleeper: Callable[[float], N
                 delay,
                 wait,
                 openai_error_code(exc),
+            )
+            sleep(delay)
+
+
+def with_transient_http_retry(call: Callable[[], T], *, sleeper: Callable[[float], None] | None = None) -> T:
+    """Reintenta 429/5xx transitorios, timeout y connection reset. Tope JOB_MAX_RETRIES."""
+    settings = get_settings()
+    max_retries = max(0, int(settings.job_max_retries))
+    max_elapsed = max_retries * _SECONDS_PER_RETRY_BUDGET
+    sleep = sleeper or time.sleep
+    started = time.monotonic()
+    attempt = 0
+    while True:
+        try:
+            return call()
+        except Exception as exc:
+            if not is_transient_http_error(exc):
+                raise
+            attempt += 1
+            wait = retry_wait_seconds(exc, attempt=attempt)
+            elapsed = time.monotonic() - started
+            remaining = max_elapsed - elapsed
+            if attempt > max_retries or wait > remaining:
+                logger.warning(
+                    "transient http exhausted attempt=%s wait=%.3fs elapsed=%.3fs remaining=%.3fs status=%s",
+                    attempt,
+                    wait,
+                    elapsed,
+                    remaining,
+                    _http_status(exc),
+                )
+                raise
+            delay = wait + _jitter(wait)
+            if delay < wait:
+                delay = wait
+            logger.info(
+                "transient http retry attempt=%s delay=%.3fs wait=%.3fs status=%s",
+                attempt,
+                delay,
+                wait,
+                _http_status(exc),
             )
             sleep(delay)

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import logging
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, or_, update
+from sqlalchemy.orm import Session
 
 from app.core.usage_context import get_usage_context
 from app.models.llm_usage import LlmUsage
@@ -222,14 +224,17 @@ def seal_created_event_usages(
     *,
     source_item_id: UUID | None = None,
     not_before=None,
+    session: Session | None = None,
 ) -> None:
     """Sella event_id solo en llamadas de la corrida que creó el suceso. No toca backfill."""
     try:
         from datetime import datetime
 
-        from app.core.db import SessionLocal
+        own_session = session is None
+        if own_session:
+            from app.core.db import SessionLocal
 
-        session = SessionLocal()
+            session = SessionLocal()
         try:
             match_run = LlmUsage.pipeline_run_id == pipeline_run_id
             match_item = None
@@ -242,20 +247,27 @@ def seal_created_event_usages(
                     item_filters.append(LlmUsage.created_at >= not_before)
                 match_item = and_(*item_filters)
             bound = match_run if match_item is None else or_(match_run, match_item)
-            session.execute(
-                update(LlmUsage)
-                .where(
-                    LlmUsage.event_id.is_(None),
-                    LlmUsage.attribution_kind != ATTRIBUTION_EMBEDDING_BACKFILL,
-                    bound,
+            nested = session.begin_nested() if not own_session else nullcontext()
+            with nested:
+                session.execute(
+                    update(LlmUsage)
+                    .where(
+                        LlmUsage.event_id.is_(None),
+                        LlmUsage.attribution_kind != ATTRIBUTION_EMBEDDING_BACKFILL,
+                        bound,
+                    )
+                    .values(event_id=event_id, attribution_kind=ATTRIBUTION_DIRECT)
                 )
-                .values(event_id=event_id, attribution_kind=ATTRIBUTION_DIRECT)
-            )
-            session.commit()
+                if own_session:
+                    session.commit()
+                else:
+                    session.flush()
         except Exception:
-            session.rollback()
+            if own_session:
+                session.rollback()
             raise
         finally:
-            session.close()
+            if own_session:
+                session.close()
     except Exception:
         logger.exception("llm usage seal failed")

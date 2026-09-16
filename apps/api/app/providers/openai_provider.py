@@ -22,10 +22,8 @@ def _model_allows_temperature_zero(model: str) -> bool:
 
 
 def _reasoning_effort_for_model(model: str) -> str | None:
-    """Effort mínimo solo para nano. No inferir por prefijo gpt-5 (Luna usa none/low/…)."""
-    name = (model or "").casefold()
-    if "nano" in name:
-        return "minimal"
+    """chat.completions rechaza reasoning_effort en gpt-5-nano (HTTP 400). No inferirlo."""
+    _ = (model or "").strip()
     return None
 
 

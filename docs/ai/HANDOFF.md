@@ -2,33 +2,34 @@
 
 **Fecha:** 2026-09-16
 
-**Tarea:** implementar Track B del MVP (EXISTING_EVENT → evidencia incremental → materialidad editorial → Writing desde live → Audit → READY_FOR_REVIEW, V1 live, publish manual).
+**Tarea:** corregir bloqueos de la smoke Track A/B real (audit SINGLE_SOURCE, atribución de claims, retry Exa, sellado de `llm_usages` al crear Event, HTTP 400 de structured output) y repetir la eval política.
 
 ## Resultado
 
-Track B quedó cableado sobre servicios/tablas existentes. No hubo microservicios, tablas de snapshots nuevas, cambios de umbrales 0.72/0.88, Voyage/Terra, ni auto-publish de actualizaciones.
+Los cinco bloqueos observados se corrigieron en código y la suite API pasó **575 passed** antes de la smoke (luego +1 test de schema, 9/9 en `test_openai_temperature.py`). La repetición real: Track A **PASS**; Track B material **FAIL** por dedup (no se tocó); confirmación **FAIL** por reescritura material. No se parchearon esos dos hallazgos durante la eval.
 
-## Implementación vigente
+## Fixes vigentes
 
-- `detect_event`: create → research; link nuevo → `resolve_event_claims(event_id, existing_event, source_item_id)`; `already_linked` no reabre.
-- Claims incremental: extrae solo la SourceItem nueva, merge `assertion_key`, re-resuelve tocados + hermanos `comparison_key`.
-- Material editorial: `status_confirmed` / `evidence_posture_changed` no reescriben; conflicto, valor, HIGH/MEDIUM nuevo, corrección, DISPROVEN/OUTDATED sí.
-- Writing update: `published_version` live + `knowledge_delta` + claims autoritativos, sin `source_contexts`. Retry `unaudited_candidate` reencola Audit sin V3.
-- Audit passed con live: `Article.status=READY_FOR_REVIEW`, Event sigue PUBLISHED, sin enqueue de publish.
-- API pública: claims del live congelados al snapshot de esa versión.
+- Audit: `certainty_findings` + `drop_attributed_single_as_corroborated` sobre titular/bajada/lead; el LLM no puede insistir `single_as_corroborated` si el pasaje ya está atribuido. Cap 2: el rewrite #2 se audita antes de `cap_exhausted`.
+- Claims: `preserve_extracted_meaning` restaura hablante/verbo y conserva `normalized_value`/`unit` en declaraciones (no en trayectoria).
+- Verification: retry HTTP transitorio en Exa; si se agota, `search_unavailable` y continúa sin inventar `SUPPORTED`.
+- `seal_created_event_usages(..., session=)` usa la sesión del detect después del flush del Event.
+- Structured output: no se infiere `reasoning_effort`; el JSON schema estricto elimina `$ref` con siblings y `default` (causa real del 400: `$ref cannot have keywords {'default'}`).
 
-## Validación
+## Eval real (IDs locales)
 
-Suite completa (código montado sobre Postgres/Redis de Compose):
+| Pieza | ID |
+|---|---|
+| Source A Prensa | `687942a8-8355-44ae-9674-70e57e8342dc` |
+| Event A (10% / 40.000) | `4ba13333-654b-4d61-b12c-dc4af5fbaed8` |
+| Article A V1 | `81e082d7-60c5-4ba1-88ca-22ab0f09646b` |
+| Source B Hacienda | `de91d4a3-bde1-4221-8acd-a54b5fdc6b3b` |
+| Event B (8% / 52.000, **nuevo**) | `8a7ea8eb-03ed-486e-9086-dec54cbd4f2e` |
+| Event confirmación | `26bdc5e8-6bfa-4ebb-95cb-b9a1a0202205` |
 
-```text
-568 passed, 2 warnings in 199.18s
-```
+## Pendientes no corregidos en esta sesión
 
-Warnings preexistentes: Starlette `BlockingPortal` y Alembic `path_separator`.
-
-Focalizado Track B + Detection/Claims/Writing/Audit/Publishing/Research/budget/posture/labels/verification: **211 passed**.
-
-## Alcance y pendientes
-
-Pendientes reales de este MVP: eval con modelos reales; no se agregó `unique(source_item_id)` en `event_sources`; no se evaluó la carrera de dos `detect` concurrentes. Dedup/Voyage reales siguen fuera.
+- Dedup Voyage: Source B oficial `embedding_low:0.717` (umbral bajo 0.72) creó Event aparte. No se cambió el threshold.
+- Confirmación: link `embedding_high:0.917` pero Writing V2 por `new_high_claim,evidence_posture_changed` (claim SUPPORTED nuevo «El ciclo lectivo comenzará el 2 de marzo.»). Live V1 intacta.
+- Deepseek `claim_resolution` sigue 400→200.
+- Usages de writing/verify posteriores al create suelen quedar `event_id` null (fuera del sello de Detection).

@@ -40,6 +40,7 @@ from app.providers.base import (
     SearchQuery,
     StructuredLLMProvider,
 )
+from app.providers.rate_limit import is_transient_http_error
 from app.providers.registry import (
     ModelRole,
     get_search_provider,
@@ -339,6 +340,7 @@ class VerificationService:
             "fetched": 0,
             "cited": 0,
             "verified": 0,
+            "search_unavailable": False,
         }
         if coverage is not None:
             coverage.verification_incomplete = bool(budget.central_unverified)
@@ -419,6 +421,8 @@ class VerificationService:
             payload["queries"][claim_id] = [query.text for query in queries]
             payload["freshness"][claim_id] = window.freshness
             hits = self._collect_hits(search, queries, plan, window.freshness, window.since, window.until)
+            if getattr(self, "_search_unavailable", False):
+                payload["search_unavailable"] = True
             payload.setdefault("search_requests", {})[claim_id] = self._search_requests
             packet, fetched = self._packet_for(claim, hits)
             payload["packets"][claim_id] = [
@@ -718,6 +722,7 @@ class VerificationService:
         official = [query for query in queries if query.include_domains]
         general = [query for query in queries if not query.include_domains]
         self._search_requests = []
+        self._search_unavailable = False
         hits: list[SearchHit] = []
         seen: set[str] = set()
 
@@ -725,7 +730,14 @@ class VerificationService:
             added = 0
             for query in requests:
                 self._search_requests.append(query.model_dump(mode="json"))
-                for hit in search.search(query):
+                try:
+                    found = search.search(query)
+                except Exception as exc:
+                    if not is_transient_http_error(exc):
+                        raise
+                    self._search_unavailable = True
+                    found = []
+                for hit in found:
                     if not hit.url:
                         continue
                     canonical = canonicalize_url(hit.url) or hit.url

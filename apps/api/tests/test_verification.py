@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -1122,3 +1123,48 @@ def test_attach_upgrades_existing_mentions_to_supports(db_session: Session) -> N
     db_session.flush()
     db_session.refresh(row)
     assert row.evidence_type == EvidenceType.SUPPORTS
+
+
+class _BoomSearch:
+    def __init__(self) -> None:
+        self.queries = []
+
+    def search(self, query):
+        self.queries.append(query)
+        request = httpx.Request("POST", "https://api.exa.ai/search")
+        response = httpx.Response(503, request=request)
+        raise httpx.HTTPStatusError("503", request=request, response=response)
+
+
+def test_search_503_does_not_block_or_invent_support(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/costo",
+        title="Anuncio",
+        body="Pérez afirmó que el costo será de 40.000 millones.",
+        content_hash="v503",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Juan Pérez afirmó que el costo será de 40.000 millones.",
+        claim_type="cifra",
+        importance=ClaimImportance.MEDIUM,
+        status=ClaimStatus.SINGLE_SOURCE,
+        normalized_value="40000",
+        unit="millones de pesos",
+    )
+    _evidence(db_session, claim, item, excerpt="Pérez afirmó que el costo será de 40.000 millones.")
+    llm = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SINGLE_SOURCE)})
+    search = _BoomSearch()
+    result = _service(db_session, llm, search).verify(event.id, trigger="test")
+    db_session.refresh(claim)
+    assert "error" not in result
+    assert result.get("search_unavailable") is True
+    assert search.queries
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    assert claim.status != ClaimStatus.SUPPORTED
+

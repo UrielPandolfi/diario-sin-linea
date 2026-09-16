@@ -352,6 +352,9 @@ def test_fail_rewrite_respects_cap(db_session: Session) -> None:
     assert llm.calls.count("ArticleAuditResult") == 3
     assert llm.calls.count("ArticleDraft") == 2
     assert result["issues"]
+    assert llm.calls[-1] == "ArticleAuditResult"
+    audit_prompts = [prompt for call, prompt in zip(llm.calls, llm.user_prompts) if call == "ArticleAuditResult"]
+    assert "Corrección dos" in audit_prompts[-1]
 
 
 def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_session: Session) -> None:

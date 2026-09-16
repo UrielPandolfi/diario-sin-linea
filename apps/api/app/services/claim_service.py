@@ -368,7 +368,10 @@ class ClaimService:
         pair_keys: list[tuple[str, str]] = []
         for raw in batch.claims:
             raw = preserve_extracted_meaning(raw, sources)
-            layers = [preserve_extracted_meaning(layer, sources) for layer in split_attributed_content(raw)]
+            layers = [
+                preserve_extracted_meaning(layer, sources, restore_attribution=False)
+                for layer in split_attributed_content(raw)
+            ]
             if len(layers) == 2:
                 pair_keys.append((assertion_key_for(layers[0]), assertion_key_for(layers[1])))
             for layer in layers:
@@ -516,7 +519,11 @@ class ClaimService:
         for raw in batch.claims:
             raw = preserve_extracted_meaning(raw, sources)
             for layer in split_attributed_content(raw):
-                split_claims.extend(split_compound_extracted(preserve_extracted_meaning(layer, sources)))
+                split_claims.extend(
+                    split_compound_extracted(
+                        preserve_extracted_meaning(layer, sources, restore_attribution=False)
+                    )
+                )
         outcome = self._merge_extracted(split_claims, sources)
         persisted = self._persist(event, outcome.pending, overwrite_matched=False)
         self.session.flush()

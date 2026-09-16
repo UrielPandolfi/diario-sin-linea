@@ -178,7 +178,13 @@ def test_exa_search_maps_since_until(monkeypatch) -> None:
     assert captured["json"]["endPublishedDate"] == "2026-08-20"
 
 
-def test_exa_http_error_propagates(monkeypatch) -> None:
+def test_exa_http_error_exhausted_after_retries(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "job_max_retries", 2)
+    monkeypatch.setattr("app.providers.rate_limit._jitter", lambda wait: 0.0)
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", lambda _s: None)
+    posts = {"n": 0}
+
     class FakeResponse:
         def raise_for_status(self) -> None:
             raise httpx.HTTPStatusError(
@@ -201,11 +207,57 @@ def test_exa_http_error_propagates(monkeypatch) -> None:
             return None
 
         def post(self, url, json=None, headers=None):
+            posts["n"] += 1
             return FakeResponse()
 
     monkeypatch.setattr("app.providers.exa.httpx.Client", FakeClient)
     with pytest.raises(httpx.HTTPStatusError):
         ExaSearchProvider(api_key="k").search(SearchQuery(text="q", count=1))
+    assert posts["n"] == 3
+
+
+def test_exa_retries_503_then_succeeds(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "job_max_retries", 3)
+    monkeypatch.setattr("app.providers.rate_limit._jitter", lambda wait: 0.0)
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", lambda _s: None)
+    posts = {"n": 0}
+
+    class FakeResponse:
+        def raise_for_status(self) -> None:
+            if posts["n"] < 3:
+                raise httpx.HTTPStatusError(
+                    "503",
+                    request=httpx.Request("POST", "https://api.exa.ai/search"),
+                    response=httpx.Response(503),
+                )
+
+        def json(self) -> dict:
+            return {
+                "results": [
+                    {"title": "A", "url": "https://a.test/1", "highlights": ["ok"]},
+                ]
+            }
+
+    class FakeClient:
+        def __init__(self, timeout=None) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def post(self, url, json=None, headers=None):
+            posts["n"] += 1
+            return FakeResponse()
+
+    monkeypatch.setattr("app.providers.exa.httpx.Client", FakeClient)
+    hits = ExaSearchProvider(api_key="k").search(SearchQuery(text="q", count=1))
+    assert posts["n"] == 3
+    assert hits[0].url == "https://a.test/1"
+    assert hits[0].snippet == "ok"
 
 
 def test_exa_invalid_json_body(monkeypatch) -> None:

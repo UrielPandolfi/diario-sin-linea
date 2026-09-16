@@ -43,11 +43,13 @@ def normalize_audit_result(
     result: ArticleAuditResult,
     *,
     structural: list[AuditIssue] | None = None,
+    article: Article | None = None,
+    snapshot: dict[str, Any] | None = None,
 ) -> ArticleAuditResult:
     """LOW nunca bloquea. Findings estructurales no se pueden silenciar con issues=[]."""
     from app.services.audit_policy import merge_audit_result
 
-    return merge_audit_result(result, structural=structural)
+    return merge_audit_result(result, structural=structural, article=article, snapshot=snapshot)
 
 
 def _lead_text(article: Article) -> str:
@@ -224,7 +226,12 @@ class AuditService:
                 user_prompt=user_prompt,
                 schema=ArticleAuditResult,
             )
-            result = normalize_audit_result(llm_result, structural=structural)
+            result = normalize_audit_result(
+                llm_result,
+                structural=structural,
+                article=article,
+                snapshot=snapshot,
+            )
             audits += 1
             rewrite_issues = [
                 issue
@@ -268,6 +275,8 @@ class AuditService:
                 base["passed"] = False
                 return base
 
+            # Cap = rewrites máximos. El rewrite #cap se audita en la
+            # siguiente iteración antes de poder devolver cap_exhausted.
             if rewrites >= cap:
                 base["reason"] = "cap_exhausted"
                 base["cap_exhausted"] = True

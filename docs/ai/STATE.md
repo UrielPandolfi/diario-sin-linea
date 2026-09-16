@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-16. Track B (EXISTING_EVENT → evidencia incremental → materialidad editorial → Writing desde live → Audit → READY_FOR_REVIEW, live V1 intacta) está en código y tests con dobles. Track A de suceso nuevo no cambia su auto-publish de primera vez. Etapa 1 (`editorial-evidence-1`) y etapa 2 (snapshot de writing, invariantes de audit, bloqueo de publish) siguen en código. Dashboard Admin de `expected_central` queda diferido. 429 temporal de OpenAI en LLM estructurado se reintenta en el cliente (no en Celery ni en el SDK).
+Revisión: 2026-09-16. Track B sigue en código y tests. Eval real: Track A del anuncio Pérez pasó a V1; Track B material no se vinculó (`embedding_low:0.717`); la confirmación Aguilar sí linkeó pero reescribió. Track A de suceso nuevo no cambia su auto-publish de primera vez. Dashboard Admin de `expected_central` queda diferido. 429 temporal de OpenAI en LLM estructurado se reintenta en el cliente (no en Celery ni en el SDK). JSON schema strict ya no envía `$ref`+`default`.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -91,3 +91,7 @@ Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en ti
 - `body_source` histórico sin metadata = `unknown`. Quota skip anterior a A1 no reconstruible.
 
 README desactualizado en: “solo Rosario”, proveedores de writing/audit fijos a Claude, `MAX_VERIFICATION_QUERIES_PER_CLAIM` (código/example = 3).
+
+## Smoke Track A/B real — 2026-09-16
+
+Tras los cinco fixes de la eval previa (audit atribuido, claims de declaración, retry Exa, sello de usages al crear Event, schema OpenAI strict): suite **575 passed**. Track A del anuncio Pérez 10%/40.000: **PASS** (V1 publicada, audit 1/0 rewrites, cifra persistida como declaración `40000`). Track B material: **FAIL** — Hacienda 8%/52.000 creó Event `8a7ea8eb` por `embedding_low:0.717` (no se tocó 0.72/0.88). Confirmación Aguilar: link `embedding_high:0.917` pero reescribió V2/V3 (`new_high_claim`); API pública siguió en V1. No se parchearon dedup ni materialidad de confirmación en la eval.
