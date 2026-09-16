@@ -26,6 +26,8 @@ PROVINCE_ALIASES = {"santa fe", "santafe"}
 LOCALITY_ALIASES = {"rosario"}
 LOCALITY_DISPLAY = {"rosario": "Rosario"}
 PROVINCE_DISPLAY = {"santa fe": "Santa Fe", "santafe": "Santa Fe"}
+CABA_DISPLAY = "Ciudad Autónoma de Buenos Aires"
+CABA_ALIASES = {"caba", "c.a.b.a.", "ciudad autonoma de buenos aires"}
 
 STRONG_POLITICAL_TOPICS = {
     EditorialTopic.NATIONAL_POLITICS,
@@ -194,6 +196,16 @@ def canonicalize_location(
         loc_province_raw, mapping=PROVINCE_DISPLAY
     )
     country = normalize_country(candidate.country_code)
+    # CABA is both a first-level jurisdiction and a city. A plain "Buenos
+    # Aires" is ambiguous and must never trigger this conversion on its own.
+    if country in (None, TARGET_COUNTRY):
+        explicit_city = fold_place(locality) in CABA_ALIASES
+        explicit_jurisdiction = fold_place(province) in CABA_ALIASES
+        if explicit_city or (explicit_jurisdiction and (not locality or fold_place(locality) == "buenos aires")):
+            locality = province = CABA_DISPLAY
+            country = TARGET_COUNTRY
+        elif explicit_jurisdiction:
+            province = CABA_DISPLAY
     return locality, province, country
 
 

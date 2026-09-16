@@ -28,9 +28,29 @@ Backend: además de la suite previa, `test_editorial_evidence`, `test_audit_poli
 
 ## Track B — no resuelto al cerrar A
 
-No se escribieron tests de `embedding_high`, Terra ni `level1_code` positivo. No se reabre research al linkear. El hueco `no_claims` (write saltea sin evaluar novedad) y los cambios factuales sin claims **siguen**. No hay `unique(source_item_id)` en `event_sources` (una publicación puede ser varios sucesos). La carrera de dos `detect` concurrentes no se evaluó. Research que adjunta ítems no los marca PROCESSED.
+2026-09-14: se agregaron tests de `embedding_high`, Terra y `level1_code` positivo. La evaluación controlada reprodujo dos fusiones incorrectas del caso C; luego se corrigieron con autorización del usuario (ver evaluación y corrección debajo). No se reabre research al linkear. El hueco `no_claims` (write saltea sin evaluar novedad) y los cambios factuales sin claims **siguen**. No hay `unique(source_item_id)` en `event_sources` (una publicación puede ser varios sucesos). La carrera de dos `detect` concurrentes no se evaluó. Research que adjunta ítems no los marca PROCESSED.
 
-Hasta B, “fuente agregada” >> “actualización publicada” es el cableado real. Dedup por embeddings/Voyage **no** quedó verificado en esta tarea.
+Hasta B, “fuente agregada” >> “actualización publicada” es el cableado real. Dedup con Voyage real **no** quedó verificado; la evaluación de 2026-09-14 usa vectores controlados.
+
+### Evaluación de dedup — 2026-09-14
+
+Resultado previo a la corrección: **DEDUP NO APTO PARA MVP**, 59 passed / 2 failed. C se fusionaba por `embedding_high:0.940` y por `level1_code` al compartir Rosario + Pellegrini. El [informe de evaluación](dedup-evaluation-2026-09-14.md) conserva esa evidencia histórica.
+
+### Primera corrección de dedup — 2026-09-14 (reemplazada)
+
+`dedup_identity.py` comparte la comparación factual entre Level 1 y la rama alta. El ancla fuerte implementada reconoce intersección corroborada + par explícito de vehículos + mismo día/tipo/localidad. Dos PLACE genéricos ya no bastan. Contradicciones comparables de ubicación, dirección, vehículos o tiempos explícitos separados por ≥2 h excluyen al Event; se consideran candidatos alternativos y Terra no puede seleccionar uno excluido o no enviado. Payload de Terra simétrico, con fecha, país/provincia, dirección y entidades estructuradas en ambos lados.
+
+Verificado en base aislada: **61/61 casos originales + 24 pruebas adicionales = 85 passed**, un warning preexistente de Alembic. Fixtures y regresiones de C intactos (comparación AST); solo se fortaleció el contrato de payload de D. A/B conservan 1 Event; C da 2 en todas sus variantes; D conserva ambas decisiones. No se tocaron thresholds (0.72/0.88), ventana (72 h), extracción, gate editorial ni actualización de resumen/embedding al vincular. El gate sigue descartando los choques comunes antes de dedup; los tests exclusivos de identidad aíslan ese gate. Datos vivos intactos. Voyage/Terra reales y concurrencia siguen sin validar; pasar estos tests no calibra la identidad semántica en producción. Trazas en `.editorial-evals/dedup-fix-20260914/`.
+
+### Simplificación autorizada de dedup — 2026-09-14 (vigente)
+
+La revisión rechazó la especialización en choques y el veto temporal universal. Se retiraron sinónimos/regex de vehículos y colisiones, anclas por par de vehículos/intersección/PLACE y toda inferencia de precisión mediante HH:MM. `compare_identity` ahora solo devuelve diferencias comparables de país/provincia/localidad y dirección explícita; no afirma identidad por ausencia de conflictos. No hay veto temporal porque el esquema no aporta precisión ni puntualidad. Se conservan formatos equivalentes de dirección e intersecciones invertidas.
+
+Level 1 solo puede vincular por una URL ya asociada; `_level1_match` retorna None porque el modelo actual no tiene un identificador único del suceso. URLs distintas continúan a embeddings/Terra. La protección de score alto, candidatos alternativos, payload simétrico y selección restringida de Terra se conservan. El score alto aún puede vincular cuando no se detectan contradicciones estructurales; esto no equivale a identidad factual demostrada ni está calibrado con Voyage real.
+
+Verificado en base aislada eliminada al terminar: **93 passed (18.02 s) + 2 integraciones (3.36 s)**; solo warning preexistente de Alembic. A/B: 1 Event por embedding alto controlado. Todas las variantes originales de C: 2 Events; C alto se excluye por dirección, sin depender de tiempo/vehículos. D conserva EXISTING_EVENT/NEW_EVENT y payload simétrico. Seis casos políticos recorren DetectionService con el gate real: mismo anuncio por embedding/Terra; anuncios en direcciones diferentes excluidos con score alto/ambiguo; misma estructura con identidad ambigua decidida por Terra; horas aproximadas distintas no excluyen al candidato. Otros tres tests de candidatos alternativos/IDs descartados también usan anuncios y direcciones numeradas.
+
+Fixtures originales A/B/C/D, funciones de C, expectativas de persistencia y prueba de D intactos por AST. A/B dejan de exigir una ruta interna. Sin xfail ni skips. Hashes de config, .env, Voyage provider, prompt de extracción, prompt de Terra y test_prompt_payloads intactos. No se tocaron datos vivos ni etapas posteriores, ni se invocaron providers reales. Evidencia: `.editorial-evals/dedup-generalized-20260914/`.
 
 ## Claims / verify / audit — etapas 1–2 en código; UI y eval no
 

@@ -17,6 +17,13 @@ Solo políticas con evidencia de intención (spec, test que las fija, comentario
 
 - Ámbito: asuntos públicos y país `editorial_country_code` (default `AR`), salvo `argentina_relevance` (`evaluate_editorial_gate`, `test_editorial_gate.py`). Política nacional/provincial fuera de Rosario **pasa** en tests. El README que dice “solo Rosario” está desactualizado.
 
+## Identidad en dedup
+
+- Código para igualdad/contradicciones estructuradas; embeddings para similitud semántica; Terra para identidad ambigua. No se mantienen sinónimos de vehículos, parsers de colisiones ni reglas específicas de otros dominios. El esquema actual no aporta identificadores únicos del suceso: el fast-path conservado es la URL ya vinculada; `_level1_match` no acredita identidad para URLs distintas. Coincidir en tipo, localidad, fecha, dirección o entidades no demuestra el mismo Event (`dedup_identity.py`, `test_detection_dedup.py`).
+- `compare_identity` solo devuelve contradicciones entre país/provincia/localidad presentes y diferentes, o direcciones explícitas reconocidas de formatos comparables. Se conservan normalización de espacios/caso/tildes, prefijos de calle e intersecciones invertidas. Ausencia de contradicción no es prueba de identidad. Los Events contradictorios se excluyen antes de seleccionar por score alto o consultar Terra; se consideran otros candidatos y Terra solo puede vincular a un ID compatible que recibió. High/low siguen en 0.88/0.72.
+- Sin veto temporal determinista: `occurred_at` no informa precisión, origen explícito/inferido ni duración/puntualidad del suceso. No se deducen esos atributos mediante regex ni se reemplaza el umbral retirado de dos horas por otro. Los timestamps permanecen en el payload de Terra; no se agregan modelos ni clasificadores temporales.
+- Terra recibe los mismos campos factuales del candidato y de cada Event existente (incluidos país/provincia, occurred_at/started_at, dirección y entidades con tipo/rol). Vincular una fuente no actualiza título, resumen ni embedding del Event durante matching. Pruebas con fakes; Voyage/Terra reales no se calibraron ni invocaron en este arreglo.
+
 ## Artículo y versiones
 
 - Un `Article` por `event_id` (`uq_articles_event_id`).

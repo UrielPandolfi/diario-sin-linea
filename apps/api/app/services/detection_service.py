@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 from math import sqrt
 from uuid import UUID
 
@@ -26,11 +27,12 @@ from app.providers.registry import (
 )
 from app.repositories import EntityRepository, EventRepository, PipelineRunRepository, SourceItemRepository
 from app.schemas import EventCreate
-from app.schemas.detection import DedupDecision, EditorialScope, EventCandidate
+from app.schemas.detection import DedupDecision, EditorialScope, EventCandidate, ExtractedEntity
+from app.services.dedup_identity import DEDUP_FIELDS, compare_identity
 from app.services.editorial_gate import (
     EditorialFilterReason,
+    apply_canonical_location,
     evaluate_editorial_gate,
-    fold_place,
     item_editorial_text,
     needs_location_fallback,
     should_filter_sports,
@@ -252,11 +254,12 @@ class DetectionService:
             return light
 
         def _call(llm: StructuredLLMProvider) -> EventCandidate:
-            return llm.generate_structured(
+            candidate = llm.generate_structured(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 schema=EventCandidate,
             )
+            return apply_canonical_location(candidate)
 
         if ultra is None:
             return _call(_light()), {}
@@ -329,6 +332,20 @@ class DetectionService:
         low = self.settings.event_match_low_threshold
         if scored:
             best_event, best_score = scored[0]
+            if best_score < low:
+                event = self._create_event(item, candidate)
+                return event, True, f"embedding_low:{best_score:.3f}"
+
+            # Similarity is not factual identity. Exclude contradictory Events
+            # from both direct merging and the set Terra is allowed to select.
+            compatible = [
+                (event, score) for event, score in scored
+                if score >= low and not compare_identity(candidate, self._event_candidate(event)).conflicts
+            ]
+            if not compatible:
+                event = self._create_event(item, candidate)
+                return event, True, "identity_conflict"
+            best_event, best_score = compatible[0]
             if best_score >= high:
                 self.event_service.attach_source(
                     best_event,
@@ -338,9 +355,10 @@ class DetectionService:
                 )
                 return best_event, False, f"embedding_high:{best_score:.3f}"
             if low <= best_score < high:
-                decision = self._ask_terra(candidate, scored[:5])
+                offered = compatible[:5]
+                decision = self._ask_terra(candidate, offered)
                 if decision.decision == "EXISTING_EVENT" and decision.event_id:
-                    existing = self.events.get(decision.event_id)
+                    existing = next((event for event, _ in offered if event.id == decision.event_id), None)
                     if existing is not None:
                         self.event_service.attach_source(
                             existing,
@@ -351,48 +369,14 @@ class DetectionService:
                         return existing, False, "terra_existing"
                 event = self._create_event(item, candidate)
                 return event, True, "terra_new"
-            event = self._create_event(item, candidate)
-            return event, True, f"embedding_low:{best_score:.3f}"
 
         event = self._create_event(item, candidate)
         return event, True, "no_candidates"
 
     def _level1_match(self, candidate: EventCandidate, recent: list[Event]) -> Event | None:
-        if (
-            candidate.occurred_at is None
-            or not candidate.event_type
-            or candidate.event_type == "unknown"
-            or not candidate.locality
-        ):
-            return None
-
-        candidate_names = {normalize_name(entity.name) for entity in candidate.entities if entity.name}
-        if not candidate_names:
-            return None
-
-        candidate_day = candidate.occurred_at.date()
-
-        for event in recent:
-            if (
-                event.started_at is None
-                or not event.event_type
-                or event.event_type == "unknown"
-                or not event.locality
-            ):
-                continue
-            if candidate_day != event.started_at.date():
-                continue
-            if candidate.event_type != event.event_type:
-                continue
-            if fold_place(candidate.locality) != fold_place(event.locality):
-                continue
-
-            event_names = {entity.normalized_name for entity in self.entities.list_for_event(event.id)}
-            shared_entities = candidate_names & event_names
-            # Same day + type + locality is not enough; entity overlap is vs
-            # list_for_event, never against the event title.
-            if len(shared_entities) >= 2:
-                return event
+        # The current schema has no unique event identifier or precise temporal
+        # identity. Equal location/type/entities cannot prove the same event.
+        # The URL fast-path is handled above; distinct URLs need embeddings/Terra.
         return None
 
     def _score_embeddings(
@@ -430,32 +414,40 @@ class DetectionService:
 
     def _ask_terra(self, candidate: EventCandidate, scored: list[tuple[Event, float]]) -> DedupDecision:
         llm = self.dedup_llm or get_structured_provider(ModelRole.AMBIGUOUS_DEDUP)
-        slim = candidate.model_dump_json(
-            include={
-                "event_type",
-                "what_happened",
-                "occurred_at",
-                "province",
-                "locality",
-                "neighborhood",
-                "address_text",
-                "entities",
-                "short_summary",
-            }
-        )
+        slim = candidate.model_dump_json(include=DEDUP_FIELDS)
         lines = [
             f"Candidato: {slim}",
             "Eventos existentes:",
         ]
         for event, score in scored:
-            lines.append(
-                f"- id={event.id} type={event.event_type} score={score:.3f} "
-                f"title={event.title_internal} place={event.locality} summary={event.short_summary}"
-            )
+            details = self._event_candidate(event).model_dump(mode="json", include=DEDUP_FIELDS)
+            lines.append("- " + json.dumps({"id": str(event.id), "score": score, **details}, ensure_ascii=False))
         return llm.generate_structured(
             system_prompt=load_prompt("deduplication.md"),
             user_prompt="\n".join(lines),
             schema=DedupDecision,
+        )
+
+    def _event_candidate(self, event: Event) -> EventCandidate:
+        """Expose stored identity facts in the same shape as the new candidate."""
+        entities = self.session.execute(
+            select(Entity, EventEntity.role)
+            .join(EventEntity, EventEntity.entity_id == Entity.id)
+            .where(EventEntity.event_id == event.id)
+            .order_by(Entity.normalized_name, EventEntity.role)
+        ).all()
+        return EventCandidate(
+            event_type=event.event_type,
+            what_happened=event.title_internal,
+            occurred_at=event.started_at,
+            country_code=event.country_code,
+            province=event.province,
+            locality=event.locality,
+            neighborhood=event.neighborhood,
+            address_text=event.address_text,
+            short_summary=event.short_summary or "",
+            entities=[ExtractedEntity(name=entity.name, entity_type=entity.entity_type, role=role)
+                      for entity, role in entities],
         )
 
     def _create_event(self, item: SourceItem, candidate: EventCandidate) -> Event:

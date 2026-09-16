@@ -1,64 +1,60 @@
 # Handoff
 
-Reemplazar este archivo al cerrar una tarea o al continuar en otro chat. No es un diario de sesiones.
-
 **Fecha:** 2026-09-14
 
-**Tarea:** `event_type` clasifica exclusivamente el suceso principal informado, anclado en `what_happened`, sin exigir que haya ocurrido ahora.
+**Tarea:** simplificación de dedup autorizada tras la revisión de generalidad.
 
-## Objetivo de este chat
+## Resultado
 
-Corregir el prompt de Event Extraction y validar su contrato y su comportamiento con el provider real. No derivar el tipo de antecedentes, contexto histórico, delitos de fondo, causas anteriores, biografías ni hechos secundarios. Un homicidio antiguo puede ser el suceso principal; una resolución en una causa por homicidio clasifica el acto judicial.
+**DEDUP GENERALIZADO — LISTO PARA PRUEBA CON VOYAGE REAL**. Esto acredita regresiones controladas; no calibra Voyage ni declara el dedup completo apto para producción.
 
-## Avances
+**93 tests aprobados (18.02 s) + 2 integraciones (3.36 s)**. Un warning preexistente de Alembic por `path_separator` en cada ejecución, sin xfail ni skips.
 
-- Único cambio de producto: `apps/api/app/prompts/event_extraction.md`. Primero identifica el asunto concreto en `what_happened`, luego clasifica ese acontecimiento. Tipos ilustrativos y libres; `otro` si no hay seguridad. No inventar un suceso para asignar una categoría.
-- Nueve casos nuevos de contrato en `test_prompt_payloads.py`: ancla semántica/exclusiones, antigüedad, descripción factual y ejemplos A–E (más A2: muerte antigua determinada como homicidio).
-- Sin cambios en servicios, schemas, modelos, persistencia, deduplicación, gate, research, claims, verification, writing, audit ni frontend. Sin Enum/Literal, migración, backfill ni framework nuevo.
-- Prueba manual real mediante `DetectionService(session)._extract_candidate(item)`, con `SourceItem` transitorio y sin llamar a `detect` ni encolar etapas. Se usó la configuración normal de `.env`, sin inyectar providers ni respuestas falsas. DB temporal para tests y registros de consumo; eliminada al terminar.
+- A, incluida variante sin entidades: 1 Event / 2 SourceItems / 2 EventSources; ejecución observada por `embedding_high:0.940`. Ya no se exige `level1_code` en el test.
+- B: 1 Event / 2 SourceItems / 2 EventSources por embedding alto; la vinculación conserva resumen y embedding del Event existente.
+- C bajo: 2 Events, `embedding_low:0.650`.
+- C alto: 2 Events, `identity_conflict` por dirección diferente; sin veto temporal ni semántica de vehículos.
+- C con Rosario/Pellegrini compartidos: 2 Events, `embedding_low:0.650`.
+- D: score 0.80 consulta Terra; EXISTING_EVENT vincula y NEW_EVENT crea. Contrato simétrico intacto.
+- Seis casos políticos con el gate real: mismo anuncio con redacciones diferentes (0.94 → embedding, 0.80 → Terra); anuncios en direcciones diferentes (0.94/0.80 → dos Events); mismo funcionario/organismo, dirección y timestamp con identidad ambigua (0.80 → Terra NEW); horas aproximadas diferentes (0.80 → Terra EXISTING, timestamps presentes en ambos lados del payload).
 
-## Pruebas
+## Implementación vigente
 
-Desde `apps/api`, con `DATABASE_URL` apuntando a una base PostgreSQL nueva y separada de la base viva, y Redis disponible:
+`dedup_identity.py` ya no interpreta `what_happened` ni `short_summary`. Se eliminaron categorías/sinónimos de vehículos, regex de choque/colisión, pares, participantes adicionales, regex de horas y el umbral universal de dos horas. No hay nuevas reglas específicas de política/justicia.
+
+`compare_identity` devuelve solamente `conflicts`: diferencias entre país/provincia/localidad presentes y direcciones explícitas de formatos comparables. Conserva normalización de tildes/caso/espacios, prefijos de calles, orden de intersecciones y direcciones numeradas. Información ausente o direcciones incomparables no son contradicción. La ausencia de conflictos no demuestra identidad.
+
+No se utiliza el tiempo como veto: el esquema no informa precisión, fecha inferida/explícita ni si el hecho es puntual o prolongado. Tampoco hay identificador estructurado único del suceso. Por eso `_level1_match` mantiene su interfaz pero retorna None; el fast-path determinista vigente es la URL ya asociada. No se inventó otra combinación heurística de fecha/dirección/entidades para reemplazar la de choques.
+
+Se conservan el filtro estructural previo a embedding_high/Terra, la consideración de candidatos alternativos y el rechazo de IDs que Terra no recibió o que fueron excluidos. Un score alto sin contradicciones detectadas todavía puede vincular directamente; la evaluación de identidad semántica con providers reales sigue pendiente.
+
+Terra conserva el payload simétrico: what_happened (title_internal del existente), event_type, occurred_at (started_at), country_code, province, locality, neighborhood, address_text, entities con nombre/tipo/rol y short_summary; id/score adicionales para existentes. No hubo cambios al prompt en esta segunda implementación.
+
+## Archivos modificados en esta segunda implementación
+
+- `apps/api/app/services/dedup_identity.py`.
+- `apps/api/app/services/detection_service.py`: retiro de la heurística positiva de Level 1 y su import sin uso.
+- `apps/api/tests/test_dedup_identity.py`: 26 pruebas de estructura, tiempo desconocido y selección de candidatos; fixtures de selección ahora no relacionados con tránsito.
+- `apps/api/tests/test_detection_dedup.py`: conserva las expectativas de A/B sin exigir Level 1; agrega seis casos políticos usando el mecanismo controlado existente.
+- `docs/ai/DECISIONS.md`, `STATE.md` y este HANDOFF.
+
+## Validación y evidencia
+
+Base nueva `sin_linea_dedup_general_101dfd2665`, eliminada al finalizar. Desde `apps/api`, con DATABASE_URL apuntando exclusivamente a esa base:
 
 ```bash
-python -m pytest tests/test_prompt_payloads.py tests/test_detection.py -q --tb=short
+python -m pytest tests/test_detection.py tests/test_detection_dedup.py tests/test_prompt_payloads.py tests/test_publication_outcome.py tests/test_dedup_identity.py -q --tb=short
+python -m pytest tests/test_pipeline_politics.py tests/test_pipeline_publish.py -q --tb=short
 ```
 
-**37 passed, 1 warning in 11.04s.** Warning preexistente de Alembic por `path_separator`. Los pytest fijan el contrato del prompt y el cableado con fakes, no prueban la clasificación semántica del modelo real.
+Primera suite: 22 Detection + 17 dedup end-to-end controlados + 15 contratos de prompt + 13 publication outcome + 26 comparador/selección = 93. Segunda: 2 integraciones. No se editaron etapas posteriores para ejecutar estos tests.
 
-## Extracción manual real
+Evidencia local fuera de Git: `.editorial-evals/dedup-generalized-20260914/`, con logs/XML de ambas suites, `traces.json`, snapshots previos de los cuatro archivos Python, `verification.json`, hashes de archivos protegidos y `environment.json`. Comparación AST confirma `_TEXTS`, `_candidates`, `_assert_outcome`, ambas funciones originales de C y la de D sin cambios. No se suavizaron los conteos de Events ni los vínculos.
 
-2026-09-14 03:19:59 UTC. Fixture: copia de título, URL, fecha y `clean_text` original (2902 caracteres) del SourceItem primario `46398277-f08f-4793-b14b-eb0c3c15d068`, obtenido con conexión de solo lectura. Título: «El búnker K de Cristina: el camporista Mariano Recalde es dueño de un departamento en San José 1111». Sin instrucciones de clasificación añadidas al fixture. El cuerpo habla de propiedad, corrupción y causas judiciales; no contiene la palabra homicidio.
+## Alcance y pendientes
 
-Provider configurado: **OpenAI `gpt-5-nano`**, modelo reportado **`gpt-5-nano-2025-08-07`**, rol `ultra_light_processing`. `extraction_meta={}`: sin fallback a Light (`gpt-4o-mini`). Respuesta con uso reportado: 2728 tokens de entrada, 632 de salida, 3360 totales.
+LOW/HIGH 0.72/0.88, ventana 72 h, Voyage provider, extracción/event_type, gate, localidades persistidas, tipos/roles de entidades y etapas posteriores intactos. Sin datos vivos ni llamadas reales. Los choques ordinarios siguen rechazados por el gate; solo sus pruebas de dedup aíslan explícitamente esa decisión. Los escenarios políticos pasan por el gate real.
 
-Campos principales del `EventCandidate`, sin editar:
+La siguiente evaluación autorizable es extracción/Voyage reales con casos de mismo/diferente suceso. No se ejecutó ahora. Permanecen fuera: calibración, concurrencia, recuperación limitada a 40 candidatos, ventana por detección y actualizaciones del Event al incorporar fuentes.
 
-```json
-{
-  "what_happened": "Mariano Recalde, senador y fundador de La Cámpora, es propietario del departamento 1° A del edificio ubicado en San José 1111, donde Cristina Kirchner cumple prisión domiciliaria; el departamento 1° B fue adquirido por María Soledad Calle, vinculada a La Cámpora, y el departamento 2° D pertenece a Los Sauces S.A., sociedad vinculada a la familia Kirchner.",
-  "event_type": "propiedad",
-  "short_summary": "Se informó que Mariano Recalde es propietario del departamento 1° A en el edificio de San José 1111, donde Cristina Kirchner cumple prisión domiciliaria; también se mencionan el 1° B adquirido por María Soledad Calle y el 2° D perteneciente a Los Sauces S.A.",
-  "editorial_topic": "PUBLIC_ECONOMY"
-}
-```
-
-**Aceptación satisfecha en esta ejecución:** no es `homicidio`; `what_happened` expresa el asunto concreto; las propiedades y la adquisición mencionadas están en el texto fuente. No inventa una nueva compra, un arresto ni una resolución. `occurred_at=null`. Una muestra real no garantiza todos los casos futuros.
-
-Evidencia local, fuera de CI y de Git: `.editorial-evals/event-type-20260914/{fixture.json,extraction.json,pytest.txt,live-before.json,live-after.json,environment.json}`. `extraction.json` conserva el `EventCandidate` completo, configuración sin secretos, metadata y registros de uso. SHA-256 del prompt validado: `c1dc236059bd76573200a71eb0d0842bd987531331c5a30106c18f014a1a85c8`.
-
-## Comportamiento inesperado y límites
-
-- La primera ejecución quedó bloqueada por la red del sandbox (`WinError 10013`); el reintento con acceso de red completó la extracción real.
-- El provider registró un intento sin uso reportado antes de la respuesta exitosa; el registro no conserva la causa. No se cambió la lógica de reintentos ni se sustituyó el modelo.
-- El candidato devolvió `locality` como string `"null"`, no JSON null. No disparó fallback (`location_confidence=0.5`).
-- `editorial_topic=PUBLIC_ECONOMY` es discutible para un informe sobre patrimonio de actores políticos. `what_happened` no conservó la atribución explícita al Registro de la Propiedad Inmueble. Roles de entidades discutibles: Ercolini como `testigo` no está respaldado por el texto; Los Sauces S.A. salió con `role=organismo`. Estos aspectos se reportan sin ampliar el alcance del cambio.
-
-## Archivos modificados
-
-`apps/api/app/prompts/event_extraction.md`, `apps/api/tests/test_prompt_payloads.py`, `docs/ai/DECISIONS.md`, `docs/ai/STATE.md`, `docs/ai/HANDOFF.md`.
-
-## Siguiente paso
-
-El Event vivo `0ddb9aaa-85c0-4316-8771-67dafa017d86` sigue en `homicidio`, con su embedding existente (1 fila). Snapshot de campos leído antes/después idéntico; no se ejecutó UPDATE ni invalidación/regeneración de embeddings. La corrección manual del tipo y la decisión sobre el embedding quedan para el próximo paso con el usuario; no imponer `otro` automáticamente. El resultado `propiedad` de esta prueba sirve como evidencia para esa revisión, no como backfill.
+Los informes y resultados anteriores en `.editorial-evals/dedup-fix-20260914/` y `dedup-evaluation-2026-09-14.md` son históricos; la heurística de choques/≥2 horas ya no está vigente.
