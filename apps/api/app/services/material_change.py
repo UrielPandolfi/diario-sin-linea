@@ -15,6 +15,22 @@ _RESOLVED = {
 _CONFIRMATION_FROM = {ClaimStatus.UNCERTAIN, ClaimStatus.SINGLE_SOURCE}
 _CORRECTION_TO = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
 
+# Knowledge can change without requiring a new public article.
+_KNOWLEDGE_ONLY_REASONS = {
+    "status_confirmed",
+    "evidence_posture_changed",
+}
+_EDITORIAL_REASONS = {
+    "first_write",
+    "new_high_claim",
+    "new_medium_claim",
+    "conflict_resolved",
+    "status_conflict",
+    "status_correction",
+    "value_changed",
+    "claim_removed_high",
+}
+
 
 def _enum_value(value: object) -> str:
     return value.value if hasattr(value, "value") else str(value)
@@ -81,7 +97,14 @@ def detect_material_change(
         before = prev_by_id[claim_id]
         if (row.get("importance") != ClaimImportance.LOW
                 and row.get("evidence_posture") != before.get("evidence_posture")):
-            reasons.append("evidence_posture_changed")
+            before_posture = before.get("evidence_posture") or {}
+            after_posture = row.get("evidence_posture") or {}
+            before_contra = int(before_posture.get("documents_contradicting") or 0)
+            after_contra = int(after_posture.get("documents_contradicting") or 0)
+            if after_contra > before_contra:
+                reasons.append("status_conflict")
+            else:
+                reasons.append("evidence_posture_changed")
         before_status = _status(before["status"])
         after_status = _status(row["status"])
         if before_status == ClaimStatus.CONFLICTING and after_status in _RESOLVED:
@@ -109,4 +132,53 @@ def detect_material_change(
             continue
         seen.add(reason)
         unique.append(reason)
-    return MaterialChange(is_material=bool(unique), reasons=unique)
+    editorial = [reason for reason in unique if reason in _EDITORIAL_REASONS]
+    return MaterialChange(is_material=bool(editorial), reasons=unique)
+
+
+def build_knowledge_delta(
+    previous: Sequence[dict] | None,
+    current: Sequence[dict],
+    change: MaterialChange,
+) -> dict:
+    prev_by_id = {str(row["id"]): row for row in previous or []}
+    curr_by_id = {str(row["id"]): row for row in current}
+    new_claims = [row for claim_id, row in curr_by_id.items() if claim_id not in prev_by_id]
+    changed_claims: list[dict] = []
+    changed_statuses: list[dict] = []
+    new_conflicts: list[dict] = []
+    resolved_conflicts: list[dict] = []
+    corrected_values: list[dict] = []
+    outdated_or_disproven: list[dict] = []
+    for claim_id, row in curr_by_id.items():
+        before = prev_by_id.get(claim_id)
+        if before is None:
+            continue
+        entry = {"id": claim_id, "before": before, "after": row}
+        if before != row:
+            changed_claims.append(entry)
+        if before.get("status") != row.get("status"):
+            changed_statuses.append(
+                {"id": claim_id, "from": before.get("status"), "to": row.get("status")}
+            )
+        before_status = _status(before["status"])
+        after_status = _status(row["status"])
+        if after_status == ClaimStatus.CONFLICTING and before_status != ClaimStatus.CONFLICTING:
+            new_conflicts.append(row)
+        if before_status == ClaimStatus.CONFLICTING and after_status in _RESOLVED:
+            resolved_conflicts.append(row)
+        if (before.get("normalized_value") or None) != (row.get("normalized_value") or None):
+            corrected_values.append(entry)
+        if after_status in _CORRECTION_TO and before_status not in _CORRECTION_TO:
+            outdated_or_disproven.append(row)
+    return {
+        "new_claims": new_claims,
+        "changed_claims": changed_claims,
+        "changed_statuses": changed_statuses,
+        "new_conflicts": new_conflicts,
+        "resolved_conflicts": resolved_conflicts,
+        "corrected_values": corrected_values,
+        "outdated_or_disproven_claims": outdated_or_disproven,
+        "material_reasons": list(change.reasons),
+        "knowledge_only_reasons": [reason for reason in change.reasons if reason in _KNOWLEDGE_ONLY_REASONS],
+    }

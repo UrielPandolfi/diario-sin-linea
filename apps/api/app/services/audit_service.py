@@ -257,6 +257,9 @@ class AuditService:
             if result.passed:
                 base["reason"] = "passed"
                 base["cap_exhausted"] = False
+                if article.published_version is not None:
+                    article.status = ArticleStatus.READY_FOR_REVIEW
+                    self.session.flush()
                 return base
 
             if structural_blocks_rewrite(structural):
@@ -341,8 +344,17 @@ class AuditService:
             # compact candidates let Audit identify their claims without new I/O.
             payload["headline_claim_candidates"] = [compact(c) for c in claims if c.id not in used | related]
         payload["lead"] = _lead_text(article)
+        extra = ""
+        if article.published_version is not None:
+            extra = (
+                "Esta es una candidata de actualización. Validala contra evidence_posture actual, "
+                "no contra el artículo live anterior. Marcá si Writing conservó una afirmación "
+                "DISPROVEN u OUTDATED, ocultó un conflicto, agregó algo no respaldado o eliminó "
+                "una atribución necesaria.\n"
+            )
         return (
-            "Auditá el lenguaje y que el nivel de certeza respete evidence_posture de esta versión. "
+            extra
+            + "Auditá el lenguaje y que el nivel de certeza respete evidence_posture de esta versión. "
             "Juzgá titular, bajada y lead por sí mismos: un cuerpo bien atribuido no sana un titular categórico. "
             "No verifiques hechos ni reevalúes la evidencia o cobertura. "
             "No reescribas el artículo; devolvé passed e issues. "

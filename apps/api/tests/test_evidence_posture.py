@@ -43,6 +43,7 @@ def test_material_evidence_change_triggers_writing_without_status_change():
     before = {"id": "a", "status": "SINGLE_SOURCE", "importance": "MEDIUM", "evidence_posture": {"documents_supporting": 1}}
     after = {**before, "evidence_posture": {"documents_supporting": 3}}
     assert detect_material_change([before], [after]).reasons == ["evidence_posture_changed"]
+    assert not detect_material_change([before], [after]).is_material
     assert not detect_material_change([after], [after]).is_material
 
 

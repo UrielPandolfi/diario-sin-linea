@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 from uuid import UUID
 
@@ -7,26 +8,43 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.article_body import context_claim_ref_map, resolve_article_draft
+from app.core.article_body import claim_ids_in_body_blocks, context_claim_ref_map, resolve_article_draft
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.usage_context import bind_model_role, usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
-from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
+from app.models import Article, Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
 from app.providers.registry import ModelRole, get_structured_provider
 from app.repositories import ArticleRepository, EntityRepository, PipelineRunRepository
 from app.schemas import ArticleContentUpdate, ArticleCreate
 from app.schemas.writing import ArticleDraft
-from app.services.article_context import build_article_context, last_success_run
+from app.services.article_context import (
+    build_article_context,
+    claims_snapshot_for_version,
+    last_success_run,
+)
 from app.services.article_service import ArticleService
+from app.services.claim_service import comparison_key_for
 from app.services.evidence_snapshot import capture_evidence_snapshot, persist_snapshot_fields
-from app.services.material_change import detect_material_change, snapshot_claims
-from app.services.pipeline_lock import WRITING_STAGE, is_write_audit_publish_busy
+from app.services.material_change import build_knowledge_delta, detect_material_change, snapshot_claims
+from app.services.pipeline_lock import AUDITING_STAGE, WRITING_STAGE, is_write_audit_publish_busy
 from app.services.verification_outcome import pair_from_runs
 
 WRITING_ROLE = "writing"
+
+_UPDATE_INSTRUCTIONS = (
+    "El artículo publicado anterior es una base editorial, no una fuente factual. "
+    "Conservá el texto que continúe siendo compatible con el estado actual de Claims. "
+    "Modificá, eliminá o atribuí cualquier afirmación que haya dejado de estar respaldada. "
+    "Incorporá la información material nueva. "
+    "Podés hacer cambios pequeños o reescribir por completo el artículo si el nuevo estado del Event lo requiere. "
+    "current_article es la versión live (published_version), no el borrador. "
+    "authoritative_claims es la verdad actual a comprobar; knowledge_delta resume qué cambió. "
+    "No conserves una afirmación solo porque aparecía en la versión anterior. "
+    "En body_blocks usá claim_refs C1/C2 del context, nunca UUIDs.\n"
+)
 
 
 class WritingService:
@@ -163,6 +181,13 @@ class WritingService:
 
         change = detect_material_change(previous, claims_snapshot)
         if article is not None and not change.is_material:
+            if has_unaudited_candidate(article, pipeline_runs):
+                base["article_id"] = str(article.id)
+                base["version"] = article.current_version
+                base["written"] = True
+                base["reason"] = "unaudited_candidate"
+                base["material_reasons"] = change.reasons
+                return base
             base["article_id"] = str(article.id)
             base["version"] = article.current_version
             base["reason"] = "no_material_change"
@@ -181,15 +206,35 @@ class WritingService:
         )
         claim_run, verify_run = pair_from_runs(list(pipeline_runs))
         evidence_snapshot = capture_evidence_snapshot(article_context, claim_run, verify_run)
+        live = None
+        if article is not None and article.published_version is not None:
+            live = self.articles.get_version(article.id, article.published_version)
+        prompt_context = article_context
+        knowledge_delta = None
+        if live is not None:
+            published_snapshot = claims_snapshot_for_version(pipeline_runs, article.published_version) or previous
+            knowledge_delta = build_knowledge_delta(published_snapshot, claims_snapshot, change)
+            prompt_context = self._authoritative_context(
+                event,
+                article_context=article_context,
+                live=live,
+                delta=knowledge_delta,
+                pipeline_runs=pipeline_runs,
+            )
         llm = self.llm or get_structured_provider(ModelRole.WRITING)
         bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
+        user_prompt = (
+            self._update_user_prompt(live, knowledge_delta, prompt_context)
+            if live is not None
+            else self._user_prompt(prompt_context)
+        )
         draft = llm.generate_structured(
             system_prompt=load_prompt("article_writing.md"),
-            user_prompt=self._user_prompt(article_context),
+            user_prompt=user_prompt,
             schema=ArticleDraft,
         )
         body, body_blocks = resolve_article_draft(
-            draft, claim_ref_map=context_claim_ref_map(article_context)
+            draft, claim_ref_map=context_claim_ref_map(prompt_context)
         )
         change_reason = "initial" if article is None else ",".join(change.reasons) or "material_change"
         if article is None:
@@ -215,7 +260,7 @@ class WritingService:
                     change_reason=change_reason,
                 ),
             )
-            if article.status == ArticleStatus.PUBLISHED:
+            if article.status in {ArticleStatus.PUBLISHED, ArticleStatus.READY_FOR_REVIEW}:
                 article.status = ArticleStatus.DRAFT
             self.session.flush()
         evidence_snapshot["version"] = article.current_version
@@ -229,11 +274,14 @@ class WritingService:
                 "material_reasons": change.reasons,
             }
         )
+        if knowledge_delta is not None:
+            base["knowledge_delta"] = knowledge_delta
+            base["update"] = True
         base.update(persist_snapshot_fields(evidence_snapshot))
         return base
 
     def _can_write(self, article) -> bool:
-        if article.status == ArticleStatus.DRAFT:
+        if article.status in {ArticleStatus.DRAFT, ArticleStatus.READY_FOR_REVIEW}:
             return True
         return article.status == ArticleStatus.PUBLISHED and article.published_version is not None
 
@@ -293,3 +341,125 @@ class WritingService:
             + "\n"
             + article_context.model_dump_json()
         )
+
+    def _authoritative_context(self, event: Event, *, article_context, live, delta: dict, pipeline_runs):
+        wanted = set(claim_ids_in_body_blocks(live.body_blocks))
+        for row in delta.get("new_claims") or []:
+            if row.get("id"):
+                wanted.add(str(row["id"]))
+        for collection in (
+            delta.get("changed_claims"),
+            delta.get("new_conflicts"),
+            delta.get("resolved_conflicts"),
+            delta.get("outdated_or_disproven_claims"),
+        ):
+            for row in collection or []:
+                claim_id = row.get("id") or (row.get("after") or {}).get("id")
+                if claim_id:
+                    wanted.add(str(claim_id))
+        groups: dict[str, list[Claim]] = {}
+        by_id = {str(claim.id): claim for claim in event.claims}
+        for claim in event.claims:
+            groups.setdefault(comparison_key_for(claim), []).append(claim)
+        extra: set[str] = set()
+        for claim_id in list(wanted):
+            claim = by_id.get(claim_id)
+            if claim is None:
+                continue
+            for member in groups.get(comparison_key_for(claim), []):
+                extra.add(str(member.id))
+            for bucket in (
+                article_context.confirmed_claims,
+                article_context.single_source_claims,
+                article_context.conflicting_claims,
+                article_context.uncertain_claims,
+                article_context.disproven_claims,
+                article_context.outdated_claims,
+            ):
+                for ctx_claim in bucket:
+                    if ctx_claim.id == claim_id:
+                        extra.update(str(item) for item in ctx_claim.related_claim_ids)
+        wanted.update(extra)
+        return build_article_context(
+            event,
+            entities=self.entities.list_for_event(event.id),
+            pipeline_runs=pipeline_runs,
+            max_claims=max(len(wanted), 1),
+            max_sources=self.settings.max_writing_sources_per_event,
+            excerpt_chars=self.settings.writing_excerpt_chars,
+            max_source_contexts=0,
+            source_context_chars=self.settings.writing_source_context_chars,
+            claim_ids=wanted or None,
+            include_source_contexts=False,
+        )
+
+    def _update_user_prompt(self, live, knowledge_delta: dict, article_context) -> str:
+        payload = {
+            "current_article": {
+                "version_number": live.version_number,
+                "headline": live.headline,
+                "summary": live.summary,
+                "body": live.body,
+            },
+            "knowledge_delta": knowledge_delta,
+            "authoritative_claims": json.loads(article_context.model_dump_json()),
+        }
+        return _UPDATE_INSTRUCTIONS + json.dumps(payload, ensure_ascii=False)
+
+
+def has_unaudited_candidate(article: Article, runs: list[PipelineRun]) -> bool:
+    if article.published_version is None:
+        return False
+    if int(article.current_version) == int(article.published_version):
+        return False
+    has_writing = False
+    for run in runs:
+        if run.stage != WRITING_STAGE or run.status != PipelineStatus.SUCCESS:
+            continue
+        meta = run.metadata_json or {}
+        bound = meta.get("version")
+        if bound is None or int(bound) != int(article.current_version):
+            continue
+        has_writing = True
+        break
+    if not has_writing:
+        return False
+    for run in runs:
+        if run.stage != AUDITING_STAGE or run.status != PipelineStatus.SUCCESS:
+            continue
+        meta = run.metadata_json or {}
+        if meta.get("passed") is not True:
+            continue
+        version_after = meta.get("version_after")
+        if version_after is not None and int(version_after) == int(article.current_version):
+            return False
+    return True
+
+
+def should_enqueue_write(session: Session, event_id: UUID) -> bool:
+    try:
+        articles = ArticleRepository(session)
+        article = articles.get_by_event_id(event_id)
+        if article is None:
+            return True
+        pipeline = PipelineRunRepository(session)
+        runs = pipeline.list_for_event(event_id, limit=50)
+        if has_unaudited_candidate(article, runs):
+            return True
+        stmt = (
+            select(Event)
+            .options(selectinload(Event.claims))
+            .where(Event.id == event_id)
+        )
+        event = session.scalars(stmt).first()
+        if event is None:
+            return True
+        claims = list(event.claims)
+        previous_run = last_success_run(runs, WRITING_STAGE)
+        previous = ((previous_run.metadata_json if previous_run is not None else None) or {}).get("claims_snapshot")
+        _claim_run, verify_run = pair_from_runs(list(runs))
+        decisions = ((verify_run.metadata_json if verify_run is not None else None) or {}).get("decision_by_claim_id") or {}
+        current = snapshot_claims(claims, decisions=decisions)
+        return detect_material_change(previous, current).is_material
+    except Exception:
+        return True

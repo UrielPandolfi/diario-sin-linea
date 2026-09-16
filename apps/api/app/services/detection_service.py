@@ -96,7 +96,7 @@ class DetectionService:
             raise ValueError("source_item_not_found")
 
         existing_link = self.events.get_link_for_item(item.id)
-        if existing_link is not None and item.processing_status != SourceItemStatus.PENDING:
+        if existing_link is not None:
             item.processing_status = SourceItemStatus.PROCESSED
             return {"event_id": str(existing_link.event_id), "created": False, "reason": "already_linked"}
 

@@ -649,6 +649,26 @@ def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
     audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
     assert queued == []
 
+    queued.clear()
+    monkeypatch.setattr(
+        "app.workers.tasks.ArticleRepository",
+        lambda session: SimpleNamespace(
+            get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False, published_version=1)
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
+    assert queued == []
+
+    queued.clear()
+    monkeypatch.setattr(
+        "app.workers.tasks.ArticleRepository",
+        lambda session: SimpleNamespace(
+            get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False, published_version=1)
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
+    assert queued == []
+
 
 def test_auditing_rejects_anthropic(monkeypatch) -> None:
     settings = get_settings()

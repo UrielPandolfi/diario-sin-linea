@@ -189,9 +189,12 @@ def detect_event(
         result = service.detect(UUID(source_item_id), attempt=self.request.retries + 1)
         session.commit()
         created_new = bool(result.get("created") and result.get("event_id"))
+        linked_existing = _is_existing_event_link(result)
         if created_new:
             research_event.delay(result["event_id"], "new_event")
-        elif fill_quota:
+        elif linked_existing:
+            resolve_event_claims.delay(result["event_id"], "existing_event", source_item_id)
+        if not created_new and fill_quota:
             release_new_event_pipeline(poll_id)
             _enqueue_next_for_quota(poll_id, source_item_id)
         return result
@@ -231,15 +234,22 @@ def research_event(self, event_id: str, trigger: str = "new_event") -> dict:
     max_retries=settings.job_max_retries,
     retry_backoff=True,
 )
-def resolve_event_claims(self, event_id: str, trigger: str = "research") -> dict:
+def resolve_event_claims(
+    self,
+    event_id: str,
+    trigger: str = "research",
+    source_item_id: str | None = None,
+) -> dict:
     session = SessionLocal()
     try:
         service = ClaimService(session)
-        result = service.resolve(UUID(event_id), trigger=trigger)
+        result = service.resolve(
+            UUID(event_id),
+            trigger=trigger,
+            source_item_id=UUID(source_item_id) if source_item_id else None,
+        )
         session.commit()
-        persisted = result.get("persisted")
-        has_claims = persisted is None or int(persisted) > 0
-        if not result.get("skipped") and has_claims:
+        if not result.get("skipped") and _claims_changed(result):
             verify_event_claims.delay(event_id, trigger)
         return result
     except Exception:
@@ -262,7 +272,10 @@ def verify_event_claims(self, event_id: str, trigger: str = "claims") -> dict:
         result = service.verify(UUID(event_id), trigger=trigger)
         session.commit()
         if not result.get("skipped") and not result.get("error"):
-            write_event_article.delay(event_id, trigger)
+            from app.services.writing_service import should_enqueue_write
+
+            if should_enqueue_write(session, UUID(event_id)):
+                write_event_article.delay(event_id, trigger)
         return result
     except Exception:
         session.rollback()
@@ -307,8 +320,9 @@ def audit_event_article(self, event_id: str, trigger: str = "writing") -> dict:
         session.commit()
         if result.get("skipped") is False and result.get("passed") is True:
             article = ArticleRepository(session).get_by_event_id(UUID(event_id))
-            if article is None or not article.editorial_hold:
-                publish_event_article.delay(event_id, trigger)
+            if article is None or not getattr(article, "editorial_hold", False):
+                if getattr(article, "published_version", None) is None:
+                    publish_event_article.delay(event_id, trigger)
         return result
     except Exception:
         session.rollback()
@@ -335,6 +349,25 @@ def publish_event_article(self, event_id: str, trigger: str = "audit") -> dict:
         raise
     finally:
         session.close()
+
+
+def _is_existing_event_link(result: dict) -> bool:
+    if result.get("created"):
+        return False
+    if not result.get("event_id"):
+        return False
+    if result.get("filtered") or result.get("detection_skipped") or result.get("pipeline_skipped"):
+        return False
+    if result.get("reason") in {"already_linked", "failed"}:
+        return False
+    return True
+
+
+def _claims_changed(result: dict) -> bool:
+    if "changed" in result:
+        return bool(result.get("changed"))
+    persisted = result.get("persisted")
+    return persisted is None or int(persisted) > 0
 
 
 def _is_transient(exc: BaseException) -> bool:

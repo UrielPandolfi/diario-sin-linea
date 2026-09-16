@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, aliased, selectinload
 from app.core.article_body import claim_ids_in_body_blocks
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.domain.enums import ArticleStatus, CorrectionKind, EventStatus, EventUpdateType
+from app.domain.enums import ArticleStatus, ClaimStatus, CorrectionKind, EventStatus, EventUpdateType
 from app.models import (
     Article,
     ArticleVersion,
@@ -21,18 +21,51 @@ from app.models import (
     EventUpdate,
     SourceItem,
 )
-from app.repositories import ArticleRepository, EventRepository
+from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.services.claim_card_presentation import (
     presentation_for_claim,
     public_presentation_payload,
     public_verification_payload,
 )
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
+from app.services.evidence_snapshot import evidence_snapshot_for_version
 from app.services.verification_outcome import verification_view_for_event
 
 PUBLIC_CANDIDATE_CAP = 200
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
+
+
+class _StatusOverlay:
+    def __init__(self, claim: Claim, status: ClaimStatus) -> None:
+        self._claim = claim
+        self.status = status
+
+    def __getattr__(self, name: str):
+        return getattr(self._claim, name)
+
+
+def _live_claim_states(session: Session, event_id: UUID, version: int) -> dict[str, dict]:
+    runs = PipelineRunRepository(session).list_for_event(event_id, limit=50)
+    snapshot = evidence_snapshot_for_version(runs, version)
+    states: dict[str, dict] = {}
+    if not snapshot:
+        return states
+    context = snapshot.get("article_context")
+    if not isinstance(context, dict):
+        return states
+    for key in (
+        "confirmed_claims",
+        "single_source_claims",
+        "conflicting_claims",
+        "uncertain_claims",
+        "disproven_claims",
+        "outdated_claims",
+    ):
+        for row in context.get(key) or []:
+            if isinstance(row, dict) and row.get("id"):
+                states[str(row["id"])] = row
+    return states
 
 
 def clamp_limit(limit: int | None) -> int:
@@ -114,12 +147,29 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
 
 
 def compact_public_claims(
-    session: Session, event: Event, *, allowed_ids: set[str] | None = None
+    session: Session, event: Event, *, allowed_ids: set[str] | None = None, freeze_to_version: int | None = None
 ) -> list[dict]:
+    claims = list(event.claims)
+    if allowed_ids is not None:
+        claims = [claim for claim in claims if str(claim.id) in allowed_ids]
+    overlay = _live_claim_states(session, event.id, freeze_to_version) if freeze_to_version is not None else {}
+    if overlay:
+        frozen: list = []
+        for claim in claims:
+            state = overlay.get(str(claim.id))
+            status_raw = (state or {}).get("status")
+            if status_raw:
+                try:
+                    frozen.append(_StatusOverlay(claim, ClaimStatus(status_raw)))
+                    continue
+                except ValueError:
+                    pass
+            frozen.append(claim)
+        claims = frozen
     _run, view = verification_view_for_event(session, event.id)
-    editorials = labels_for_event_claims(list(event.claims), view)
+    editorials = labels_for_event_claims(list(claims), view)
     rows: list[dict] = []
-    for claim in event.claims:
+    for claim in claims:
         if allowed_ids is not None and str(claim.id) not in allowed_ids:
             continue
         source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
@@ -212,7 +262,9 @@ def article_payload(event: Event, article: Article, live: ArticleVersion, *, ses
         "article_id": str(article.id),
         "notices": public_notices(corrections),
         "history": public_history(article, corrections, updates),
-        "claims": compact_public_claims(session, event, allowed_ids=allowed),
+        "claims": compact_public_claims(
+            session, event, allowed_ids=allowed, freeze_to_version=article.published_version
+        ),
     }
 
 

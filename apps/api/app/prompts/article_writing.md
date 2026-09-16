@@ -106,3 +106,8 @@ Devolvé JSON:
 - body_blocks: lista de {type: "paragraph", segments: [{text, claim_refs}]}
 
 El color y el tono no expresan ideología.
+
+Actualización de un artículo ya publicado:
+
+Si el user JSON incluye `current_article`, estás actualizando una versión live. `current_article` es base editorial, no fuente factual. Conservá el texto compatible con los Claims actuales. Modificá, eliminá o atribuí cualquier afirmación que haya dejado de estar respaldada. Incorporá la información material de `knowledge_delta`. Podés editar frases, cambiar titular o bajada, o reescribir el artículo completo si el estado actual del Event lo exige. No conserves una afirmación solo porque aparecía en la versión anterior. `authoritative_claims` es el recorte de Claims actuales necesarios para comprobar el texto conservado y el delta; no reconstruyas la nota desde todos los textos originales si esos Claims bastan.
+

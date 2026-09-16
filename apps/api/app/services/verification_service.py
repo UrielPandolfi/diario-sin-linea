@@ -344,7 +344,9 @@ class VerificationService:
             coverage.verification_incomplete = bool(budget.central_unverified)
             payload["coverage"] = coverage.model_dump(mode="json")
         if not selected:
-            payload["evaluated_claims"] = evaluated_claims_payload(list(event.claims))
+            payload["evaluated_claims"] = [
+                row.model_dump(mode="json") for row in evaluated_claims_payload(list(event.claims))
+            ]
             return payload
 
         search = self.search or get_search_provider()

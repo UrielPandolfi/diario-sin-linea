@@ -224,6 +224,13 @@ class _PendingClaim:
     evidence: dict[UUID, _PendingEvidence] = field(default_factory=dict)
 
 
+@dataclass
+class PersistResult:
+    claims: list[Claim]
+    touched_ids: set[UUID] = field(default_factory=set)
+    new_evidence: int = 0
+
+
 class ClaimService:
     def __init__(
         self,
@@ -240,7 +247,15 @@ class ClaimService:
         self.resolver_llm = resolver_llm
         self.escalated_resolver_llm = escalated_resolver_llm
 
-    def resolve(self, event_id: UUID, *, trigger: str, context: dict | None = None, claim_id: UUID | None = None) -> dict:
+    def resolve(
+        self,
+        event_id: UUID,
+        *,
+        trigger: str,
+        context: dict | None = None,
+        claim_id: UUID | None = None,
+        source_item_id: UUID | None = None,
+    ) -> dict:
         event = self._load_event(event_id)
         if event is None:
             raise ValueError("event_not_found")
@@ -258,7 +273,12 @@ class ClaimService:
             event_id=event.id,
             stage=CLAIM_STAGE,
             status=PipelineStatus.RUNNING,
-            metadata_json={"trigger": trigger, "context": context or {}, "target_claim_id": str(claim_id) if claim_id else None},
+            metadata_json={
+                "trigger": trigger,
+                "context": context or {},
+                "target_claim_id": str(claim_id) if claim_id else None,
+                "source_item_id": str(source_item_id) if source_item_id else None,
+            },
         )
         self.pipeline.add(run)
         try:
@@ -282,6 +302,8 @@ class ClaimService:
                 if claim_id:
                     with self.session.begin_nested():
                         result = self._run(event, claim_id=claim_id)
+                elif source_item_id is not None:
+                    result = self._run_incremental(event, source_item_id)
                 else:
                     result = self._run(event)
             run.status = PipelineStatus.SUCCESS
@@ -352,7 +374,7 @@ class ClaimService:
             for layer in layers:
                 split_claims.extend(split_compound_extracted(layer))
         outcome = self._merge_extracted(split_claims, sources)
-        claims = self._persist(event, outcome.pending)
+        claims = self._persist(event, outcome.pending).claims
         self.session.flush()
         claims = self._reload_claims(event.id) if claims else []
         expected = match_expected_to_claims(expected_centrals_from_event(event), claims)
@@ -445,6 +467,141 @@ class ClaimService:
             "claims_fingerprint": fingerprint,
             "coverage": coverage.model_dump(mode="json"),
         }
+
+    def _run_incremental(self, event: Event, source_item_id: UUID) -> dict:
+        item = next(
+            (
+                link.source_item
+                for link in event.event_sources
+                if link.source_item is not None and link.source_item_id == source_item_id
+            ),
+            None,
+        )
+        empty = {
+            "extracted": 0,
+            "persisted": 0,
+            "resolved": 0,
+            "changed": False,
+            "new_evidence": 0,
+            "needs_external_verification": [],
+            "escalated_claim_refs": [],
+            "contract_version": CONTRACT_VERSION,
+        }
+        if item is None:
+            return {**empty, "reason": "source_not_linked"}
+        if item.processing_status in (SourceItemStatus.FAILED, SourceItemStatus.SKIPPED):
+            return {**empty, "reason": "source_not_usable"}
+        if not has_extracted_body(item):
+            return {**empty, "reason": "no_usable_sources"}
+        if self._source_item_already_extracted(event, source_item_id):
+            claims = self._reload_claims(event.id)
+            coverage = build_coverage_contract(event=event, claims=claims, dropped=[])
+            return {
+                **empty,
+                "persisted": len(claims),
+                "changed": self._needs_verify_after_source(event.id, source_item_id),
+                "reason": "source_already_extracted",
+                "claims_fingerprint": claims_fingerprint(claims),
+                "coverage": coverage.model_dump(mode="json"),
+            }
+
+        sources = [item]
+        extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+        batch = extractor.generate_structured(
+            system_prompt=load_prompt("claim_extraction.md"),
+            user_prompt=self._extraction_prompt(event, sources),
+            schema=ClaimExtractionBatch,
+        )
+        split_claims: list[ExtractedClaim] = []
+        for raw in batch.claims:
+            raw = preserve_extracted_meaning(raw, sources)
+            for layer in split_attributed_content(raw):
+                split_claims.extend(split_compound_extracted(preserve_extracted_meaning(layer, sources)))
+        outcome = self._merge_extracted(split_claims, sources)
+        persisted = self._persist(event, outcome.pending, overwrite_matched=False)
+        self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        fingerprint = claims_fingerprint(claims)
+        changed = bool(persisted.touched_ids) or persisted.new_evidence > 0
+        base = {
+            "extracted": len(batch.claims),
+            "persisted": len(claims),
+            "resolved": 0,
+            "changed": changed,
+            "new_evidence": persisted.new_evidence,
+            "needs_external_verification": [],
+            "escalated_claim_refs": [],
+            "contract_version": CONTRACT_VERSION,
+            "claims_fingerprint": fingerprint,
+            "coverage": coverage.model_dump(mode="json"),
+            "incremental": True,
+        }
+        if not claims or not persisted.touched_ids:
+            return base
+
+        affected = self._affected_claims(claims, persisted.touched_ids)
+        resolver = self.resolver_llm or get_claim_resolution_provider(escalated=False)
+        resolution = resolver.generate_structured(
+            system_prompt=load_prompt("claim_resolution.md"),
+            user_prompt=self._resolution_prompt(event, affected),
+            schema=ClaimResolutionBatch,
+        )
+        needs = self._apply_resolution(affected, resolution, event_id=event.id)
+        self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        return {
+            **base,
+            "resolved": len(affected),
+            "needs_external_verification": needs,
+            "claims_fingerprint": claims_fingerprint(claims),
+            "coverage": coverage.model_dump(mode="json"),
+            "changed": True,
+        }
+
+    def _source_item_already_extracted(self, event: Event, source_item_id: UUID) -> bool:
+        for claim in event.claims:
+            for row in claim.evidence:
+                if row.source_item_id == source_item_id:
+                    return True
+        return False
+
+    def _needs_verify_after_source(self, event_id: UUID, source_item_id: UUID) -> bool:
+        runs = self.pipeline.list_for_event(event_id, limit=50)
+        claims_for_item = [
+            run
+            for run in runs
+            if run.stage == CLAIM_STAGE
+            and run.status == PipelineStatus.SUCCESS
+            and str((run.metadata_json or {}).get("source_item_id") or "") == str(source_item_id)
+        ]
+        if not claims_for_item:
+            return True
+        first = min(claims_for_item, key=lambda run: run.started_at or utc_now())
+        first_done = first.finished_at or first.started_at
+        for run in runs:
+            if run.stage != "verification" or run.status != PipelineStatus.SUCCESS:
+                continue
+            when = run.finished_at or run.started_at
+            if first_done is None or when is None or when >= first_done:
+                return False
+        return True
+
+    def _affected_claims(self, claims: list[Claim], touched_ids: set[UUID]) -> list[Claim]:
+        groups: dict[str, list[Claim]] = defaultdict(list)
+        by_id = {claim.id: claim for claim in claims}
+        for claim in claims:
+            groups[comparison_key_for(claim)].append(claim)
+        selected: dict[UUID, Claim] = {}
+        for claim_id in touched_ids:
+            claim = by_id.get(claim_id)
+            if claim is None:
+                continue
+            for member in groups[comparison_key_for(claim)]:
+                selected[member.id] = member
+        ordered = [claim for claim in claims if claim.id in selected]
+        return ordered or list(selected.values())
 
     def _reextract_one(self, event: Event, claim_id: UUID) -> dict:
         """Explicit recheck through extraction/resolution, preserving identity and runs."""
@@ -657,7 +814,14 @@ class ClaimService:
                 valid[item.id] = pending
         return valid
 
-    def _persist(self, event: Event, pending_by_key: dict[str, _PendingClaim], *, target_claim: Claim | None = None) -> list[Claim]:
+    def _persist(
+        self,
+        event: Event,
+        pending_by_key: dict[str, _PendingClaim],
+        *,
+        target_claim: Claim | None = None,
+        overwrite_matched: bool = True,
+    ) -> PersistResult:
         existing_rows = list(
             self.session.scalars(
                 select(Claim)
@@ -667,8 +831,11 @@ class ClaimService:
         )
         existing = {assertion_key_for(claim): claim for claim in existing_rows}
         persisted: list[Claim] = []
+        touched_ids: set[UUID] = set()
+        new_evidence = 0
         for key, pending in pending_by_key.items():
             claim = target_claim or existing.get(key)
+            created = False
             if claim is None:
                 claim = Claim(
                     event_id=event.id,
@@ -686,7 +853,8 @@ class ClaimService:
                 self.session.add(claim)
                 self.session.flush()
                 existing[key] = claim
-            else:
+                created = True
+            elif overwrite_matched:
                 claim.canonical_text = pending.canonical_text
                 claim.claim_type = pending.claim_type
                 claim.importance = pending.importance
@@ -696,6 +864,8 @@ class ClaimService:
                 claim.normalized_value = pending.normalized_value
                 claim.unit = pending.unit
                 claim.occurred_at = pending.occurred_at
+            if created:
+                touched_ids.add(claim.id)
             by_item = {row.source_item_id: row for row in claim.evidence}
             for item_id, ev in pending.evidence.items():
                 row = by_item.get(item_id)
@@ -710,17 +880,26 @@ class ClaimService:
                     )
                     self.session.add(row)
                     claim.evidence.append(row)
+                    new_evidence += 1
+                    touched_ids.add(claim.id)
                 else:
-                    if _EVIDENCE_RANK[ev.evidence_type] >= _EVIDENCE_RANK[row.evidence_type]:
+                    upgraded = False
+                    if _EVIDENCE_RANK[ev.evidence_type] > _EVIDENCE_RANK[row.evidence_type]:
+                        row.evidence_type = ev.evidence_type
+                        upgraded = True
+                    elif _EVIDENCE_RANK[ev.evidence_type] == _EVIDENCE_RANK[row.evidence_type]:
                         row.evidence_type = ev.evidence_type
                     if ev.excerpt and not row.excerpt:
                         row.excerpt = ev.excerpt
+                        upgraded = True
                     if ev.confidence is not None:
                         row.confidence = ev.confidence
                     if ev.source_url:
                         row.source_url = ev.source_url
+                    if upgraded:
+                        touched_ids.add(claim.id)
             persisted.append(claim)
-        return persisted
+        return PersistResult(claims=persisted, touched_ids=touched_ids, new_evidence=new_evidence)
 
     def _reload_claims(self, event_id: UUID) -> list[Claim]:
         stmt = (

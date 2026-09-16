@@ -239,6 +239,24 @@ def test_detector_only_low_new_is_not_material() -> None:
     assert change.is_material is False
 
 
+def test_detector_confirmation_only_is_not_material() -> None:
+    cid = uuid4()
+    previous = [_snapshot_row(cid, text="Hubo seis heridos", status="SINGLE_SOURCE", importance="HIGH", value="6")]
+    current = [_snapshot_row(cid, text="Hubo seis heridos", status="SUPPORTED", importance="HIGH", value="6")]
+    change = detect_material_change(previous, current)
+    assert change.is_material is False
+    assert "status_confirmed" in change.reasons
+
+
+def test_detector_new_contradiction_is_material() -> None:
+    cid = uuid4()
+    previous = [_snapshot_row(cid, text="Hubo seis heridos", status="SUPPORTED", importance="HIGH", value="6")]
+    current = [_snapshot_row(cid, text="Hubo seis heridos", status="CONFLICTING", importance="HIGH", value="6")]
+    change = detect_material_change(previous, current)
+    assert change.is_material is True
+    assert "status_conflict" in change.reasons
+
+
 def test_context_omits_html_and_event_body(db_session: Session) -> None:
     source = _source(db_session)
     html = "<html><body><article>SECRETO raw_text no debe ir al prompt</article></body></html>"

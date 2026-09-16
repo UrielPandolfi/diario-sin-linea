@@ -1,12 +1,12 @@
 # Estado
 
-Revisión: 2026-09-10. Track A (observabilidad y costos Admin) está en código. Track B **no** se implementó ni se da por resuelto. Etapa 1 (`editorial-evidence-1`) y etapa 2 (snapshot de writing, invariantes de audit, bloqueo de publish) están en código y tests con dobles. Etapa 3 (tarjeta pública de evidencia / DTO de `support_basis`) está en código y tests de matriz; eval paga **no**. Dashboard Admin de `expected_central` queda diferido. 429 temporal de OpenAI en LLM estructurado se reintenta en el cliente (no en Celery ni en el SDK).
+Revisión: 2026-09-16. Track B (EXISTING_EVENT → evidencia incremental → materialidad editorial → Writing desde live → Audit → READY_FOR_REVIEW, live V1 intacta) está en código y tests con dobles. Track A de suceso nuevo no cambia su auto-publish de primera vez. Etapa 1 (`editorial-evidence-1`) y etapa 2 (snapshot de writing, invariantes de audit, bloqueo de publish) siguen en código. Dashboard Admin de `expected_central` queda diferido. 429 temporal de OpenAI en LLM estructurado se reintenta en el cliente (no en Celery ni en el SDK).
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → research → claims → verify → write → audit → publish (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`). Claims del artículo: `compact_public_claims` serializa el DTO de presentación (`claim_card_presentation`: `status` + `support_basis` + `demotion`); no `llm_reason` ni `sol.reason` como veredicto.
+Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish solo si no hay `published_version` (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
 
 Ingesta RSS (HTML no soportado en `ingestion_service.py`). Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
@@ -22,15 +22,19 @@ Backend: además de la suite previa, `test_editorial_evidence`, `test_audit_poli
 
 ## Hallazgos de cableado (no decisiones)
 
-1. **Link no encola research.** `detect_event` solo llama `research_event` si `created` y hay `event_id`. Vincular o filtrar no reabre research→publish. **Track B:** no verificado ni reparado en A.
-2. **`AUTO_PUBLISH` no se lee** fuera de Settings. El path vivo publica por audit `passed` + no hold + gate de versión/snapshot.
-3. **`READY_FOR_REVIEW` no se asigna** en servicios.
+1. **Link nuevo encola claims incremental, no research.** `already_linked` (EventSource ya existente) no reabre pipeline. Track A create sigue encolando research.
+2. **`AUTO_PUBLISH` no se lee** fuera de Settings. Primera publicación: audit `passed` + no hold + `published_version is None`. Actualización: Audit passed → `READY_FOR_REVIEW`, publish solo por admin.
+3. **`Event.status` READY_FOR_REVIEW / UPDATING** siguen sin usarse. La candidata se representa con `Event=PUBLISHED` + `Article=READY_FOR_REVIEW`.
 
-## Track B — no resuelto al cerrar A
+## Track B — 2026-09-16
+
+En código: `detect_event` → `resolve_event_claims(..., source_item_id)` sin research; `ClaimService._run_incremental`; detector editorial (corroboración no reescribe); Writing live+delta; Audit `READY_FOR_REVIEW`; sin auto-publish si hay live; freeze público de claims; retry `unaudited_candidate`. Tests: `test_track_b.py`. Dedup 0.72/0.88, Voyage y Terra no se tocaron. Research de ítems ya vinculados no reabre Track B (`already_linked`). Pendiente real: eval con modelos reales; `unique(source_item_id)` en `event_sources` no se agregó; carrera de dos `detect` concurrentes no se evaluó.
+
+## Track B histórico al cerrar A
 
 2026-09-14: se agregaron tests de `embedding_high`, Terra y `level1_code` positivo. La evaluación controlada reprodujo dos fusiones incorrectas del caso C; luego se corrigieron con autorización del usuario (ver evaluación y corrección debajo). No se reabre research al linkear. El hueco `no_claims` (write saltea sin evaluar novedad) y los cambios factuales sin claims **siguen**. No hay `unique(source_item_id)` en `event_sources` (una publicación puede ser varios sucesos). La carrera de dos `detect` concurrentes no se evaluó. Research que adjunta ítems no los marca PROCESSED.
 
-Hasta B, “fuente agregada” >> “actualización publicada” es el cableado real. Dedup con Voyage real **no** quedó verificado; la evaluación de 2026-09-14 usa vectores controlados.
+Research que adjunta ítems no los marca PROCESSED en ResearchService; si el ítem reingresa a Detection con EventSource ya existente, `already_linked` lo marca PROCESSED y no reabre Track B.
 
 ### Evaluación de dedup — 2026-09-14
 

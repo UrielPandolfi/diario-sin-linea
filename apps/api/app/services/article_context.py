@@ -61,6 +61,21 @@ def select_context_claims(claims: Sequence[Claim], *, limit: int) -> list[Claim]
     return ordered[:limit]
 
 
+def claims_snapshot_for_version(runs: Sequence[PipelineRun], version: int) -> list[dict] | None:
+    target = int(version)
+    for run in runs:
+        if run.stage != "writing" or run.status != PipelineStatus.SUCCESS:
+            continue
+        meta = run.metadata_json or {}
+        bound = meta.get("version")
+        if bound is None or int(bound) != target:
+            continue
+        snapshot = meta.get("claims_snapshot")
+        if isinstance(snapshot, list):
+            return list(snapshot)
+    return None
+
+
 def compact_verification(
     run: PipelineRun | None,
     *,
@@ -346,6 +361,8 @@ def build_article_context(
     excerpt_chars: int = 400,
     max_source_contexts: int = 6,
     source_context_chars: int = 5000,
+    claim_ids: set[str] | None = None,
+    include_source_contexts: bool = True,
 ) -> ArticleContext:
     claim_run, verify_run = pair_from_runs(list(pipeline_runs))
     coverage = ((claim_run.metadata_json if claim_run is not None else None) or {}).get("coverage") or {}
@@ -355,7 +372,11 @@ def build_article_context(
         verify_run, coverage_gap=coverage_gap, stale=stale, claim_run=claim_run
     )
 
-    selected = select_context_claims(list(event.claims), limit=max_claims)
+    pool = list(event.claims)
+    if claim_ids is not None:
+        wanted = {str(claim_id) for claim_id in claim_ids}
+        pool = [claim for claim in pool if str(claim.id) in wanted]
+    selected = select_context_claims(pool, limit=max_claims)
     related: dict[str, list[str]] = {}
     for pair in ((claim_run.metadata_json if claim_run is not None else None) or {}).get("attribution_pairs", []):
         a, b = pair.get("attribution_claim_id"), pair.get("factual_claim_id")
@@ -404,7 +425,9 @@ def build_article_context(
         sources=sources,
         source_contexts=_source_contexts(
             event, limit=max_source_contexts, text_chars=source_context_chars
-        ),
+        )
+        if include_source_contexts
+        else [],
         claim_refs=claim_refs,
         verification=verification,
     )
