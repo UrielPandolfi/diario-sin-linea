@@ -56,7 +56,7 @@ from app.schemas import SourceCreate, SourceItemCreate
 from app.schemas.verification import (
     CheapClaimEvidenceAssessment,
     CheapEvidenceJudgement,
-    EvidenceJudgementType,
+    EVENT_SOURCE_EVIDENCE_TYPES,
     PERSISTABLE_JUDGEMENTS,
     VerificationPlan,
     VerificationResult,
@@ -78,7 +78,7 @@ from app.services.claim_coverage import (
     is_mixed_proposition,
     proposition_role_for,
 )
-from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for
+from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for, is_utterance_claim
 from app.services.information_origin import (
     assess_origins,
     demotion_for,
@@ -530,6 +530,8 @@ class VerificationService:
                     continue
                 if assertion_key_for(sibling) == assertion_key_for(winner):
                     continue
+                if is_utterance_claim(sibling) or is_utterance_claim(winner):
+                    continue
                 if not _has_structured_spo(sibling):
                     continue
                 if sibling.status == ClaimStatus.OUTDATED:
@@ -892,13 +894,13 @@ class VerificationService:
         primary_support = False
         by_ref = {src.ref: src for src in packet}
         for row in assessment.judgements:
-            evidence_type = PERSISTABLE_JUDGEMENTS.get(row.relation)
-            if row.relation == EvidenceJudgementType.DOES_NOT_ESTABLISH:
-                evidence_type = EvidenceType.MENTIONS
-            if evidence_type is None:
+            selected_type = PERSISTABLE_JUDGEMENTS.get(row.relation)
+            if selected_type is None:
                 continue
-            evidence_type, _ = self._admit_relation(claim, by_ref.get(row.source_ref), row, evidence_type)
-            added, counted = self._attach_evidence(event, claim, by_ref, row.source_ref, evidence_type, row)
+            evidence_type, _ = self._admit_relation(claim, by_ref.get(row.source_ref), row, selected_type)
+            added, counted = self._attach_evidence(
+                event, claim, by_ref, row.source_ref, evidence_type, row, selected_type=selected_type
+            )
             attached += added
             cited += counted
             src = by_ref.get(row.source_ref)
@@ -929,7 +931,13 @@ class VerificationService:
         for row in result.evidence:
             evidence_type, valid = self._admit_relation(claim, by_ref.get(row.source_ref), row, row.evidence_type)
             added, counted = self._attach_evidence(
-                event, claim, by_ref, row.source_ref, evidence_type, row
+                event,
+                claim,
+                by_ref,
+                row.source_ref,
+                evidence_type,
+                row,
+                selected_type=row.evidence_type,
             )
             if counted and valid:
                 valid_contradictions.add(by_ref[row.source_ref].item.id)
@@ -1041,6 +1049,8 @@ class VerificationService:
         source_ref: int,
         evidence_type: EvidenceType,
         row: VerificationResult | CheapEvidenceJudgement | Any,
+        *,
+        selected_type: EvidenceType | None = None,
     ) -> tuple[int, int]:
         src = by_ref.get(source_ref)
         if src is None:
@@ -1085,6 +1095,8 @@ class VerificationService:
         )
         self.session.add(evidence)
         claim.evidence.append(evidence)
+        if (selected_type or evidence_type) not in EVENT_SOURCE_EVIDENCE_TYPES:
+            return 0, 1
         _, created_link = self.event_service.attach_source(
             event,
             item.id,

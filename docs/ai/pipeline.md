@@ -15,8 +15,8 @@ flowchart LR
   material -->|false| stopB[stop Track B]
   material -->|true or unaudited_candidate| write[write_event_article]
   write -->|written| audit[audit_event_article]
-  audit -->|passed and no published_version and not hold| publish[publish_event_article]
-  audit -->|passed and published_version| review[Article READY_FOR_REVIEW]
+  audit -->|passed and AUTO_PUBLISH and not hold| publish[publish_event_article]
+  audit -->|passed and not AUTO_PUBLISH| review[Article READY_FOR_REVIEW]
 ```
 
 ## Etapas
@@ -29,7 +29,7 @@ flowchart LR
 | `resolve_event_claims` | `claim_resolution` | `ClaimService.resolve` | `verify_event_claims` si no `skipped` y `changed` (o `persisted` None/>0 en Track A) |
 | `verify_event_claims` | `verification` | `VerificationService.verify` | `write_event_article` si no `skipped`, no `error`, y `should_enqueue_write` |
 | `write_event_article` | `writing` | `WritingService.write` | `audit_event_article` si `written is True` (incluye `unaudited_candidate`) |
-| `audit_event_article` | `auditing` | `AuditService.audit` | `publish_event_article` si passed, no hold, y `published_version is None` |
+| `audit_event_article` | `auditing` | `AuditService.audit` | `publish_event_article` si passed, no hold, y `AUTO_PUBLISH=true` |
 | `publish_event_article` | `publishing` | `PublishService.publish` | — |
 
 Cap de poll: si `allow_new_event_pipeline` falla, `detect_event` persiste un `PipelineRun` de detección con `reason=max_new_events_per_poll` (sin LLM) y retorna skip. Si no crea y `fill_quota`, libera el slot y prueba otro PENDING (`_enqueue_next_for_quota`).
@@ -38,13 +38,13 @@ Admin: listado **Publicaciones** (`GET /api/v1/admin/publications`) = estado act
 
 ## Create, link, skip (detección)
 
-En `DetectionService._resolve_event` / `detect`: URL conocida → attach; match embeddings/Terra → link o create; gate → `SKIPPED`. Create: `EventService.create` + `INITIAL`. Un `EventSource` ya existente (`already_linked`) marca el item `PROCESSED` y no reabre pipeline. Un link **nuevo** encola claims incremental (`existing_event`) **sin** research. El create encola research (Track A).
+En `DetectionService._resolve_event` / `detect`: URL conocida → attach; match embeddings (auto-merge ≥ HIGH) o DeepSeek si el par es ambiguo → link o create; gate → `SKIPPED`. Create: `EventService.create` + `INITIAL`. Un `EventSource` ya existente (`already_linked`) marca el item `PROCESSED` y no reabre pipeline. Un link **nuevo** encola claims incremental (`existing_event`) **sin** research. El create encola research (Track A).
 
 Admin puede disparar research/claims/… sobre un Event ya existente.
 
 ## Track B (EXISTING_EVENT)
 
-Fuente nueva vinculada → extrae Claims **solo** de esa SourceItem, merge por `assertion_key`, re-resuelve claims tocados y hermanos de `comparison_key`. Verification sigue las reglas actuales (búsquedas dirigidas si hace falta); no se relanza research web completo. `MaterialChangeDetector` decide **antes** de Writing: corroboración `SINGLE_SOURCE→SUPPORTED` / `evidence_posture_changed` **no** es material editorial. Si no hay cambio editorial: no LLM de Writing, no Audit, no ArticleVersion, no EventUpdate público. Si hay: Writing usa `published_version` live + `knowledge_delta` + claims autoritativos (sin `source_contexts`). Audit valida la candidata contra el snapshot de **esa** versión. `Event.status` permanece `PUBLISHED`; `Article.status` pasa a `READY_FOR_REVIEW` tras Audit; `published_version` sigue en V1 hasta publish admin. No hay auto-publish si ya existe `published_version`. Retry de Writing con candidata no auditada (`unaudited_candidate`) reencola Audit sin crear V3. La API pública congela status/labels de Claims según el snapshot de la versión live.
+Fuente nueva vinculada → extrae Claims **solo** de esa SourceItem, merge por `assertion_key`, re-resuelve claims tocados y hermanos de `comparison_key`. Verification sigue las reglas actuales (búsquedas dirigidas si hace falta) y **no** convierte un search hit en `EventSource` salvo juicio SUPPORTS/CONTRADICTS/QUALIFIES; no se relanza research web completo. `MaterialChangeDetector` decide **antes** de Writing: corroboración `SINGLE_SOURCE→SUPPORTED` / `evidence_posture_changed` / `proposition_corroborated` **no** es material editorial. Un claim nuevo de la misma proposición (p. ej. misma fecha o mismo `comparison_key`) no dispara `new_high_claim`. Si no hay cambio editorial: no LLM de Writing, no Audit, no ArticleVersion, no EventUpdate público. Si hay: Writing usa `published_version` live + `knowledge_delta` + claims autoritativos (sin `source_contexts`). Audit valida la candidata contra el snapshot de **esa** versión. `Event.status` permanece `PUBLISHED`; `published_version` sigue en V1 hasta publish. Con `AUTO_PUBLISH=true`, Audit passed encola publish de V2; con `false`, `Article.status` queda `READY_FOR_REVIEW`. Retry de Writing con candidata no auditada (`unaudited_candidate`) reencola Audit sin crear V3. La API pública congela status/labels de Claims según el snapshot de la versión live.
 
 ## Audit
 
@@ -52,7 +52,7 @@ Fuente nueva vinculada → extrae Claims **solo** de esa SourceItem, merge por `
 
 ## Publish
 
-`PublishService`: no archived; `already_published` si `published_version == current_version`; hold bloquea salvo `override_editorial_hold` en admin. El gate usa `latest_completed` de auditing (SUCCESS o FAILED) y exige `audited`, `passed`, `version_after == current_version` **al publicar**, snapshot de esa versión, e invariantes estructurales en verde. Un FAILED posterior a un SUCCESS de la misma versión no aprueba. El worker **no auto-publica** actualizaciones: si el Article ya tiene `published_version`, Audit passed deja `READY_FOR_REVIEW` y no encola publish. Track A (primera vez, `published_version is None`) sigue encolando publish salvo `editorial_hold`. `revise` humano no pasa por este helper.
+`PublishService`: no archived; `already_published` si `published_version == current_version`; hold bloquea salvo `override_editorial_hold` en admin. El gate usa `latest_completed` de auditing (SUCCESS o FAILED) y exige `audited`, `passed`, `version_after == current_version` **al publicar**, snapshot de esa versión, e invariantes estructurales en verde. Un FAILED posterior a un SUCCESS de la misma versión no aprueba. El worker encola publish si Audit `passed`, no hold y `AUTO_PUBLISH=true` (V1 y actualizaciones). Si `AUTO_PUBLISH=false`, Audit passed deja `READY_FOR_REVIEW`. `revise` humano no pasa por este helper.
 
 ## Invariantes (con evidencia en schema/servicios)
 

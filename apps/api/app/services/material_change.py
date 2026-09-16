@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from app.core.text import normalize_name, token_set
 from app.domain.enums import ClaimImportance, ClaimStatus
 from app.models import Claim
+from app.services.claim_service import calendar_dates, comparison_key_for
 
 _RESOLVED = {
     ClaimStatus.SUPPORTED,
@@ -19,6 +21,7 @@ _CORRECTION_TO = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
 _KNOWLEDGE_ONLY_REASONS = {
     "status_confirmed",
     "evidence_posture_changed",
+    "proposition_corroborated",
 }
 _EDITORIAL_REASONS = {
     "first_write",
@@ -47,7 +50,12 @@ def snapshot_claims(claims: Sequence[Claim], *, decisions: dict | None = None) -
                 "status": _enum_value(claim.status),
                 "importance": _enum_value(claim.importance),
                 "normalized_value": claim.normalized_value,
+                "unit": claim.unit,
                 "claim_type": claim.claim_type,
+                "subject": claim.subject,
+                "predicate": claim.predicate,
+                "object_text": claim.object_text,
+                "comparison_key": comparison_key_for(claim),
                 "evidence_posture": {key: basis.get(key) for key in (
                     "documents_supporting", "documents_qualifying", "documents_contradicting",
                     "known_independent_count", "unknown_group_count", "reprint_collapsed_count", "primary_access", "kind",
@@ -75,6 +83,49 @@ class MaterialChange:
     reasons: list[str]
 
 
+def _row_text(row: dict) -> str:
+    return (row.get("object_text") or row.get("canonical_text") or "") or ""
+
+
+def _proposition_tokens(row: dict) -> set[str]:
+    folded = normalize_name(_row_text(row))
+    months = {
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "setiembre", "octubre", "noviembre", "diciembre",
+    }
+    return {
+        token
+        for token in token_set(folded)
+        if len(token) >= 4 and not token.isdigit() and token not in months
+    }
+
+
+def propositions_related(left: dict, right: dict) -> bool:
+    left_key, right_key = left.get("comparison_key"), right.get("comparison_key")
+    if left_key and right_key and left_key == right_key:
+        return True
+    dates_left = calendar_dates(_row_text(left)) | calendar_dates(left.get("canonical_text"))
+    dates_right = calendar_dates(_row_text(right)) | calendar_dates(right.get("canonical_text"))
+    if dates_left and dates_right and dates_left & dates_right:
+        return True
+    unit_left = normalize_name(left.get("unit") or "")
+    unit_right = normalize_name(right.get("unit") or "")
+    if unit_left and unit_left == unit_right:
+        return len(_proposition_tokens(left) & _proposition_tokens(right)) >= 2
+    return False
+
+
+def _values_equivalent(left: dict, right: dict) -> bool:
+    first, second = left.get("normalized_value") or None, right.get("normalized_value") or None
+    if first and second:
+        return first == second
+    dates_left = calendar_dates(_row_text(left)) | calendar_dates(left.get("canonical_text"))
+    dates_right = calendar_dates(_row_text(right)) | calendar_dates(right.get("canonical_text"))
+    if dates_left and dates_right:
+        return bool(dates_left & dates_right)
+    return first == second
+
+
 def detect_material_change(
     previous: Sequence[dict] | None,
     current: Sequence[dict],
@@ -88,6 +139,13 @@ def detect_material_change(
 
     for claim_id, row in curr_by_id.items():
         if claim_id not in prev_by_id:
+            related = [before for before in previous if propositions_related(before, row)]
+            if related:
+                if any(_values_equivalent(before, row) for before in related):
+                    reasons.append("proposition_corroborated")
+                else:
+                    reasons.append("value_changed")
+                continue
             importance = _importance(row.get("importance") or ClaimImportance.MEDIUM)
             if importance == ClaimImportance.HIGH:
                 reasons.append("new_high_claim")

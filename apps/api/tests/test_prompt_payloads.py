@@ -197,7 +197,7 @@ def test_terra_dump_omits_editorial_fields() -> None:
     assert "editorial_scope" not in slim
     assert "location_confidence" not in slim
     assert "Rosario" in slim
-    assert DetectionService._ask_terra  # callable exists
+    assert DetectionService._ask_ambiguous_dedup  # callable exists
 
 
 def test_context_evidence_maps_source_ref() -> None:

@@ -320,9 +320,9 @@ def audit_event_article(self, event_id: str, trigger: str = "writing") -> dict:
         session.commit()
         if result.get("skipped") is False and result.get("passed") is True:
             article = ArticleRepository(session).get_by_event_id(UUID(event_id))
-            if article is None or not getattr(article, "editorial_hold", False):
-                if getattr(article, "published_version", None) is None:
-                    publish_event_article.delay(event_id, trigger)
+            held = article is not None and getattr(article, "editorial_hold", False)
+            if not held and get_settings().auto_publish:
+                publish_event_article.delay(event_id, trigger)
         return result
     except Exception:
         session.rollback()

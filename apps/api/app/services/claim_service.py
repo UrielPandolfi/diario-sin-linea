@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 from typing import Any
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.source_content import has_extracted_body
 from app.core.source_snippet import select_source_snippet
-from app.core.text import excerpt_in_source, normalize_name
+from app.core.text import excerpt_in_source, normalize_name, token_set
 from app.core.urls import url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import (
@@ -50,7 +51,7 @@ from app.services.claim_coverage import (
     split_compound_extracted,
 )
 from app.services.information_origin import assess_origins, has_support_evidence
-from app.services.claim_meaning import preserve_extracted_meaning, split_attributed_content
+from app.services.claim_meaning import attributed_statement, preserve_extracted_meaning, split_attributed_content
 from app.services.verification_outcome import (
     is_verification_locked,
     verification_view_for_event,
@@ -66,6 +67,32 @@ _EVIDENCE_RANK = {
 }
 
 _PROTECTED_STATUSES = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
+_DOCUMENT_ACT = re.compile(
+    r"\b(confirm[oó]|establece|fija|dispone|determina|public[oó]|indica)\s+que\b",
+    re.I,
+)
+_MONTHS = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "setiembre", "octubre", "noviembre", "diciembre",
+)
+_CALENDAR_DATE = re.compile(
+    r"\b(\d{1,2})\s+de\s+(" + "|".join(_MONTHS) + r")\b",
+    re.I,
+)
+_YEAR_TOKEN = re.compile(r"\b((?:19|20)\d{2})\b")
+_PROP_STOP = {
+    "que", "del", "una", "unos", "unas", "para", "con", "por", "los", "las",
+    "el", "la", "de", "en", "un", "al", "es", "fue", "ser", "como", "este",
+    "esta", "estos", "estas", "segun", "sera", "seran", "hacia", "desde",
+}
+
+
+def is_utterance_claim(claim: Claim | ExtractedClaim) -> bool:
+    return looks_like_speech_act(
+        canonical_text=claim.canonical_text,
+        predicate=getattr(claim, "predicate", None),
+        claim_type=getattr(claim, "claim_type", None),
+    )
 
 
 def _item_body(item: SourceItem) -> str:
@@ -89,6 +116,43 @@ def build_assertion_key(
     return normalize_name(canonical_text or "")
 
 
+def looks_like_speech_act(
+    *,
+    canonical_text: str | None = None,
+    predicate: str | None = None,
+    claim_type: str | None = None,
+) -> bool:
+    if (claim_type or "").strip().lower() == "declaracion":
+        return True
+    blob = f"{predicate or ''} {canonical_text or ''}"
+    return attributed_statement(blob) or bool(_DOCUMENT_ACT.search(blob))
+
+
+def calendar_dates(text: str | None) -> set[str]:
+    folded = normalize_name(text or "")
+    return {f"{day} {month}" for day, month in _CALENDAR_DATE.findall(folded)}
+
+
+def proposition_fingerprint(text: str | None) -> str:
+    folded = normalize_name(text or "")
+    years = sorted(set(_YEAR_TOKEN.findall(folded)))
+    dates = sorted(calendar_dates(folded))
+    cleaned = _CALENDAR_DATE.sub(" ", folded)
+    cleaned = _YEAR_TOKEN.sub(" ", cleaned)
+    cleaned = re.sub(r"\d+(?:[.,]\d+)?", " ", cleaned)
+    tokens = sorted(
+        token for token in token_set(cleaned) - _PROP_STOP if len(token) >= 4
+    )
+    parts: list[str] = []
+    if years:
+        parts.append("y:" + ",".join(years))
+    if dates:
+        parts.append("d:" + ",".join(dates))
+    if tokens:
+        parts.append("t:" + ",".join(tokens))
+    return "|".join(parts)
+
+
 def build_comparison_key(
     *,
     canonical_text: str,
@@ -97,11 +161,20 @@ def build_comparison_key(
     unit: str | None = None,
     normalized_value: str | None = None,
     object_text: str | None = None,
+    claim_type: str | None = None,
 ) -> str:
+    if looks_like_speech_act(canonical_text=canonical_text, predicate=predicate, claim_type=claim_type):
+        core = (object_text or "").strip() or (canonical_text or "")
+        fingerprint = proposition_fingerprint(core)
+        if fingerprint:
+            return f"prop|{fingerprint}|{normalize_name(unit or '')}"
     subj = (subject or "").strip()
     pred = (predicate or "").strip()
     if subj and pred:
         return f"{normalize_name(subj)}|{normalize_name(pred)}|{normalize_name(unit or '')}"
+    fallback = proposition_fingerprint((object_text or "").strip() or canonical_text)
+    if fallback:
+        return f"prop|{fallback}|{normalize_name(unit or '')}"
     return build_assertion_key(
         canonical_text=canonical_text,
         subject=subject,
@@ -131,6 +204,7 @@ def comparison_key_for(claim: Claim | ExtractedClaim) -> str:
         normalized_value=claim.normalized_value,
         object_text=claim.object_text,
         unit=claim.unit,
+        claim_type=getattr(claim, "claim_type", None),
     )
 
 
@@ -1008,20 +1082,20 @@ class ClaimService:
         for claim in claims:
             groups[comparison_key_for(claim)].append(claim)
         for members in groups.values():
-            keys = {assertion_key_for(claim) for claim in members}
-            if len(keys) < 2:
+            world = [claim for claim in members if not is_utterance_claim(claim)]
+            if len({assertion_key_for(claim) for claim in world}) < 2:
                 continue
-            clock = _competing_clock(members)
+            clock = _competing_clock(world)
             if clock is None:
-                for claim in members:
+                for claim in world:
                     if is_verification_locked(claim, members, view, verify_run):
                         continue
                     if claim.status not in _PROTECTED_STATUSES:
                         claim.status = ClaimStatus.UNCERTAIN
                 continue
             latest = max(clock.values())
-            latest_members = [claim for claim in members if clock[claim] == latest]
-            for claim in members:
+            latest_members = [claim for claim in world if clock[claim] == latest]
+            for claim in world:
                 if clock[claim] < latest and claim.status != ClaimStatus.DISPROVEN:
                     claim.status = ClaimStatus.OUTDATED
             latest_keys = {assertion_key_for(claim) for claim in latest_members}

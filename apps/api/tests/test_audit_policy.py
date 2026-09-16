@@ -18,6 +18,7 @@ from app.services.article_service import ArticleService
 from app.services.audit_policy import (
     certainty_findings,
     merge_audit_result,
+    passage_is_attributed,
     signals_plural_corroboration,
     signals_unattributed_effective_date,
     structural_findings,
@@ -549,3 +550,57 @@ def test_certainty_findings_flags_unattributed_figure_without_llm() -> None:
     }
     issues = certainty_findings(article, snapshot)
     assert any(issue.reason == AuditIssueReason.SINGLE_AS_CORROBORATED for issue in issues)
+
+
+def test_passage_is_attributed_accepts_atribuir_and_habria_stems() -> None:
+    assert passage_is_attributed("El costo fiscal estimado de 40.000 millones fueron atribuidos a sus declaraciones.")
+    assert passage_is_attributed("Ese costo fue atribuido a Pérez.")
+    assert passage_is_attributed("El gobernador habría anticipado el envío a la Legislatura.")
+    assert passage_is_attributed("Los funcionarios habrían anticipado la cifra.")
+    assert not passage_is_attributed("El costo será de 40.000 millones.")
+
+
+def _single_source_article(headline: str, summary: str, body: str):
+    return type(
+        "A",
+        (),
+        {
+            "headline": headline,
+            "summary": summary,
+            "body": body,
+            "body_blocks": None,
+        },
+    )()
+
+
+def _single_source_snapshot() -> dict:
+    return {
+        "evaluated_claims": [
+            {
+                "claim_id": "c1",
+                "canonical_text": "Juan Pérez afirmó que el costo será de 40.000 millones.",
+                "status": "SINGLE_SOURCE",
+                "normalized_value": "40000",
+            }
+        ]
+    }
+
+
+def test_certainty_findings_skips_atribuidos_a_sus_declaraciones() -> None:
+    article = _single_source_article(
+        headline="Pérez habló del costo fiscal.",
+        summary="El costo fiscal estimado de 40.000 millones fueron atribuidos a sus declaraciones.",
+        body="El costo fiscal estimado de 40.000 millones fueron atribuidos a sus declaraciones.",
+    )
+    issues = certainty_findings(article, _single_source_snapshot())
+    assert issues == []
+
+
+def test_certainty_findings_skips_habria_anticipado() -> None:
+    article = _single_source_article(
+        headline="Pérez habló del costo fiscal.",
+        summary="El gobernador habría anticipado un costo de 40.000 millones.",
+        body="El gobernador habría anticipado un costo de 40.000 millones.",
+    )
+    issues = certainty_findings(article, _single_source_snapshot())
+    assert issues == []

@@ -21,6 +21,7 @@ from app.schemas.writing import (
     ContextVerification,
     ContextVerificationSol,
 )
+from app.services.claim_service import comparison_key_for
 from app.services.verification_outcome import pair_from_runs
 
 _IMPORTANCE_RANK = {
@@ -383,6 +384,18 @@ def build_article_context(
         if a and b:
             related.setdefault(a, []).append(b)
             related.setdefault(b, []).append(a)
+    groups: dict[str, list[str]] = {}
+    for claim in event.claims:
+        groups.setdefault(comparison_key_for(claim), []).append(str(claim.id))
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        for cid in members:
+            others = [other for other in members if other != cid]
+            bucket = related.setdefault(cid, [])
+            for other in others:
+                if other not in bucket:
+                    bucket.append(other)
     sources, item_id_to_ref, url_to_ref = _sources(event, limit=max_sources)
     claim_refs: dict[str, str] = {}
     buckets: dict[str, list[ContextClaim]] = {name: [] for name in _STATUS_BUCKET.values()}

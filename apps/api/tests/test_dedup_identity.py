@@ -6,8 +6,13 @@ import pytest
 from app.domain.enums import EntityType
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
 from app.schemas import EventCreate
-from app.schemas.detection import DedupDecision, EventCandidate, ExtractedEntity
-from app.services.dedup_identity import compare_identity
+from app.schemas.detection import AmbiguousDedupDecision, EventCandidate, ExtractedEntity
+from app.services.dedup_identity import (
+    coincidence_signals,
+    compare_identity,
+    is_structural_terra_candidate,
+    should_ask_ambiguous_dedup,
+)
 from app.services.detection_service import DetectionService
 from app.services.event_service import EventService
 from tests.test_detection import _item, _source
@@ -123,8 +128,12 @@ def _ranked_events(session, *, compatible_score: float, terra_chooses_conflict: 
         service.events.upsert_embedding(event.id, [score, sqrt(1 - score ** 2)] + [0.0] * 1022, embedder.model)
         stored.append(event)
     session.flush()
-    target = stored[0] if terra_chooses_conflict else stored[1]
-    terra.responses["DedupDecision"] = DedupDecision(decision="EXISTING_EVENT", event_id=target.id, confidence=0.9)
+    _ = terra_chooses_conflict
+    terra.responses["AmbiguousDedupDecision"] = AmbiguousDedupDecision(
+        decision="SAME_EVENT",
+        confidence=0.9,
+        reason="Controlled same event",
+    )
     event, created, reason = service._resolve_event(incoming, _facts())
     return stored, event, created, reason, terra
 
@@ -136,14 +145,125 @@ def test_high_score_conflict_does_not_hide_a_compatible_runner_up(db_session):
     assert terra.calls == []
 
 
-@pytest.mark.parametrize("chooses_conflict", [False, True])
-def test_terra_cannot_restore_a_candidate_rejected_for_conflict(db_session, chooses_conflict):
-    stored, event, created, reason, terra = _ranked_events(db_session, compatible_score=0.80, terra_chooses_conflict=chooses_conflict)
-    assert terra.calls == ["DedupDecision"]
-    assert str(stored[0].id) not in terra.user_prompts[0]
-    assert str(stored[1].id) in terra.user_prompts[0]
-    if chooses_conflict:
-        assert created and reason == "terra_new"
-        assert event.id not in {row.id for row in stored}
-    else:
-        assert not created and reason == "terra_existing" and event.id == stored[1].id
+def test_ambiguous_llm_cannot_see_a_conflict_candidate(db_session):
+    stored, event, created, reason, terra = _ranked_events(
+        db_session, compatible_score=0.80, terra_chooses_conflict=False,
+    )
+    assert terra.calls == ["AmbiguousDedupDecision"]
+    payload = terra.user_prompts[0]
+    assert str(stored[0].id) not in payload
+    assert str(stored[1].id) in payload
+    assert not created and reason == "terra_existing" and event.id == stored[1].id
+
+
+def _civic(**changes):
+    values = dict(
+        event_type="anuncio_oficial",
+        what_happened="El gobernador anunció que enviará un proyecto tributario a la Legislatura.",
+        short_summary="Envío de un proyecto tributario.",
+        occurred_at=datetime(2026, 9, 16, 12, tzinfo=_AR),
+        country_code="AR", province="Río Norte", locality=None, address_text=None,
+        editorial_topic=None,
+        entities=[],
+    )
+    values.update(changes)
+    values.pop("editorial_topic", None)
+    return EventCandidate(
+        event_type=values["event_type"],
+        what_happened=values["what_happened"],
+        short_summary=values["short_summary"],
+        occurred_at=values["occurred_at"],
+        country_code=values["country_code"],
+        province=values["province"],
+        locality=values["locality"],
+        address_text=values["address_text"],
+        entities=values.get("entities") or [],
+    )
+
+
+def test_material_update_below_low_is_structural_terra_candidate():
+    left = _civic(
+        what_happened=(
+            "El gobernador anunció que enviará a la Legislatura un proyecto para reducir "
+            "determinados impuestos provinciales. El costo fiscal estimado de la medida es elevado."
+        ),
+        short_summary="Anuncio de un proyecto para reducir impuestos provinciales.",
+    )
+    right = _civic(
+        what_happened=(
+            "El Ministerio de Hacienda publicó posteriormente el proyecto enviado a la Legislatura. "
+            "El texto oficial establece una reducción distinta y un impacto fiscal actualizado."
+        ),
+        short_summary="Publicación del proyecto tributario enviado a la Legislatura.",
+        occurred_at=datetime(2026, 9, 16, 18, tzinfo=_AR),
+        entities=[],
+    )
+    assert compare_identity(left, right).conflicts == ()
+    assert should_ask_ambiguous_dedup(left, right) is True
+    assert is_structural_terra_candidate(left, right) is True
+    assert "shared_process" in coincidence_signals(left, right)
+
+
+def test_missing_extracted_province_still_asks_ambiguous_dedup():
+    left = _civic(
+        what_happened=(
+            "El gobernador anunció que enviará a la Legislatura un proyecto para reducir "
+            "determinados impuestos provinciales. El costo fiscal estimado de la medida es elevado."
+        ),
+        short_summary="Anuncio de un proyecto para reducir impuestos provinciales.",
+        province="Río Norte",
+    )
+    right = _civic(
+        what_happened=(
+            "El Ministerio de Hacienda publicó posteriormente el proyecto enviado a la Legislatura. "
+            "El texto oficial establece una reducción distinta y un impacto fiscal actualizado."
+        ),
+        short_summary="Publicación del proyecto tributario enviado a la Legislatura.",
+        occurred_at=datetime(2026, 9, 16, 18, tzinfo=_AR),
+        province=None,
+        locality=None,
+        entities=[],
+    )
+    assert compare_identity(left, right).conflicts == ()
+    assert should_ask_ambiguous_dedup(left, right) is True
+    assert "shared_location" not in coincidence_signals(left, right)
+    assert "shared_process" in coincidence_signals(left, right)
+
+
+@pytest.mark.parametrize("second", [
+    "El gobernador anunció que enviará a la Legislatura un proyecto educativo para ampliar la jornada escolar.",
+    "El gobernador anunció una reforma policial para reorganizar las fuerzas de seguridad provinciales.",
+    "La legislatura trata el presupuesto 2027 de la provincia, distinto del ejercicio anterior.",
+    "El ejecutivo envió un proyecto para cambiar el impuesto inmobiliario en la provincia.",
+])
+def test_distinct_civic_processes_are_not_structural_terra_candidates(second):
+    left = _civic(
+        what_happened=(
+            "El gobernador anunció que enviará a la Legislatura un proyecto tributario "
+            "para modificar Ingresos Brutos y el presupuesto 2026."
+        ),
+        short_summary="Proyecto tributario y presupuesto 2026.",
+    )
+    right = _civic(what_happened=second, short_summary=second)
+    assert should_ask_ambiguous_dedup(left, right) is False
+    assert is_structural_terra_candidate(left, right) is False
+    assert compare_identity(left, right).conflicts == ()
+
+
+def test_same_incident_type_and_city_without_process_object_is_not_structural():
+    left = _civic(
+        event_type="incendio",
+        what_happened="Ardió un depósito en zona norte de Rosario",
+        short_summary="Incendio de depósito en el norte",
+        locality="Buenos Aires",
+        province="Buenos Aires",
+    )
+    right = _civic(
+        event_type="incendio",
+        what_happened="Ardió un taller mecánico en zona sur de Rosario",
+        short_summary="Incendio de taller en el sur",
+        locality="Buenos Aires",
+        province="Buenos Aires",
+    )
+    assert should_ask_ambiguous_dedup(left, right) is False
+    assert is_structural_terra_candidate(left, right) is False

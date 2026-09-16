@@ -257,6 +257,42 @@ def test_detector_new_contradiction_is_material() -> None:
     assert "status_conflict" in change.reasons
 
 
+def test_detector_same_date_new_claim_is_proposition_not_new_high() -> None:
+    first = uuid4()
+    previous = [_snapshot_row(
+        first,
+        text="La ministra anunció que el ciclo lectivo comenzará el 2 de marzo.",
+        status="SINGLE_SOURCE",
+    )]
+    current = previous + [_snapshot_row(
+        uuid4(),
+        text="El calendario oficial establece que las clases comenzarán el 2 de marzo.",
+        status="SUPPORTED",
+    )]
+    change = detect_material_change(previous, current)
+    assert "new_high_claim" not in change.reasons
+    assert "proposition_corroborated" in change.reasons
+    assert change.is_material is False
+
+
+def test_detector_pure_repetition_of_announcement_is_not_material() -> None:
+    first = uuid4()
+    previous = [_snapshot_row(
+        first,
+        text="La ministra Elena Aguilar anunció que el ciclo lectivo comenzará el 2 de marzo.",
+        status="SINGLE_SOURCE",
+    )]
+    current = previous + [_snapshot_row(
+        uuid4(),
+        text="Aguilar anunció este martes que las clases comenzarán el 2 de marzo.",
+        status="SINGLE_SOURCE",
+    )]
+    change = detect_material_change(previous, current)
+    assert change.is_material is False
+    assert "proposition_corroborated" in change.reasons
+    assert "new_high_claim" not in change.reasons
+
+
 def test_context_omits_html_and_event_body(db_session: Session) -> None:
     source = _source(db_session)
     html = "<html><body><article>SECRETO raw_text no debe ir al prompt</article></body></html>"

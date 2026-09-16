@@ -74,12 +74,14 @@ _ATTRIBUTION_MARKERS = (
     "indico que",
     "informó que",
     "informo que",
-    "atribuy",
+    "atribu",
     "un informe",
     "el informe",
     "la cobertura",
-    "habría anunci",
-    "habria anunci",
+    "habría ",
+    "habria ",
+    "habrían ",
+    "habrian ",
 )
 _SINGLE_LIKE = {"SINGLE_SOURCE", "UNCERTAIN"}
 _CLAIM_STOP = {

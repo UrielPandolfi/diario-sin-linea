@@ -63,6 +63,14 @@ PERSISTABLE_JUDGEMENTS = {
     EvidenceJudgementType.MENTIONS: EvidenceType.MENTIONS,
 }
 
+# EventSource = el ítem es fuente del suceso. Un hit de búsqueda no alcanza:
+# SUPPORTS / CONTRADICTS / QUALIFIES sí; MENTIONS y DOES_NOT_ESTABLISH no.
+EVENT_SOURCE_EVIDENCE_TYPES = {
+    EvidenceType.SUPPORTS,
+    EvidenceType.CONTRADICTS,
+    EvidenceType.QUALIFIES,
+}
+
 
 class VerificationPlan(BaseModel):
     verification_target: VerificationTarget = VerificationTarget.GENERAL_WEB

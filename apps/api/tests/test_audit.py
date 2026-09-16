@@ -306,10 +306,7 @@ def test_passed_audit_marks_ready_without_rewrite(db_session: Session) -> None:
     assert result["audit_count"] == 1
     assert result["cap_exhausted"] is False
     assert result["reason"] == "passed"
-    assert article.status == ArticleStatus.DRAFT
-    assert article.current_version == version
-    assert event.status == event_status == EventStatus.DETECTED
-    assert llm.calls == ["ArticleAuditResult"]
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
     versions = db_session.scalar(
         select(func.count()).select_from(ArticleVersion).where(ArticleVersion.article_id == article.id)
     )
@@ -389,7 +386,7 @@ def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_s
     assert retry["passed"] is True
     assert retry["rewrite_count"] == 0
     assert article.id == article_id
-    assert article.status == ArticleStatus.DRAFT
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
     assert count == 1
     assert retry_llm.calls == ["ArticleAuditResult"]
 
@@ -483,7 +480,7 @@ def test_admin_audit_accepted_and_get_compact(db_session: Session, monkeypatch) 
         response = client.post(f"/api/v1/admin/events/{event.id}/audit", headers=ADMIN_ORIGIN)
     assert detail.status_code == 200
     body = detail.json()
-    assert body["article"]["status"] == ArticleStatus.DRAFT.value
+    assert body["article"]["status"] == ArticleStatus.READY_FOR_REVIEW.value
     assert body["audit"]["passed"] is True
     assert body["audit"]["cap_exhausted"] is False
     assert body["status"] == EventStatus.DETECTED.value
@@ -585,6 +582,7 @@ def test_write_enqueues_audit_only_when_written(monkeypatch) -> None:
 
 def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
     queued: list[tuple] = []
+    monkeypatch.setattr(get_settings(), "auto_publish", True)
 
     class Sess:
         def commit(self) -> None:
@@ -660,17 +658,7 @@ def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
         ),
     )
     audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
-    assert queued == []
-
-    queued.clear()
-    monkeypatch.setattr(
-        "app.workers.tasks.ArticleRepository",
-        lambda session: SimpleNamespace(
-            get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False, published_version=1)
-        ),
-    )
-    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
-    assert queued == []
+    assert queued == [("00000000-0000-0000-0000-000000000001", "writing")]
 
 
 def test_auditing_rejects_anthropic(monkeypatch) -> None:

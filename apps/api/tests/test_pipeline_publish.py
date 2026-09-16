@@ -221,12 +221,12 @@ def test_pipeline_fake_source_to_public_apis(db_session: Session) -> None:
     assert verified.get("error") is None
 
     draft = plain_article_draft(
-        "Choque de colectivos en Pellegrini y Corrientes",
-        "Dos unidades chocaron en Rosario. Hay heridos y el tránsito sigue cortado.",
+        "Según las fuentes, dos colectivos chocaron en Pellegrini y Corrientes",
+        "Según las fuentes, el choque fue en Rosario, hay heridos y el tránsito sigue cortado.",
         (
-            "Dos colectivos chocaron en Pellegrini y Corrientes.\n\n"
-            "El choque dejó seis heridos.\n\n"
-            "El tránsito permanece cortado."
+            "Según las fuentes, dos colectivos chocaron en Pellegrini y Corrientes.\n\n"
+            "Según una de las fuentes, el choque dejó seis heridos.\n\n"
+            "Según otra fuente, el tránsito permanece cortado."
         ),
     )
     written = WritingService(db_session, llm=FakeStructuredLLM({"ArticleDraft": draft})).write(
@@ -242,12 +242,17 @@ def test_pipeline_fake_source_to_public_apis(db_session: Session) -> None:
         feed_before = client.get("/api/v1/feed")
         assert article.slug not in [item["slug"] for item in feed_before.json()["items"]]
 
-    audited = AuditService(
-        db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
-    ).audit(event.id, trigger="writing")
-    assert audited["passed"] is True
+    audit_llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": ArticleAuditResult(passed=True, issues=[]),
+            "ArticleDraft": draft,
+        }
+    )
+    audited = AuditService(db_session, llm=audit_llm, writer=audit_llm).audit(event.id, trigger="writing")
+    assert audited.get("error") is None, audited
+    assert audited["passed"] is True, audited.get("issues") or audited.get("reason")
     db_session.refresh(article)
-    assert article.status == ArticleStatus.DRAFT
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
 
     published = PublishService(db_session).publish(event.id, trigger="audit")
     assert published["published"] is True

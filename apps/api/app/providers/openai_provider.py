@@ -72,8 +72,11 @@ class OpenAIStructuredProvider:
                 create_kwargs: dict = {
                     "model": self.model,
                     "messages": messages,
-                    "response_format": openai_json_schema_format(schema),
                 }
+                if self.provider_name.lower() == "deepseek":
+                    create_kwargs["response_format"] = {"type": "json_object"}
+                else:
+                    create_kwargs["response_format"] = openai_json_schema_format(schema)
                 if _model_allows_temperature_zero(self.model):
                     create_kwargs["temperature"] = 0
                 effort = self.reasoning_effort or _reasoning_effort_for_model(self.model)

@@ -1,12 +1,14 @@
 # Estado
 
-Revisión: 2026-09-16. Track B sigue en código y tests. Eval real: Track A del anuncio Pérez pasó a V1; Track B material no se vinculó (`embedding_low:0.717`); la confirmación Aguilar sí linkeó pero reescribió. Track A de suceso nuevo no cambia su auto-publish de primera vez. Dashboard Admin de `expected_central` queda diferido. 429 temporal de OpenAI en LLM estructurado se reintenta en el cliente (no en Celery ni en el SDK). JSON schema strict ya no envía `$ref`+`default`.
+Revisión: 2026-09-16. Track B: dedup ambigua con DeepSeek bajo LOW si hay señales (sin exigir geo extraída), `comparison_key` de proposición para actos de habla, `AUTO_PUBLISH` como gate real. Suite y smokes reales de esta iteración en HANDOFF.
+
+Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish solo si no hay `published_version` (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
+Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
 
 Ingesta RSS (HTML no soportado en `ingestion_service.py`). Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
@@ -23,12 +25,12 @@ Backend: además de la suite previa, `test_editorial_evidence`, `test_audit_poli
 ## Hallazgos de cableado (no decisiones)
 
 1. **Link nuevo encola claims incremental, no research.** `already_linked` (EventSource ya existente) no reabre pipeline. Track A create sigue encolando research.
-2. **`AUTO_PUBLISH` no se lee** fuera de Settings. Primera publicación: audit `passed` + no hold + `published_version is None`. Actualización: Audit passed → `READY_FOR_REVIEW`, publish solo por admin.
+2. **`AUTO_PUBLISH` se lee** en `audit_event_article`. true + passed + no hold → enqueue publish (V1 y V2). false + passed → `READY_FOR_REVIEW`.
 3. **`Event.status` READY_FOR_REVIEW / UPDATING** siguen sin usarse. La candidata se representa con `Event=PUBLISHED` + `Article=READY_FOR_REVIEW`.
 
 ## Track B — 2026-09-16
 
-En código: `detect_event` → `resolve_event_claims(..., source_item_id)` sin research; `ClaimService._run_incremental`; detector editorial (corroboración no reescribe); Writing live+delta; Audit `READY_FOR_REVIEW`; sin auto-publish si hay live; freeze público de claims; retry `unaudited_candidate`. Tests: `test_track_b.py`. Dedup 0.72/0.88, Voyage y Terra no se tocaron. Research de ítems ya vinculados no reabre Track B (`already_linked`). Pendiente real: eval con modelos reales; `unique(source_item_id)` en `event_sources` no se agregó; carrera de dos `detect` concurrentes no se evaluó.
+En código: `detect_event` → `resolve_event_claims(..., source_item_id)` sin research; `ClaimService._run_incremental`; detector editorial (corroboración y `proposition_corroborated` no reescriben); Writing live+delta; Audit + `AUTO_PUBLISH` para V1/V2; freeze público de claims; retry `unaudited_candidate`. Tests: `test_track_b.py`. Dedup 0.72/0.88 y Voyage no se tocaron; bajo LOW, si hay señales de coincidencia (proceso u entidades nombradas) se llama DeepSeek (`SAME_EVENT` / `DIFFERENT_EVENT` / `UNSURE`). Research de ítems ya vinculados no reabre Track B (`already_linked`). Pendiente: eval con modelos reales de esta iteración en HANDOFF; `unique(source_item_id)` en `event_sources` no se agregó; carrera de dos `detect` concurrentes no se evaluó.
 
 ## Track B histórico al cerrar A
 
@@ -92,6 +94,6 @@ Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en ti
 
 README desactualizado en: “solo Rosario”, proveedores de writing/audit fijos a Claude, `MAX_VERIFICATION_QUERIES_PER_CLAIM` (código/example = 3).
 
-## Smoke Track A/B real — 2026-09-16
+## Smoke Track A/B real — 2026-09-16 (DeepSeek dedup ambigua, smk5ds)
 
-Tras los cinco fixes de la eval previa (audit atribuido, claims de declaración, retry Exa, sello de usages al crear Event, schema OpenAI strict): suite **575 passed**. Track A del anuncio Pérez 10%/40.000: **PASS** (V1 publicada, audit 1/0 rewrites, cifra persistida como declaración `40000`). Track B material: **FAIL** — Hacienda 8%/52.000 creó Event `8a7ea8eb` por `embedding_low:0.717` (no se tocó 0.72/0.88). Confirmación Aguilar: link `embedding_high:0.917` pero reescribió V2/V3 (`new_high_claim`); API pública siguió en V1. No se parchearon dedup ni materialidad de confirmación en la eval.
+Suite **607 passed**. Rebuild horneado, `AMBIGUOUS_DEDUP=deepseek/deepseek-chat`. Smoke A Pérez: Event `b3b046b5`, V1. Smoke B Hacienda: **mismo Event**, Voyage `0.712`, DeepSeek `SAME_EVENT`, V2 live. C educación: Event nuevo `5f1cd620` (`DIFFERENT_EVENT` vs A a 0.422). D calendario: mismo Event que C por `embedding_high:0.916`. Detalle en HANDOFF.

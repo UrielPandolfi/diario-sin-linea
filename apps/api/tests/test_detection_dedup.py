@@ -18,7 +18,7 @@ from app.domain.enums import EntityType, IngestionMethod
 from app.models import Event, EventSource, PipelineRun, SourceItem
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
 from app.schemas import SourceCreate, SourceItemCreate
-from app.schemas.detection import DedupDecision, EditorialTopic, EventCandidate, ExtractedEntity
+from app.schemas.detection import AmbiguousDedupDecision, EditorialTopic, EventCandidate, ExtractedEntity
 from app.services.detection_service import DetectionService, embedding_text
 from app.services.editorial_gate import evaluate_editorial_gate
 from app.services.source_item_service import SourceItemService
@@ -148,11 +148,17 @@ def _run_pair(
 
     first = service.detect(items[0].id)
     session.commit()
-    terra.responses["DedupDecision"] = DedupDecision(
-        decision=terra_decision,
-        event_id=first["event_id"] if terra_decision == "EXISTING_EVENT" else None,
+    mapped = {
+        "EXISTING_EVENT": "SAME_EVENT",
+        "NEW_EVENT": "DIFFERENT_EVENT",
+        "SAME_EVENT": "SAME_EVENT",
+        "DIFFERENT_EVENT": "DIFFERENT_EVENT",
+        "UNSURE": "UNSURE",
+    }[terra_decision]
+    terra.responses["AmbiguousDedupDecision"] = AmbiguousDedupDecision(
+        decision=mapped,
         confidence=0.9,
-        reason="Controlled response: same incident" if terra_decision == "EXISTING_EVENT"
+        reason="Controlled response: same incident" if mapped == "SAME_EVENT"
         else "Controlled response: insufficient evidence of the same incident",
     )
     second = service.detect(items[1].id)
@@ -174,7 +180,7 @@ def _run_pair(
         "retrieval": retrieval, "level1": level1, "scores": scores,
         "controlled_similarity": similarity, "embedding_calls": embedding_calls,
         "terra_calls": terra.calls, "terra_payloads": terra.user_prompts,
-        "terra_response": terra.responses["DedupDecision"].model_dump(mode="json"),
+        "terra_response": terra.responses["AmbiguousDedupDecision"].model_dump(mode="json"),
         "results": [first, second], "counts": counts, "links": links,
         "events": [{"id": str(event.id), "title": event.title_internal,
                     "summary": event.short_summary, "started_at": event.started_at,
@@ -255,18 +261,18 @@ def test_case_d_ambiguous_similarity_uses_terra_decision_and_payload(
     assert report["level1"] == [None, None]
     assert report["scores"][1][0][1] == pytest.approx(0.80)
     assert report["thresholds"]["low"] <= 0.80 < report["thresholds"]["high"]
-    assert report["terra_calls"] == ["DedupDecision"]
-    payload = report["terra_payloads"][0]
-    candidate_line, existing_lines = payload.split("\nEventos existentes:\n")
-    sent_candidate = json.loads(candidate_line.removeprefix("Candidato: "))
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
+    payload = json.loads(report["terra_payloads"][0])
     fields = {"event_type", "what_happened", "occurred_at", "country_code", "province", "locality",
               "neighborhood", "address_text", "entities", "short_summary"}
+    assert payload["voyage_similarity"] == pytest.approx(0.80)
+    assert "signals" in payload
+    sent_candidate = payload["candidate"]
     assert sent_candidate == {key: report["candidates"][1][key] for key in fields}
     first_event_id = report["results"][0]["event_id"]
-    sent_existing = json.loads(existing_lines.removeprefix("- "))
-    assert set(sent_existing) == fields | {"id", "score"}
+    sent_existing = payload["existing_event"]
+    assert set(sent_existing) == fields | {"id"}
     assert sent_existing["id"] == first_event_id
-    assert sent_existing["score"] == pytest.approx(0.80)
     # PostgreSQL returns the stored instant in UTC; compare instants, not spelling.
     assert datetime.fromisoformat(sent_existing["occurred_at"]) == datetime.fromisoformat(report["candidates"][0]["occurred_at"])
     assert {key: sent_existing[key] for key in fields - {"occurred_at"}} == {
@@ -309,7 +315,7 @@ def test_political_rewordings_link_the_same_event(db_session, monkeypatch, recor
         candidates=_political_announcements(), isolate_gate=False, terra_decision="EXISTING_EVENT",
     )
     _assert_outcome(report, events=1)
-    assert report["terra_calls"] == (["DedupDecision"] if similarity < report["thresholds"]["high"] else [])
+    assert report["terra_calls"] == (["AmbiguousDedupDecision"] if similarity < report["thresholds"]["high"] else [])
 
 
 @pytest.mark.parametrize("similarity", [0.80, 0.94])
@@ -334,7 +340,7 @@ def test_shared_political_entities_place_and_time_leave_ambiguous_identity_to_te
         candidates=_political_announcements(different=True), isolate_gate=False, terra_decision="NEW_EVENT",
     )
     _assert_outcome(report, events=2)
-    assert report["terra_calls"] == ["DedupDecision"]
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
 
 
 def test_approximate_times_do_not_exclude_a_political_event_from_terra(
@@ -350,8 +356,207 @@ def test_approximate_times_do_not_exclude_a_political_event_from_terra(
         candidates=candidates, isolate_gate=False, terra_decision="EXISTING_EVENT",
     )
     _assert_outcome(report, events=1)
-    assert report["terra_calls"] == ["DedupDecision"]
-    payload = report["terra_payloads"][0]
-    candidate_line, existing_lines = payload.split("\nEventos existentes:\n")
-    assert datetime.fromisoformat(json.loads(candidate_line.removeprefix("Candidato: "))["occurred_at"]) == candidates[1].occurred_at
-    assert datetime.fromisoformat(json.loads(existing_lines.removeprefix("- "))["occurred_at"]) == candidates[0].occurred_at
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
+    payload = json.loads(report["terra_payloads"][0])
+    assert datetime.fromisoformat(payload["candidate"]["occurred_at"]) == candidates[1].occurred_at
+    assert datetime.fromisoformat(payload["existing_event"]["occurred_at"]) == candidates[0].occurred_at
+
+
+def _civic_pair(first: str, second: str) -> list[EventCandidate]:
+    return [
+        EventCandidate(
+            event_type="anuncio_oficial",
+            what_happened=body,
+            short_summary=body,
+            occurred_at=datetime(2026, 9, 16, 12 + index, tzinfo=_AR),
+            country_code="AR",
+            province="Río Norte",
+            editorial_topic=EditorialTopic.GOVERNMENT,
+            is_public_affairs=True,
+            argentina_relevance=True,
+            location_confidence=0.9,
+            entities=[],
+        )
+        for index, body in enumerate((first, second))
+    ]
+
+
+def test_material_update_below_low_asks_terra_without_automerge(
+    db_session, monkeypatch, record_property,
+):
+    candidates = _civic_pair(
+        (
+            "El gobernador anunció que enviará a la Legislatura un proyecto para reducir "
+            "determinados impuestos provinciales. El costo fiscal estimado de la medida es elevado."
+        ),
+        (
+            "El Ministerio de Hacienda publicó posteriormente el proyecto enviado a la Legislatura. "
+            "El texto oficial establece una reducción distinta y un impacto fiscal actualizado."
+        ),
+    )
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "structural_below_low",
+        similarity=0.717, candidates=candidates, isolate_gate=False, terra_decision="EXISTING_EVENT",
+    )
+    _assert_outcome(report, events=1, reason="terra_existing")
+    assert report["thresholds"]["low"] == pytest.approx(0.72)
+    assert report["scores"][1][0][1] == pytest.approx(0.717)
+    assert 0.717 < report["thresholds"]["low"]
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
+    assert report["level1"] == [None, None]
+    second = report["results"][1]
+    assert second["path"] == "ambiguous_below_low"
+    assert second["dedup_decision"] == "SAME_EVENT"
+    assert second["best_score"] == pytest.approx(0.717)
+    assert "shared_process" in second["dedup_signals"]
+
+
+def test_material_update_below_low_terra_may_create_new_event(
+    db_session, monkeypatch, record_property,
+):
+    candidates = _civic_pair(
+        (
+            "El gobernador anunció que enviará a la Legislatura un proyecto para reducir "
+            "determinados impuestos provinciales. El costo fiscal estimado de la medida es elevado."
+        ),
+        (
+            "El Ministerio de Hacienda publicó posteriormente el proyecto enviado a la Legislatura. "
+            "El texto oficial establece una reducción distinta y un impacto fiscal actualizado."
+        ),
+    )
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "structural_below_low_new",
+        similarity=0.717, candidates=candidates, isolate_gate=False, terra_decision="NEW_EVENT",
+    )
+    _assert_outcome(report, events=2, reason="terra_new")
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
+    assert report["results"][1]["dedup_decision"] == "DIFFERENT_EVENT"
+
+
+@pytest.mark.parametrize("second,case", [
+    (
+        "El gobernador anunció que enviará a la Legislatura un proyecto educativo para ampliar la jornada escolar.",
+        "tax_vs_education",
+    ),
+    (
+        "El gobernador anunció una reforma policial para reorganizar las fuerzas de seguridad provinciales.",
+        "tax_vs_police",
+    ),
+    (
+        "La legislatura trata el presupuesto 2027 de la provincia.",
+        "budget_year",
+    ),
+    (
+        "El ejecutivo envió un proyecto para cambiar el impuesto inmobiliario en la provincia.",
+        "tax_object",
+    ),
+])
+def test_distinct_civic_processes_below_low_do_not_go_to_terra(
+    db_session, monkeypatch, record_property, second, case,
+):
+    first = (
+        "El gobernador anunció que enviará a la Legislatura un proyecto tributario "
+        "para modificar Ingresos Brutos y el presupuesto 2026."
+    )
+    report = _run_pair(
+        db_session, monkeypatch, record_property, case, similarity=0.717,
+        candidates=_civic_pair(first, second), isolate_gate=False, terra_decision="EXISTING_EVENT",
+    )
+    _assert_outcome(report, events=2, reason="embedding_low:0.717")
+    assert report["terra_calls"] == []
+
+
+_TAX_UPDATE_TEXTS = (
+    (
+        "El gobernador anunció que enviará a la Legislatura un proyecto para reducir "
+        "determinados impuestos provinciales. El costo fiscal estimado de la medida es elevado."
+    ),
+    (
+        "El Ministerio de Hacienda publicó posteriormente el proyecto enviado a la Legislatura. "
+        "El texto oficial establece una reducción distinta y un impacto fiscal actualizado."
+    ),
+)
+
+
+def test_below_low_with_signals_asks_deepseek_without_extracted_province(
+    db_session, monkeypatch, record_property,
+):
+    candidates = _civic_pair(*_TAX_UPDATE_TEXTS)
+    candidates[1].province = None
+    candidates[1].locality = None
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "below_low_missing_province",
+        similarity=0.681, candidates=candidates, isolate_gate=False, terra_decision="SAME_EVENT",
+    )
+    _assert_outcome(report, events=1, reason="terra_existing")
+    assert report["thresholds"]["low"] == pytest.approx(0.72)
+    assert report["scores"][1][0][1] == pytest.approx(0.681)
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
+    second = report["results"][1]
+    assert second["path"] == "ambiguous_below_low"
+    assert second["dedup_decision"] == "SAME_EVENT"
+    assert "shared_process" in second["dedup_signals"]
+    payload = json.loads(report["terra_payloads"][0])
+    assert payload["voyage_similarity"] == pytest.approx(0.681)
+    assert payload["candidate"]["province"] is None
+    assert payload["existing_event"]["province"] == "Río Norte"
+
+
+def test_deepseek_same_event_links_existing_event(
+    db_session, monkeypatch, record_property,
+):
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "deepseek_same",
+        similarity=0.681, candidates=_civic_pair(*_TAX_UPDATE_TEXTS),
+        isolate_gate=False, terra_decision="SAME_EVENT",
+    )
+    _assert_outcome(report, events=1, reason="terra_existing")
+    assert report["results"][1]["dedup_decision"] == "SAME_EVENT"
+
+
+def test_deepseek_different_event_creates_new_event(
+    db_session, monkeypatch, record_property,
+):
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "deepseek_different",
+        similarity=0.681, candidates=_civic_pair(*_TAX_UPDATE_TEXTS),
+        isolate_gate=False, terra_decision="DIFFERENT_EVENT",
+    )
+    _assert_outcome(report, events=2, reason="terra_new")
+    assert report["results"][1]["dedup_decision"] == "DIFFERENT_EVENT"
+
+
+def test_deepseek_unsure_creates_new_event(
+    db_session, monkeypatch, record_property,
+):
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "deepseek_unsure",
+        similarity=0.681, candidates=_civic_pair(*_TAX_UPDATE_TEXTS),
+        isolate_gate=False, terra_decision="UNSURE",
+    )
+    _assert_outcome(report, events=2, reason="terra_new")
+    assert report["results"][1]["dedup_decision"] == "UNSURE"
+    assert report["terra_calls"] == ["AmbiguousDedupDecision"]
+
+
+def test_obviously_distinct_below_low_does_not_call_deepseek(
+    db_session, monkeypatch, record_property,
+):
+    report = _run_pair(
+        db_session, monkeypatch, record_property, "obviously_distinct",
+        similarity=0.681,
+        candidates=_civic_pair(
+            _TAX_UPDATE_TEXTS[0],
+            "El gobernador anunció que enviará a la Legislatura un proyecto educativo para ampliar la jornada escolar.",
+        ),
+        isolate_gate=False, terra_decision="SAME_EVENT",
+    )
+    _assert_outcome(report, events=2, reason="embedding_low:0.681")
+    assert report["terra_calls"] == []
+
+
+def test_clear_automerge_skips_deepseek(db_session, monkeypatch, record_property):
+    report = _run_pair(db_session, monkeypatch, record_property, "A", similarity=0.94)
+    _assert_outcome(report, events=1)
+    assert report["terra_calls"] == []
+    assert report["results"][1]["reason"].startswith("embedding_high:")

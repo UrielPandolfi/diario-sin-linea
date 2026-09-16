@@ -199,13 +199,13 @@ class AuditService:
         if article is None:
             base["reason"] = "no_article"
             return base
-        if article.status != ArticleStatus.DRAFT:
+        if article.status not in {ArticleStatus.DRAFT, ArticleStatus.READY_FOR_REVIEW}:
             base["reason"] = "article_not_draft"
             return base
 
         article_context = None
         snapshot = None
-        if article is not None and article.status == ArticleStatus.DRAFT:
+        if article is not None and article.status in {ArticleStatus.DRAFT, ArticleStatus.READY_FOR_REVIEW}:
             runs = self.pipeline.list_for_event(event.id, limit=50)
             snapshot = evidence_snapshot_for_version(runs, article.current_version)
             article_context = article_context_from_snapshot(snapshot)
@@ -264,15 +264,15 @@ class AuditService:
             if result.passed:
                 base["reason"] = "passed"
                 base["cap_exhausted"] = False
-                if article.published_version is not None:
-                    article.status = ArticleStatus.READY_FOR_REVIEW
-                    self.session.flush()
+                article.status = ArticleStatus.READY_FOR_REVIEW
+                self.session.flush()
                 return base
 
             if structural_blocks_rewrite(structural):
                 base["reason"] = "structural_block"
                 base["cap_exhausted"] = False
                 base["passed"] = False
+                article.status = ArticleStatus.DRAFT
                 return base
 
             # Cap = rewrites máximos. El rewrite #cap se audita en la
@@ -281,6 +281,7 @@ class AuditService:
                 base["reason"] = "cap_exhausted"
                 base["cap_exhausted"] = True
                 base["passed"] = False
+                article.status = ArticleStatus.DRAFT
                 return base
 
             if writer is None:

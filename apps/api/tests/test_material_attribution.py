@@ -94,6 +94,33 @@ def test_deattributed_figure_restores_speaker_and_keeps_value(db_session):
     assert row.subject and "Pérez" in row.subject
 
 
+def test_official_figure_keeps_distinct_identity_from_historical_declaration():
+    from app.services.claim_service import assertion_key_for, is_utterance_claim
+
+    spoken = preserve_extracted_meaning(
+        ExtractedClaim(
+            canonical_text="Juan Pérez afirmó que el costo sería de 40.000 millones.",
+            claim_type="declaracion",
+            normalized_value="40000",
+            unit="millones de pesos",
+        ),
+        [],
+    )
+    official = ExtractedClaim(
+        canonical_text="El proyecto oficial estima 52.000 millones.",
+        claim_type="cifra",
+        subject="El proyecto oficial",
+        predicate="estima",
+        object_text="52.000 millones",
+        normalized_value="52000",
+        unit="millones de pesos",
+    )
+    assert assertion_key_for(spoken) != assertion_key_for(official)
+    assert is_utterance_claim(spoken)
+    assert not is_utterance_claim(official)
+    assert spoken.normalized_value == "40000"
+
+
 def test_paraphrases_dedupe_using_normalized_dimensions_and_keep_id(db_session):
     a = "Milei implementará un paquete de reformas más profundo."
     b = "Milei abrirá una nueva etapa con reformas aún más profundas."

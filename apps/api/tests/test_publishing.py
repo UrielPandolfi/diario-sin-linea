@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
@@ -12,12 +13,13 @@ from app.domain.enums import (
     ClaimImportance,
     ClaimStatus,
     EventStatus,
+    EventUpdateType,
     EvidenceType,
     IngestionMethod,
     PipelineStatus,
 )
 from app.main import app
-from app.models import Article, ArticleVersion, Claim, ClaimEvidence, PipelineRun
+from app.models import Article, ArticleVersion, Claim, ClaimEvidence, EventUpdate, PipelineRun
 from app.providers.fakes import FakeStructuredLLM
 from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
 from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSeverity, AuditIssueType
@@ -193,7 +195,7 @@ def test_passed_audit_can_publish_event_and_article(db_session: Session) -> None
     original_event_status = event.status
     _audit_pass(db_session, event)
     db_session.refresh(article)
-    assert article.status == ArticleStatus.DRAFT
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
     result = _publish(db_session, event)
     db_session.refresh(article)
     db_session.refresh(event)
@@ -205,14 +207,26 @@ def test_passed_audit_can_publish_event_and_article(db_session: Session) -> None
     assert event.status == EventStatus.PUBLISHED
     assert event.slug == article.slug
     assert original_event_status == EventStatus.DETECTED
+    updates = db_session.scalar(
+        select(func.count()).select_from(EventUpdate).where(
+            EventUpdate.event_id == event.id,
+            EventUpdate.update_type == EventUpdateType.ARTICLE_UPDATED,
+        )
+    )
     again = _publish(db_session, event)
     assert again["reason"] == "already_published"
     assert again["published"] is True
+    assert db_session.scalar(
+        select(func.count()).select_from(EventUpdate).where(
+            EventUpdate.event_id == event.id,
+            EventUpdate.update_type == EventUpdateType.ARTICLE_UPDATED,
+        )
+    ) == updates
 
 
-def test_auto_publish_flag_does_not_gate_passed_chain(monkeypatch) -> None:
+def _audit_worker_session(monkeypatch, article, *, auto_publish: bool) -> list[tuple]:
     settings = get_settings()
-    monkeypatch.setattr(settings, "auto_publish", False)
+    monkeypatch.setattr(settings, "auto_publish", auto_publish)
     queued: list[tuple] = []
 
     class Sess:
@@ -227,20 +241,72 @@ def test_auto_publish_flag_does_not_gate_passed_chain(monkeypatch) -> None:
 
     monkeypatch.setattr("app.workers.tasks.SessionLocal", Sess)
     monkeypatch.setattr("app.workers.tasks.publish_event_article.delay", lambda *args: queued.append(args))
-    from app.workers.tasks import audit_event_article
-    from types import SimpleNamespace
-
     monkeypatch.setattr(
         "app.workers.tasks.ArticleRepository",
-        lambda session: SimpleNamespace(get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False)),
+        lambda session: SimpleNamespace(get_by_event_id=lambda *_a, **_k: article),
     )
     monkeypatch.setattr(
         "app.workers.tasks.AuditService",
         lambda session: SimpleNamespace(audit=lambda *_a, **_k: {"skipped": False, "passed": True}),
     )
+    from app.workers.tasks import audit_event_article
+
     audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
+    return queued
+
+
+def test_auto_publish_false_leaves_ready_for_review(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    queued = _audit_worker_session(
+        monkeypatch,
+        SimpleNamespace(editorial_hold=False, published_version=None),
+        auto_publish=False,
+    )
+    assert queued == []
+    queued = _audit_worker_session(
+        monkeypatch,
+        SimpleNamespace(editorial_hold=False, published_version=1),
+        auto_publish=False,
+    )
+    assert queued == []
+
+
+def test_auto_publish_true_enqueues_first_and_update(monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    queued = _audit_worker_session(
+        monkeypatch,
+        SimpleNamespace(editorial_hold=False, published_version=None),
+        auto_publish=True,
+    )
     assert queued == [("00000000-0000-0000-0000-000000000001", "writing")]
-    assert settings.auto_publish is False
+    queued = _audit_worker_session(
+        monkeypatch,
+        SimpleNamespace(editorial_hold=False, published_version=1),
+        auto_publish=True,
+    )
+    assert queued == [("00000000-0000-0000-0000-000000000001", "writing")]
+    queued = _audit_worker_session(
+        monkeypatch,
+        SimpleNamespace(editorial_hold=True, published_version=1),
+        auto_publish=True,
+    )
+    assert queued == []
+
+
+def test_auto_publish_true_first_audit_waits_for_publish_task(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "auto_publish", True)
+    event, article, _claim_row = _seed_draft(db_session)
+    _audit_pass(db_session, event)
+    db_session.refresh(article)
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
+    assert article.published_version is None
+    published = _publish(db_session, event)
+    db_session.refresh(article)
+    assert published["published"] is True
+    assert article.status == ArticleStatus.PUBLISHED
+    assert article.published_version == 1
 
 
 def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> None:
@@ -331,6 +397,23 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
     assert article.published_at == published_at
     assert event.last_material_update_at is not None
     assert event.status == EventStatus.PUBLISHED
+    updates_after_v2 = db_session.scalar(
+        select(func.count()).select_from(EventUpdate).where(
+            EventUpdate.event_id == event.id,
+            EventUpdate.update_type == EventUpdateType.ARTICLE_UPDATED,
+        )
+    )
+    again = _publish(db_session, event)
+    db_session.refresh(article)
+    assert again["reason"] == "already_published"
+    assert again["published"] is True
+    assert article.published_version == article.current_version
+    assert db_session.scalar(
+        select(func.count()).select_from(EventUpdate).where(
+            EventUpdate.event_id == event.id,
+            EventUpdate.update_type == EventUpdateType.ARTICLE_UPDATED,
+        )
+    ) == updates_after_v2
 
 
 def test_publish_blocked_when_writing_running(db_session: Session) -> None:

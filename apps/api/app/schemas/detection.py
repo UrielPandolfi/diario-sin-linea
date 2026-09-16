@@ -128,3 +128,25 @@ class DedupDecision(BaseModel):
     event_id: UUID | None = None
     confidence: float = 0.0
     reason: str = ""
+
+
+class AmbiguousDedupDecision(BaseModel):
+    decision: Literal["SAME_EVENT", "DIFFERENT_EVENT", "UNSURE"]
+    confidence: float = 0.0
+    reason: str = ""
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def _normalize_decision(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        token = value.strip().upper().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "EXISTING_EVENT": "SAME_EVENT",
+            "SAME": "SAME_EVENT",
+            "NEW_EVENT": "DIFFERENT_EVENT",
+            "DIFFERENT": "DIFFERENT_EVENT",
+            "UNKNOWN": "UNSURE",
+            "UNCERTAIN": "UNSURE",
+        }
+        return aliases.get(token, token)

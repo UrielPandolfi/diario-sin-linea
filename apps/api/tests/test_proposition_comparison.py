@@ -61,6 +61,28 @@ def test_original_preserves_attribution_trajectory_and_source():
     assert "13%" in economic.object_text and "2%" in economic.object_text
 
 
+def test_declaration_and_underlying_fact_keep_distinct_assertion_keys():
+    from app.services.claim_service import assertion_key_for, comparison_key_for
+
+    spoken = preserve_extracted_meaning(
+        ExtractedClaim(
+            canonical_text="Aguilar anunció que el ciclo lectivo comenzará el 2 de marzo.",
+            claim_type="declaracion",
+        ),
+        [],
+    )
+    official = ExtractedClaim(
+        canonical_text="El ciclo lectivo comenzará el 2 de marzo.",
+        claim_type="hecho",
+        subject="El ciclo lectivo",
+        predicate="comenzará",
+        object_text="el 2 de marzo",
+    )
+    assert assertion_key_for(spoken) != assertion_key_for(official)
+    assert comparison_key_for(spoken).startswith("prop|")
+    assert "d:2 marzo" in comparison_key_for(spoken)
+
+
 def test_plan_cannot_replace_attribution_or_drop_material_terms():
     claim = SimpleNamespace(canonical_text=ORIGINAL, claim_type="hecho", occurred_at=None,
                             importance=ClaimImportance.HIGH, status=ClaimStatus.SINGLE_SOURCE, evidence=[])

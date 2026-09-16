@@ -166,6 +166,33 @@ def test_json_schema_falls_back_to_json_object(monkeypatch) -> None:
     assert recorded[1]["prompt_tokens"] == 1
 
 
+def test_deepseek_uses_json_object_without_schema_400(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    formats: list[str] = []
+
+    class Completions:
+        def create(self, **kwargs):
+            kind = kwargs["response_format"]["type"]
+            formats.append(kind)
+            if kind == "json_schema":
+                raise AssertionError("deepseek must not send json_schema")
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"x": 3}'))],
+            )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    provider = OpenAIStructuredProvider(
+        api_key="k",
+        model="deepseek-chat",
+        provider_name="deepseek",
+        client=client,
+    )
+    result = provider.generate_structured(system_prompt="s", user_prompt="u", schema=_Tiny)
+    assert result.x == 3
+    assert formats == ["json_object"]
+
+
 def _assert_openai_strict_schema(node: object) -> None:
     if isinstance(node, dict):
         if "$ref" in node:
@@ -184,3 +211,12 @@ def test_event_candidate_schema_omits_ref_defaults() -> None:
 
     payload = openai_json_schema_format(EventCandidate)
     _assert_openai_strict_schema(payload["json_schema"]["schema"])
+
+
+def test_claim_resolution_schema_omits_ref_defaults() -> None:
+    from app.providers.structured_format import openai_json_schema_format
+    from app.schemas.claims import ClaimExtractionBatch, ClaimResolutionBatch
+
+    for schema in (ClaimResolutionBatch, ClaimExtractionBatch):
+        payload = openai_json_schema_format(schema)
+        _assert_openai_strict_schema(payload["json_schema"]["schema"])

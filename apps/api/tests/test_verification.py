@@ -307,6 +307,114 @@ def test_declaration_runs_claim_queries_not_event_research(db_session: Session) 
     assert all(link.relation_type == EventSourceRelation.ADDITIONAL for link in extra)
 
 
+def test_off_topic_search_hits_stay_candidates_not_event_sources(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://prensa.rionorte.test/anuncio",
+        title="Anuncio",
+        body="Pérez afirmó que el costo será de 40.000 millones.",
+        content_hash="h1",
+    )
+    event = _event(db_session, item, title_internal="Pérez anuncia baja impositiva", event_type="anuncio")
+    claim = _claim(
+        db_session,
+        event,
+        text="Pérez afirmó que el costo será de 40.000 millones",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        normalized_value="40000",
+        unit="pesos",
+    )
+    useful = "https://hacienda.rionorte.test/proyecto"
+    mexico = "https://mexico.test/subsidio-47300"
+    rionegro = "https://rionegro.test/ingresos-brutos"
+    useful_page = "<article><p>Pérez afirmó que el costo será de 40.000 millones anuales.</p></article>"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="Pérez afirmó que el costo será de 40.000 millones anuales.",
+                        confidence=0.9,
+                        reason="repite la declaración",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=2,
+                        relation=EvidenceJudgementType.MENTIONS,
+                        excerpt="47 mil millones de pesos por subsidios",
+                        confidence=0.4,
+                        reason="mismo tema fiscal, otro país",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=3,
+                        relation=EvidenceJudgementType.DOES_NOT_ESTABLISH,
+                        excerpt=None,
+                        confidence=0.3,
+                        reason="otra provincia y otro proyecto",
+                    ),
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    search = FakeSearchProvider(
+        [
+            SearchHit(
+                title="Hacienda publica el proyecto",
+                url=useful,
+                snippet="Pérez afirmó que el costo será de 40.000 millones anuales.",
+            ),
+            SearchHit(
+                title="Subsidios a combustibles",
+                url=mexico,
+                snippet="Dejan de ingresar 47 mil millones de pesos por subsidios a combustibles",
+            ),
+            SearchHit(
+                title="Alivio de Ingresos Brutos",
+                url=rionegro,
+                snippet="Proponen reducir Ingresos Brutos en Río Negro",
+            ),
+        ]
+    )
+    fetcher = RecordingFetcher(
+        {
+            useful: useful_page,
+            mexico: "<article><p>Dejan de ingresar 47 mil millones de pesos por subsidios a combustibles</p></article>",
+            rionegro: "<article><p>Proponen reducir Ingresos Brutos en Río Negro</p></article>",
+        }
+    )
+    result = _service(
+        db_session, FakeStructuredLLM(), search, fetcher, assessor=assessor
+    ).verify(event.id, trigger="admin")
+    packet_urls = {row["url"] for row in result["packets"][str(claim.id)]}
+    assert useful in packet_urls
+    assert mexico in packet_urls
+    assert rionegro in packet_urls
+    linked = {
+        link.source_item.url
+        for link in db_session.scalars(select(EventSource).where(EventSource.event_id == event.id))
+        if link.source_item is not None
+    }
+    assert item.url in linked
+    assert useful in linked
+    assert mexico not in linked
+    assert rionegro not in linked
+    extra = db_session.scalars(
+        select(EventSource).where(
+            EventSource.event_id == event.id,
+            EventSource.source_item_id != item.id,
+        )
+    ).all()
+    assert len(extra) == 1
+    assert extra[0].relation_type == EventSourceRelation.ADDITIONAL
+    assert extra[0].source_item.url == useful
+
+
 def test_conflicting_unresolved_keeps_status_and_value(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Muertos", content_hash="h1")

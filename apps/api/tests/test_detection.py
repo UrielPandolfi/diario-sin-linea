@@ -78,6 +78,7 @@ def test_new_item_creates_event(db_session: Session) -> None:
     assert count == 1
     assert "EventCandidate" in llm.calls
     assert "DedupDecision" not in llm.calls
+    assert "AmbiguousDedupDecision" not in llm.calls
 
 
 def test_same_url_relink_skips_duplicate_entity_roles(db_session: Session) -> None:
@@ -220,6 +221,7 @@ def test_same_day_type_locality_without_strong_overlap_does_not_merge(db_session
     count = db_session.execute(text("SELECT count(*) FROM events")).scalar_one()
     assert count == 2
     assert "DedupDecision" not in llm.calls
+    assert "AmbiguousDedupDecision" not in llm.calls
 
 
 def test_entities_are_not_merged_across_events(db_session: Session) -> None:

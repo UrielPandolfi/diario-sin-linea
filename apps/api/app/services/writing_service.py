@@ -277,6 +277,17 @@ class WritingService:
         if knowledge_delta is not None:
             base["knowledge_delta"] = knowledge_delta
             base["update"] = True
+        claim_buckets = (
+            prompt_context.confirmed_claims,
+            prompt_context.single_source_claims,
+            prompt_context.conflicting_claims,
+            prompt_context.uncertain_claims,
+            prompt_context.disproven_claims,
+            prompt_context.outdated_claims,
+        )
+        base["claims_in_prompt"] = sum(len(bucket) for bucket in claim_buckets)
+        base["source_context_count"] = len(prompt_context.source_contexts or [])
+        base["source_contexts_included"] = bool(prompt_context.source_contexts)
         base.update(persist_snapshot_fields(evidence_snapshot))
         return base
 
