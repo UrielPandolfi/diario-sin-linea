@@ -27,6 +27,7 @@ from app.services.claim_card_presentation import (
     public_presentation_payload,
     public_verification_payload,
 )
+from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.evidence_snapshot import evidence_snapshot_for_version
 from app.services.verification_outcome import verification_view_for_event
@@ -108,9 +109,12 @@ def live_content(session: Session, article: Article) -> ArticleVersion | None:
 def source_payloads(event: Event) -> list[dict]:
     rows: list[dict] = []
     seen: set[str] = set()
+    event_places = event_geo_keys(event)
     for link in event.event_sources:
         item = link.source_item
         if item is None:
+            continue
+        if geo_places_conflict(event_places, item_geo_keys(item)):
             continue
         source = item.source
         url = item.canonical_url or item.url

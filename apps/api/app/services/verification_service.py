@@ -86,6 +86,7 @@ from app.services.information_origin import (
     support_basis_from_assessment,
     usable_body_source,
 )
+from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.event_service import EventService
 from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
 from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
@@ -1096,6 +1097,11 @@ class VerificationService:
         self.session.add(evidence)
         claim.evidence.append(evidence)
         if (selected_type or evidence_type) not in EVENT_SOURCE_EVIDENCE_TYPES:
+            return 0, 1
+        if geo_places_conflict(
+            event_geo_keys(event),
+            item_geo_keys(item, src.title, src.snippet, src.fetched_text),
+        ):
             return 0, 1
         _, created_link = self.event_service.attach_source(
             event,

@@ -136,6 +136,48 @@ def place_tokens(value: str | None) -> list[str]:
     return [token for token in _SPLIT.split(folded) if token]
 
 
+_GEO_BIGRAM_PREFIXES = frozenset({"rio", "san", "santa", "tierra", "buenos", "entre"})
+
+
+def geo_place_keys(*, structured: tuple[str | None, ...] = (), texts: tuple[str | None, ...] = ()) -> set[str]:
+    """Claves de jurisdicción comparables: provincia/localidad y bigramas rio/san/…"""
+    keys: set[str] = set()
+    for value in structured:
+        folded = fold_place(value)
+        if folded:
+            keys.add(folded)
+    for part in texts:
+        tokens = place_tokens(part)
+        for index, token in enumerate(tokens[:-1]):
+            nxt = tokens[index + 1]
+            if token in _GEO_BIGRAM_PREFIXES and nxt and len(nxt) >= 3 and nxt not in {"del", "de", "los", "las"}:
+                keys.add(f"{token} {nxt}")
+    return keys
+
+
+def event_geo_keys(event: object) -> set[str]:
+    return geo_place_keys(
+        structured=(getattr(event, "province", None), getattr(event, "locality", None)),
+        texts=(getattr(event, "title_internal", None), getattr(event, "short_summary", None)),
+    )
+
+
+def item_geo_keys(item: object, *extra: str | None) -> set[str]:
+    return geo_place_keys(
+        texts=(
+            getattr(item, "title", None),
+            getattr(item, "clean_text", None),
+            getattr(item, "excerpt", None),
+            *extra,
+        )
+    )
+
+
+def geo_places_conflict(left: set[str], right: set[str]) -> bool:
+    """True si ambos nombran jurisdicción y no comparten ninguna clave."""
+    return bool(left) and bool(right) and left.isdisjoint(right)
+
+
 def normalize_country(value: str | None) -> str | None:
     folded = fold_place(value)
     if not folded:

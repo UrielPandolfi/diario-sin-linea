@@ -1060,6 +1060,7 @@ def test_extraction_prompt_covers_selective_claim_philosophy() -> None:
     assert "derivables matemáticamente" in prompt
     assert "`[]` es un resultado válido" in prompt or "es un resultado válido" in prompt
     assert "una proposición material" in prompt
+    assert "si el snippet trae una cifra distinta" in prompt
     assert "profundas críticas" in prompt
     assert "Y cometió delito Z" in prompt
     assert "estimación, proyección o dato oficial" in prompt
@@ -1513,3 +1514,170 @@ def test_supported_without_primary_does_not_lock_resolution(db_session: Session)
     _service(db_session, second).resolve(event.id, trigger="admin")
     assert _event_claims(db_session, event.id)[0].status == ClaimStatus.CONFLICTING
 
+def test_incremental_keeps_historical_figures_and_persists_new_official_values(db_session: Session) -> None:
+    source_a = _source(
+        db_session, name="Prensa", domain="prensa.rionorte.test", feed_url="https://prensa.rionorte.test/rss.xml"
+    )
+    source_b = _source(
+        db_session,
+        name="Hacienda",
+        domain="hacienda.rionorte.test",
+        feed_url="https://hacienda.rionorte.test/rss.xml",
+    )
+    body_a = (
+        "El gobernador Juan Pérez anunció que enviará a la Legislatura un proyecto para reducir en un 10% "
+        "determinados impuestos provinciales. Pérez afirmó que la medida tendría un costo fiscal estimado "
+        "de 40.000 millones de pesos anuales."
+    )
+    body_b = (
+        "El texto oficial establece una reducción del 8%, no del 10% mencionado inicialmente. "
+        "La documentación oficial calcula además un impacto fiscal estimado de 52.000 millones de pesos anuales."
+    )
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://prensa.rionorte.test/a",
+        title="Pérez anuncia baja impositiva",
+        body=body_a,
+        content_hash="ha40",
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://hacienda.rionorte.test/b",
+        title="Hacienda publica el proyecto",
+        body=body_b,
+        content_hash="hb52",
+    )
+    title = (
+        "El gobernador Juan Pérez anunció un proyecto para reducir en un 10% impuestos provinciales, "
+        "con un costo fiscal estimado de 40.000 millones de pesos anuales."
+    )
+    event = _event(db_session, item_a, title_internal=title, event_type="anuncio_oficial", province="Río Norte")
+    first = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                ExtractedClaim(
+                    canonical_text="Juan Pérez anunció un proyecto para reducir en un 10% determinados impuestos provinciales.",
+                    claim_type="declaracion",
+                    importance=ClaimImportance.HIGH,
+                    subject="Juan Pérez",
+                    predicate="anunció",
+                    object_text="un proyecto para reducir en un 10% determinados impuestos provinciales",
+                    normalized_value="10",
+                    unit="%",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1,
+                            evidence_type=EvidenceType.SUPPORTS,
+                            excerpt="reducir en un 10% determinados impuestos provinciales",
+                        )
+                    ],
+                ),
+                ExtractedClaim(
+                    canonical_text="Pérez afirmó que la medida tendría un costo fiscal estimado de 40.000 millones de pesos anuales.",
+                    claim_type="declaracion",
+                    importance=ClaimImportance.HIGH,
+                    subject="Pérez",
+                    predicate="afirmó que",
+                    object_text="la medida tendría un costo fiscal estimado de 40.000 millones de pesos anuales",
+                    normalized_value="40000",
+                    unit="millones de pesos",
+                    evidence=[
+                        ExtractedEvidence(
+                            source_ref=1,
+                            evidence_type=EvidenceType.SUPPORTS,
+                            excerpt="costo fiscal estimado de 40.000 millones de pesos anuales",
+                        )
+                    ],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SINGLE_SOURCE, reason="a"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.SINGLE_SOURCE, reason="a"),
+            ]
+        ),
+    )
+    first_result = _service(db_session, first).resolve(event.id, trigger="new_event")
+    assert first_result["persisted"] == 2
+    _attach(db_session, event, item_b)
+
+    second = FakeStructuredLLM(
+        {
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[
+                    ExtractedClaim(
+                        canonical_text="El proyecto establece una reducción del 8% en determinados impuestos provinciales.",
+                        claim_type="hecho",
+                        importance=ClaimImportance.HIGH,
+                        object_text="una reducción del 8%",
+                        normalized_value="8",
+                        unit="%",
+                        evidence=[
+                            ExtractedEvidence(
+                                source_ref=1,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt="una reducción del 8%, no del 10%",
+                            )
+                        ],
+                    ),
+                    ExtractedClaim(
+                        canonical_text="El costo fiscal estimado del proyecto es de 40.000 millones de pesos anuales.",
+                        claim_type="hecho",
+                        importance=ClaimImportance.HIGH,
+                        object_text="40.000 millones de pesos anuales",
+                        normalized_value="40000",
+                        unit="millones de pesos",
+                        evidence=[
+                            ExtractedEvidence(
+                                source_ref=1,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt="una reducción del 8%, no del 10% mencionado inicialmente",
+                            )
+                        ],
+                    ),
+                    ExtractedClaim(
+                        canonical_text="El proyecto oficial estima un impacto fiscal de 52.000 millones de pesos anuales.",
+                        claim_type="hecho",
+                        importance=ClaimImportance.HIGH,
+                        object_text="52.000 millones de pesos anuales",
+                        normalized_value="52000",
+                        unit="millones de pesos",
+                        evidence=[
+                            ExtractedEvidence(
+                                source_ref=1,
+                                evidence_type=EvidenceType.SUPPORTS,
+                                excerpt="impacto fiscal estimado de 52.000 millones de pesos anuales",
+                            )
+                        ],
+                    ),
+                ]
+            ),
+            "ClaimResolutionBatch": ClaimResolutionBatch(
+                items=[
+                    ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SINGLE_SOURCE, reason="b"),
+                    ClaimResolutionItem(claim_ref=2, status=ClaimStatus.SINGLE_SOURCE, reason="b"),
+                ]
+            ),
+        }
+    )
+    incremental = ClaimService(db_session, extractor_llm=second, resolver_llm=second).resolve(
+        event.id, trigger="existing_event", source_item_id=item_b.id
+    )
+    assert incremental["incremental"] is True
+    prompt = second.user_prompts[0]
+    assert "40.000" not in prompt
+    assert "52.000" in prompt
+    assert "Título interno:" not in prompt
+    claims = _event_claims(db_session, event.id)
+    values = {(claim.normalized_value, claim.unit) for claim in claims}
+    texts = {claim.canonical_text for claim in claims}
+    assert ("10", "%") in values
+    assert ("40000", "millones de pesos") in values
+    assert ("8", "%") in values
+    assert ("52000", "millones de pesos") in values
+    assert not any("40.000" in text and "proyecto es de" in text for text in texts)
+    assert any("52.000" in text for text in texts)
+    assert sum(1 for claim in claims if claim.normalized_value == "40000") == 1

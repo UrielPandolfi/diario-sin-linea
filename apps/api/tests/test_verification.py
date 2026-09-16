@@ -5,7 +5,7 @@ from uuid import uuid4
 import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from tests.origin import ADMIN_ORIGIN
@@ -19,7 +19,7 @@ from app.domain.enums import (
     PipelineStatus,
 )
 from app.main import app
-from app.models import Claim, ClaimEvidence, EventSource, PipelineRun, SourceItem
+from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import SearchHit
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM, RecordingFetcher
 from app.schemas import EventCreate, SourceCreate, SourceItemCreate
@@ -36,6 +36,7 @@ from app.schemas.verification import (
 )
 from app.services.claim_service import CLAIM_STAGE
 from app.services.event_service import EventService
+from app.services.feed_ranking import source_payloads
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_policy import canonicalize_claim_type, select_claims
@@ -1275,4 +1276,111 @@ def test_search_503_does_not_block_or_invent_support(db_session: Session) -> Non
     assert search.queries
     assert claim.status == ClaimStatus.SINGLE_SOURCE
     assert claim.status != ClaimStatus.SUPPORTED
+
+
+def test_other_jurisdiction_generic_overlap_is_evidence_not_public_source(db_session: Session) -> None:
+    source = _source(db_session, domain="educacion.rionorte.test", feed_url="https://educacion.rionorte.test/rss.xml")
+    item = _item(
+        db_session,
+        source.id,
+        url="https://educacion.rionorte.test/calendario",
+        title="Aguilar anuncia el 2 de marzo",
+        body="La ministra de Educación de Río Norte, Marta Aguilar, anunció que el ciclo lectivo comenzará el 2 de marzo.",
+        content_hash="c1",
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="La ministra de Educación de Río Norte, Marta Aguilar, anunció que el ciclo lectivo comenzará el 2 de marzo",
+        event_type="anuncio_oficial",
+        province="Río Norte",
+        locality=None,
+        short_summary="Aguilar anunció el inicio del ciclo lectivo el 2 de marzo.",
+    )
+    claim = _claim(
+        db_session,
+        event,
+        text="El ciclo lectivo comenzará el 2 de marzo.",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        normalized_value="2",
+        unit="marzo",
+    )
+    related = "https://calendario.rionorte.test/oficial"
+    other = "https://www.rionegro.com.ar/ciclo-lectivo-2026"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="El Ministerio de Educación de Río Norte publicó el calendario y confirmó el 2 de marzo.",
+                        confidence=0.9,
+                        reason="misma jurisdicción y el mismo anuncio",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=2,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.",
+                        confidence=0.8,
+                        reason="misma fecha genérica",
+                    ),
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    search = FakeSearchProvider(
+        [
+            SearchHit(
+                title="Educación de Río Norte confirma el 2 de marzo",
+                url=related,
+                snippet="El Ministerio de Educación de Río Norte publicó el calendario y confirmó el 2 de marzo.",
+            ),
+            SearchHit(
+                title="Río Negro puso en marcha el ciclo lectivo 2026",
+                url=other,
+                snippet="Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.",
+            ),
+        ]
+    )
+    fetcher = RecordingFetcher(
+        {
+            related: "<article><p>El Ministerio de Educación de Río Norte publicó el calendario y confirmó el 2 de marzo.</p></article>",
+            other: "<article><p>Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.</p></article>",
+        }
+    )
+    _service(db_session, FakeStructuredLLM(), search, fetcher, assessor=assessor).verify(
+        event.id, trigger="admin"
+    )
+    evidence_urls = {
+        row.source_url
+        for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id))
+    }
+    assert related in evidence_urls
+    assert other in evidence_urls
+    linked = {
+        link.source_item.url
+        for link in db_session.scalars(select(EventSource).where(EventSource.event_id == event.id))
+        if link.source_item is not None
+    }
+    assert item.url in linked
+    assert related in linked
+    assert other not in linked
+    db_session.expire_all()
+    loaded = db_session.scalars(
+        select(Event)
+        .options(
+            selectinload(Event.event_sources)
+            .selectinload(EventSource.source_item)
+            .selectinload(SourceItem.source)
+        )
+        .where(Event.id == event.id)
+    ).one()
+    public_urls = {row["url"] for row in source_payloads(loaded)}
+    assert item.url in public_urls
+    assert related in public_urls
+    assert other not in public_urls
 

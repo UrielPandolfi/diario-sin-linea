@@ -428,3 +428,31 @@ def test_location_fallback_when_contradictory_and_low_confidence() -> None:
         )
         is True
     )
+
+
+def test_geo_place_keys_distinguish_rio_norte_from_rio_negro() -> None:
+    from types import SimpleNamespace
+
+    from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
+
+    event = SimpleNamespace(
+        province=None,
+        locality=None,
+        title_internal="La ministra de Río Norte anunció que el ciclo lectivo comienza el 2 de marzo",
+        short_summary="Aguilar anunció el 2 de marzo",
+    )
+    related = SimpleNamespace(
+        title="Educación de Río Norte confirma el 2 de marzo",
+        clean_text="El Ministerio de Educación de Río Norte publicó el calendario.",
+        excerpt=None,
+    )
+    other = SimpleNamespace(
+        title="Río Negro puso en marcha el ciclo lectivo 2026",
+        clean_text="Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.",
+        excerpt=None,
+    )
+    event_keys = event_geo_keys(event)
+    assert "rio norte" in event_keys
+    assert not geo_places_conflict(event_keys, item_geo_keys(related))
+    assert geo_places_conflict(event_keys, item_geo_keys(other))
+

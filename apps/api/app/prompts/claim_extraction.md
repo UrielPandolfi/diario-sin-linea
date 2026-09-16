@@ -13,7 +13,7 @@ Antes de emitir un Claim preguntate:
 
 Si la respuesta no es clara, no lo extraigas. Es preferible devolver `claims: []` a inventar Claims triviales. `[]` es un resultado válido.
 
-El suceso a cubrir está en el título interno y el resumen. Extraé afirmaciones sobre ESE hecho.
+El suceso a cubrir está en el título interno y el resumen. Extraé afirmaciones sobre ESE hecho. Las magnitudes se toman del snippet de las fuentes: si el snippet trae una cifra distinta a la del título interno, extraé la del snippet como Claim nuevo.
 
 No extraigas un segundo suceso que aparezca en las mismas páginas u otras fuentes (otra inauguración, otro acto oficial el mismo día, otra obra). Si una fuente habla de otro hecho, ignorá esas oraciones.
 

@@ -99,6 +99,33 @@ def _item_body(item: SourceItem) -> str:
     return (item.clean_text or "").strip()
 
 
+def _figure_digits(claim: Claim | ExtractedClaim) -> str:
+    digits = re.sub(r"\D", "", getattr(claim, "normalized_value", None) or "")
+    if len(digits) >= 4:
+        return digits
+    digits = re.sub(r"\D", "", getattr(claim, "canonical_text", None) or "")
+    return digits if len(digits) >= 4 else ""
+
+
+def _sources_support_figure(
+    raw: ExtractedClaim,
+    sources: list[SourceItem],
+    valid_evidence: dict[UUID, _PendingEvidence],
+) -> bool:
+    digits = _figure_digits(raw)
+    if not digits:
+        return True
+    by_id = {item.id: item for item in sources}
+    for item_id in valid_evidence:
+        item = by_id.get(item_id)
+        if item is None:
+            continue
+        haystack = re.sub(r"\D", "", " ".join(filter(None, [item.clean_text, item.excerpt, item.title])))
+        if digits in haystack:
+            return True
+    return False
+
+
 def build_assertion_key(
     *,
     canonical_text: str,
@@ -586,7 +613,7 @@ class ClaimService:
         extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
         batch = extractor.generate_structured(
             system_prompt=load_prompt("claim_extraction.md"),
-            user_prompt=self._extraction_prompt(event, sources),
+            user_prompt=self._extraction_prompt(event, sources, identity_only=True),
             schema=ClaimExtractionBatch,
         )
         split_claims: list[ExtractedClaim] = []
@@ -762,15 +789,27 @@ class ClaimService:
             address=event.address_text,
         )
 
-    def _extraction_prompt(self, event: Event, sources: list[SourceItem]) -> str:
+    def _extraction_prompt(
+        self, event: Event, sources: list[SourceItem], *, identity_only: bool = False
+    ) -> str:
         when = event.started_at or event.detected_at
-        lines = [
-            f"Título interno: {event.title_internal}",
-            f"Tipo interno (puede estar mal; extraé hechos del texto, no del tipo): {event.event_type}",
-            f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
-            f"Fecha: {when}",
-            "Fuentes (source_ref 1..N, snippet truncado). Extraé los hechos concretos aunque no coincidan con el tipo interno.",
-        ]
+        if identity_only:
+            place = f"{event.locality or ''} {event.province or ''}".strip()
+            lines = [
+                "Identidad del suceso (no es una fuente; no extraigas cifras ni hechos de este bloque): "
+                f"tipo={event.event_type}; lugar={place}; fecha={when}",
+                "Extraé únicamente lo que afirman los snippets. Si una fuente trae una magnitud distinta, "
+                "creá un Claim nuevo con ese valor. No copies cifras históricas que no estén en el snippet.",
+                "Fuentes (source_ref 1..N, snippet truncado).",
+            ]
+        else:
+            lines = [
+                f"Título interno: {event.title_internal}",
+                f"Tipo interno (puede estar mal; extraé hechos del texto, no del tipo): {event.event_type}",
+                f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
+                f"Fecha: {when}",
+                "Fuentes (source_ref 1..N, snippet truncado). Extraé los hechos concretos aunque no coincidan con el tipo interno.",
+            ]
         for index, item in enumerate(sources, start=1):
             published = item.published_at.isoformat() if item.published_at else ""
             lines.append(
@@ -808,6 +847,8 @@ class ClaimService:
                     repaired.append(row.model_copy(update={"excerpt": salvaged}))
                 if repaired:
                     valid_evidence = self._valid_evidence(repaired, sources, require_body=require_body)
+            if valid_evidence and not _sources_support_figure(raw, sources, valid_evidence):
+                valid_evidence = {}
             if not valid_evidence:
                 dropped.append(
                     record_drop(canonical_text=canonical, reason=DropReason.INVALID_EXCERPT.value)

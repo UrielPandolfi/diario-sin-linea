@@ -2,30 +2,50 @@
 
 **Fecha:** 2026-09-16
 
-**Tarea:** Dedup ambigua con DeepSeek (sin exigir geo extraída); suite; smokes A–D smk5ds.
+**Tarea:** Cerrar los dos huecos editoriales de smk5ds (fuente pública irrelevante y 52.000 perdido). Track B dedup no se tocó.
 
-## Código
+## Veredicto
 
-- Bajo LOW: si no hay contradicción estructurada, tipos compatibles, años no disjuntos, y hay overlap de proceso **o** entidades nombradas → DeepSeek. **No** exige `province`/`locality`.
-- Banda LOW–HIGH: Voyage ya filtró; DeepSeek salvo conflicto o tipos incompatibles.
-- ≥ HIGH sin conflicto: auto-merge, sin LLM.
-- Schema `AmbiguousDedupDecision`: `SAME_EVENT` asocia; `DIFFERENT_EVENT` / `UNSURE` crean Event. Rol `AMBIGUOUS_DEDUP` reutiliza el adapter DeepSeek (`OpenAIStructuredProvider` + `json_object`). Si faltan env, cae a `CLAIM_RESOLUTION`.
-- LOW=0.72 HIGH=0.88 y Voyage no se tocaron. Ni Writing/Audit, MaterialChangeDetector, auto-publish, claims ni verification.
+**Bloque editorial cerrado para MVP.** Track B sigue APTO. Los dos huecos de smk5ds pasan en smk6ed.
 
-Suite API: **607 passed**.
+## Causas (código)
 
-## Smoke smk5ds (URLs nuevas, rebuild horneado, `AMBIGUOUS_DEDUP=deepseek/deepseek-chat`)
+1. **Fuente pública irrelevante.** Verification persistía `ClaimEvidence` y, si el juicio era SUPPORTS/CONTRADICTS/QUALIFIES, `_attach_evidence` creaba `EventSource` ADDITIONAL. `source_payloads` listaba todos los `event_sources`. MENTIONS ya no adjuntaba; el hueco era SUPPORTS genérico de otra jurisdicción (Río Negro vs Río Norte).
+2. **52.000 perdido.** El prompt incremental incluía `title_internal` con 40.000; Luna copiaba esa cifra. `salvage_excerpt` podía validar una oración sin la magnitud. No era merge `assertion_key` 52k→40k.
 
-**A** SourceItem `7a2e57ec` → Event `b3b046b5-1d1b-4a5a-8fcb-824e423c6661` (`no_candidates`). V1 publicada. API 200.
+## Cambio mínimo
 
-**B** SourceItem `6b5459ab` → **mismo Event**. `best_score=0.712` (<0.72). `path=ambiguous_below_low`. Señales: `compatible_type`, `shared_entities`, `shared_process` (`fiscal`, `reduc`). DeepSeek **llamado**, `SAME_EVENT` conf 0.85. B extract: `province=null` `locality=null`. Track B escribió y publicó **V2**. API 200, 2 fuentes, titular del 8%.
+- `geo_places_conflict` (`editorial_gate.py`): si Event e ítem tienen lugares disjuntos, no hay `EventSource`. `ClaimEvidence` sí puede quedar. Defensa en `source_payloads`.
+- Incremental: `_extraction_prompt(..., identity_only=True)` (sin `title_internal`); `_sources_support_figure` exige 4+ dígitos en el cuerpo/snippet.
 
-**C** SourceItem `97ffa7fd` → Event nuevo `5f1cd620-37b2-42e7-be7c-e5970cc30e76`. Score vs A `0.422`. DeepSeek `DIFFERENT_EVENT`. V1 publicada. API 200.
+Sin LLM nuevo. Sin tocar LOW/HIGH, Voyage, DeepSeek dedup, MaterialChangeDetector, auto-publish ni versionado.
 
-**D** SourceItem `a1f652f7` → **mismo Event que C**, `embedding_high:0.916`, sin DeepSeek. Confirmación; no hubo Writing V2.
+## Tests
 
-## Residuos
+- `test_other_jurisdiction_generic_overlap_is_evidence_not_public_source`
+- `test_geo_place_keys_distinguish_rio_norte_from_rio_negro`
+- `test_incremental_keeps_historical_figures_and_persists_new_official_values`
+- Suite API: **610 passed**
 
-- C llamó DeepSeek contra el suceso tributario a 0.422 por `shared_entities` (token de organismo). DeepSeek acertó DIFFERENT.
-- Uso `ambiguous_dedup` en B no quedó tasado (`estimated_cost_usd=None`).
-- C pública muestra 3 `sources` (2 ítems eval + uno extra de pipeline).
+## Smokes smk6ed (providers reales)
+
+Tag URL `smk6ed`. El `wait.py` de eval puede marcar idle en V1 mientras B/D siguen; la validación usó el pipeline ya terminado.
+
+### Event A/B — `d0cf9d13-19b1-41fc-b722-db196e363b05`
+
+- A `45b0a912` → Event nuevo (`no_candidates`), V1.
+- B `c39ecf0f` → **el mismo Event**. Voyage 0.746, `path=ambiguous_band`, DeepSeek **SAME_EVENT**.
+- V2 material (`new_high_claim`); `published_version=current_version=2`.
+- Claims: 10% (declaración de A, `UNCERTAIN`); 40.000 de A `val=40000` `SINGLE_SOURCE`; 8% de Hacienda `val=8`; **52.000 de Hacienda `val=52000`**. No se reescribió 52.000 como 40.000.
+- Fuentes públicas: prensa + hacienda eval.
+
+### Event C/D — `c4a60246-eb98-4fc3-a216-09c8c4b6d2b0`
+
+- C `616763bd` → Event distinto. Score 0.441, DeepSeek **DIFFERENT_EVENT**.
+- D `6d43b8ed` → mismo Event, `embedding_high:0.912`. Sin V2 (igual que smk5ds: confirmación no material).
+- Fuentes públicas: **2**, ambas eval (`educacion` INITIAL, `calendario` CONFIRMING).
+- `rionegro.com.ar` apareció como hit de Verification; **no** es `EventSource` ni entra al API. `educacion.rionegro.gov.ar` quedó `ClaimEvidence` MENTIONS.
+
+## Deuda (sin heurística nueva)
+
+`generic entity overlap may trigger unnecessary dedup call` — C vs A a ~0.44 por overlap genérico; DeepSeek acertó DIFFERENT.

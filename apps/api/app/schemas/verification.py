@@ -64,7 +64,8 @@ PERSISTABLE_JUDGEMENTS = {
 }
 
 # EventSource = el ítem es fuente del suceso. Un hit de búsqueda no alcanza:
-# SUPPORTS / CONTRADICTS / QUALIFIES sí; MENTIONS y DOES_NOT_ESTABLISH no.
+# SUPPORTS / CONTRADICTS / QUALIFIES sí, salvo jurisdicción distinta a la del Event;
+# MENTIONS y DOES_NOT_ESTABLISH no.
 EVENT_SOURCE_EVIDENCE_TYPES = {
     EvidenceType.SUPPORTS,
     EvidenceType.CONTRADICTS,

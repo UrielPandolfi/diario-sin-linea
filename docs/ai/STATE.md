@@ -1,8 +1,6 @@
 # Estado
 
-Revisión: 2026-09-16. Track B: dedup ambigua con DeepSeek bajo LOW si hay señales (sin exigir geo extraída), `comparison_key` de proposición para actos de habla, `AUTO_PUBLISH` como gate real. Suite y smokes reales de esta iteración en HANDOFF.
-
-Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
+Revisión: 2026-09-16. Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente. Suite 610 y smokes smk6ed en HANDOFF.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -97,3 +95,11 @@ README desactualizado en: “solo Rosario”, proveedores de writing/audit fijos
 ## Smoke Track A/B real — 2026-09-16 (DeepSeek dedup ambigua, smk5ds)
 
 Suite **607 passed**. Rebuild horneado, `AMBIGUOUS_DEDUP=deepseek/deepseek-chat`. Smoke A Pérez: Event `b3b046b5`, V1. Smoke B Hacienda: **mismo Event**, Voyage `0.712`, DeepSeek `SAME_EVENT`, V2 live. C educación: Event nuevo `5f1cd620` (`DIFFERENT_EVENT` vs A a 0.422). D calendario: mismo Event que C por `embedding_high:0.916`. Detalle en HANDOFF.
+
+### Validación final Track B (smokes smk5ds, sin cambio de código)
+
+Circuito A–B–C–D **APTO**: B reutiliza A, V2 material, V1 intacta, `current_version=published_version=2`, sin V3; C es otro Event; D reutiliza C por embedding alto y no escribe versión ni update material.
+
+Deuda de optimización (no heurística nueva): **`generic entity overlap may trigger unnecessary dedup call`**. C vs A a similarity 0.422 llamó DeepSeek por `shared_entities` (token de organismo); la decisión `DIFFERENT_EVENT` fue correcta.
+
+Huecos editoriales de smk5ds **cerrados** en smk6ed (sin tocar dedup/Voyage/LOW/HIGH/versionado): (1) Verification puede persistir `ClaimEvidence` de otra jurisdicción; `geo_places_conflict` impide `EventSource` y `source_payloads` no la lista. (2) Incremental ya no mete `title_internal` con cifras viejas; 52.000/8% se persisten y 10%/40.000 siguen trazables.
