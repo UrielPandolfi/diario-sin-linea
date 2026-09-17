@@ -7,6 +7,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 
 const NAV = [
   { href: "/admin", label: "Tablero" },
+  { href: "/admin/estadisticas", label: "Estadísticas" },
   { href: "/admin/publications", label: "Publicaciones" },
   { href: "/admin/events", label: "Sucesos" },
   { href: "/admin/published", label: "Publicadas" },

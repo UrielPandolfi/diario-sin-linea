@@ -9,6 +9,7 @@ import feedparser
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
+from app.core.config import get_settings
 from app.core.text import content_fingerprint
 from app.core.urls import canonicalize_url
 from app.core.source_content import (
@@ -60,6 +61,20 @@ def _looks_like_feed(body: str, content_type: str) -> bool:
         return True
     head = body.lstrip()[:400].lower()
     return head.startswith("<?xml") or "<rss" in head or "<feed" in head
+
+
+def _select_recent_entries(entries: list[FeedEntry], limit: int) -> list[FeedEntry]:
+    if limit <= 0:
+        return []
+    if entries and all(entry.published_at is not None for entry in entries):
+        ordered = sorted(
+            entries,
+            key=lambda entry: entry.published_at or datetime.min.replace(tzinfo=timezone.utc),
+            reverse=True,
+        )
+    else:
+        ordered = list(entries)
+    return ordered[:limit]
 
 
 class IngestionService:
@@ -149,7 +164,7 @@ class IngestionService:
     def _entries_from_feed(self, body: str, feed_url: str) -> list[FeedEntry]:
         parsed = feedparser.parse(body)
         entries: list[FeedEntry] = []
-        for raw in parsed.entries[:50]:
+        for raw in parsed.entries:
             link = raw.get("link") or raw.get("id")
             if not link:
                 continue
@@ -161,10 +176,13 @@ class IngestionService:
                     summary=raw.get("summary") or raw.get("description"),
                     author=raw.get("author"),
                     external_id=str(raw.get("id")) if raw.get("id") else None,
-                    published_at=_struct_time_to_datetime(raw.get("published_parsed")),
+                    published_at=_struct_time_to_datetime(
+                        raw.get("published_parsed") or raw.get("updated_parsed")
+                    ),
                 )
             )
-        return entries
+        limit = int(get_settings().monitored_source_poll_limit)
+        return _select_recent_entries(entries, limit)
 
     def _ingest_entry(self, source: Source, entry: FeedEntry) -> IngestOutcome:
         canonical = canonicalize_url(entry.url)

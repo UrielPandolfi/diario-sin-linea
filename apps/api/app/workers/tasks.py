@@ -41,7 +41,7 @@ celery_app.conf.task_routes = {
 celery_app.conf.beat_schedule = {
     "poll-monitored-sources": {
         "task": "app.workers.tasks.poll_monitored_sources",
-        "schedule": timedelta(seconds=settings.ingestion_poll_interval_seconds),
+        "schedule": timedelta(seconds=settings.monitored_source_poll_interval_seconds),
     }
 }
 
@@ -150,7 +150,10 @@ def poll_monitored_sources() -> dict:
     session = SessionLocal()
     try:
         from app.repositories import SourceRepository
+        from app.services.app_settings import AppSettingsService
 
+        if not AppSettingsService(session).is_auto_poll_enabled():
+            return {"queued": 0, "skipped": True, "reason": "auto_poll_disabled"}
         source_ids = [str(source.id) for source in SourceRepository(session).list_pollable()]
     finally:
         session.close()

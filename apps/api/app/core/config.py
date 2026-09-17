@@ -1,5 +1,6 @@
 from functools import lru_cache
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        populate_by_name=True,
     )
 
     database_url: str = (
@@ -72,7 +74,14 @@ class Settings(BaseSettings):
     event_match_low_threshold: float = 0.72
     event_match_window_hours: int = 72
     embedding_dimensions: int = 1024
-    ingestion_poll_interval_seconds: int = 900
+    monitored_source_poll_limit: int = 5
+    monitored_source_poll_interval_seconds: int = Field(
+        default=300,
+        validation_alias=AliasChoices(
+            "MONITORED_SOURCE_POLL_INTERVAL_SECONDS",
+            "INGESTION_POLL_INTERVAL_SECONDS",
+        ),
+    )
     # 0 = unlimited. >0 caps new sucesos (and initial detection batch) per poll.
     max_new_events_per_poll: int = 0
     feed_relevance_weight: float = 1.0

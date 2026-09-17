@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-16. Portada determinista Fase A (`hero_image_url` post-commit, PNG en Postgres). Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente. Suite 610 y smokes smk6ed en HANDOFF.
+Revisión: 2026-09-16. Portada determinista Fase A (`hero_image_url` post-commit, PNG en Postgres). Admin estadísticas de redacción (solo lectura). Polling automático cerrado (límite 5 / intervalo 300s) con toggle `auto_poll_enabled`. Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -10,9 +10,9 @@ Pipeline Celery: poll → detect → (create: research | link nuevo: claims incr
 
 Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService.ensure_in_own_session` genera una plantilla Pillow 1200×630 y la guarda en `article_hero_images`. No entra a claims/writing/audit. `hero_image_url` null sigue siendo válido. Las cards del feed no muestran imagen.
 
-Ingesta RSS (HTML no soportado en `ingestion_service.py`). Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
+Ingesta RSS (HTML no soportado en `ingestion_service.py`). Beat `poll_monitored_sources` cada `monitored_source_poll_interval_seconds` (default 300) si `auto_poll_enabled` (Admin, default activo); cada poll inspecciona `monitored_source_poll_limit` entradas recientes (default 5) antes de descargar HTML. Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
-Admin Track A: `/admin/publications` (estado actual vs ejecuciones de período), costos estimados con libro/snapshot (`0014_llm_costs`), procedencia de cuerpo (`body_source`), skip de cuota persistido, fallo histórico ≠ fallo abierto. Atribución 1:1 de `LlmUsage`; backfill de embeddings separado.
+Admin Track A: `/admin/publications` (estado actual vs ejecuciones de período), `/admin/estadisticas` (solo lectura: embudo, descarte, Track B, etiquetas), costos estimados con libro/snapshot (`0014_llm_costs`), procedencia de cuerpo (`body_source`), skip de cuota persistido, fallo histórico ≠ fallo abierto. Atribución 1:1 de `LlmUsage`; backfill de embeddings separado.
 
 Casos de lectores y revisión editorial: routers en `main.py`, migración `0013_reader_cases`, UI `/contacto`, `/seguimiento/[token]`, `/admin/cases`. **No** pasan por Celery. `EditorialService.revise` no usa el gate de audit/publish.
 

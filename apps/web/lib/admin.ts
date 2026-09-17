@@ -91,6 +91,78 @@ export type AdminStats = {
   sources_added_24h?: Record<string, number>;
   no_material_change_24h?: number;
   costs_24h?: AdminCostSummary;
+  auto_poll_enabled?: boolean;
+};
+
+export type AdminAnalyticsCount = {
+  key: string;
+  count: number;
+  label?: string;
+  unique_items?: number;
+  code?: string;
+  code_label?: string;
+};
+
+export type AdminAnalytics = {
+  window: string;
+  since: string | null;
+  read_only: boolean;
+  headline: string[];
+  funnel: {
+    notes_ingested: number;
+    notes_by_status: AdminAnalyticsCount[];
+    notes_discarded_not_news: number;
+    notes_linked_existing: number;
+    sucesos_created: number;
+    sucesos_total: number;
+    articles_published: number;
+    articles_updated_track_b: number;
+    ready_for_review: number;
+  };
+  detection: {
+    attempts: number;
+    unique_items: number;
+    truncated: boolean;
+    discarded_unique: number;
+    linked_unique: number;
+    created_unique: number;
+    discarded_codes: AdminAnalyticsCount[];
+    by_outcome: Record<
+      string,
+      {
+        count: number;
+        unique_items?: number;
+        outcome_label: string;
+        codes: { code: string; count: number; code_label: string }[];
+      }
+    >;
+  };
+  publication: {
+    published: number;
+    updated_track_b: number;
+    ready_for_review: number;
+    events_published_status: number;
+    writing_material_updates: number;
+    writing_no_material_change: number;
+    material_reasons: AdminAnalyticsCount[];
+  };
+  claims: {
+    total: number;
+    by_status: AdminAnalyticsCount[];
+  };
+  editorial_labels: {
+    published_notes_scored: number;
+    on_articles: AdminAnalyticsCount[];
+    on_claims: AdminAnalyticsCount[];
+  };
+  sources: {
+    monitored: number;
+    by_relation: AdminAnalyticsCount[];
+  };
+};
+
+export type AdminIngestionSettings = {
+  auto_poll_enabled: boolean;
 };
 
 export type AdminSource = {

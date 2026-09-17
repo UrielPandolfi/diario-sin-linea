@@ -20,6 +20,8 @@ from app.repositories import (
     SourceItemRepository,
     SourceRepository,
 )
+from app.services.app_settings import AppSettingsService
+from app.services.editorial_analytics import WINDOWS, EditorialAnalyticsService
 from app.services.claim_card_presentation import presentation_for_claim, public_presentation_payload
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.verification_outcome import verification_view_for_event
@@ -61,6 +63,10 @@ class PublishBody(BaseModel):
     override_editorial_hold: bool = False
     target_version: int | None = None
     base_published_version: int | None = None
+
+
+class IngestionSettingsPatch(BaseModel):
+    auto_poll_enabled: bool
 
 
 class SourceWrite(BaseModel):
@@ -302,7 +308,25 @@ def stats(db: DbSession) -> dict:
         "sources_added_24h": EventRepository(db).count_links_added_since(since),
         "no_material_change_24h": sum(1 for run in writing_runs if writing_no_material_change(run)),
         "costs_24h": aggregate_usage_costs(db, since=since),
+        "auto_poll_enabled": AppSettingsService(db).is_auto_poll_enabled(),
     }
+
+
+@router.get("/analytics", dependencies=[Depends(require_admin)])
+def editorial_analytics(db: DbSession, window: str = Query(default="all")) -> dict:
+    chosen = window if window in WINDOWS else "all"
+    return EditorialAnalyticsService(db).snapshot(window=chosen)
+
+
+@router.get("/ingestion", dependencies=[Depends(require_admin)])
+def get_ingestion_settings(db: DbSession) -> dict:
+    return AppSettingsService(db).ingestion_payload()
+
+
+@router.patch("/ingestion", dependencies=[Depends(require_admin_origin)])
+def patch_ingestion_settings(payload: IngestionSettingsPatch, db: DbSession) -> dict:
+    AppSettingsService(db).set_auto_poll_enabled(payload.auto_poll_enabled)
+    return AppSettingsService(db).ingestion_payload()
 
 
 @router.get("/sources", dependencies=[Depends(require_admin)])
