@@ -10,7 +10,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 | --- | --- |
 | `apps/web/` | Next.js 15 (App Router): UI pública + `/admin` |
 | `apps/api/app/` | FastAPI, dominio, servicios, workers Celery |
-| `apps/api/migrations/versions/` | Alembic (`0001` … `0014_llm_costs`) |
+| `apps/api/migrations/versions/` | Alembic (`0001` … `0016_article_hero_images`) |
 | `apps/api/tests/` | Pytest |
 | `docker-compose.yml` | postgres, redis, api, worker, beat, web |
 | `scripts/run_editorial_eval.py` | Eval editorial (fixtures; no RSS) |

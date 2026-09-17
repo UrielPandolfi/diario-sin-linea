@@ -1,12 +1,14 @@
 # Estado
 
-Revisión: 2026-09-16. Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente. Suite 610 y smokes smk6ed en HANDOFF.
+Revisión: 2026-09-16. Portada determinista Fase A (`hero_image_url` post-commit, PNG en Postgres). Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente. Suite 610 y smokes smk6ed en HANDOFF.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
+Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
+
+Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService.ensure_in_own_session` genera una plantilla Pillow 1200×630 y la guarda en `article_hero_images`. No entra a claims/writing/audit. `hero_image_url` null sigue siendo válido. Las cards del feed no muestran imagen.
 
 Ingesta RSS (HTML no soportado en `ingestion_service.py`). Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
@@ -18,7 +20,7 @@ Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `suppor
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
+Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
 
 ## Hallazgos de cableado (no decisiones)
 

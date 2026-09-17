@@ -11,6 +11,7 @@ from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType, Pipeli
 from app.models import Article, Event, EventUpdate, PipelineRun
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.services.audit_policy import blocking_issues, structural_findings
+from app.services.hero_image_service import schedule_after_commit
 from app.services.pipeline_lock import PUBLISHING_STAGE, is_write_audit_publish_busy
 
 AUDITING_STAGE = "auditing"
@@ -85,6 +86,9 @@ class PublishService:
             if not result.get("published"):
                 event.status = original_status
             self.session.flush()
+            article_id = result.get("article_id")
+            if result.get("published") and article_id:
+                schedule_after_commit(self.session, UUID(str(article_id)))
             return {"skipped": False, "event_id": str(event.id), **result}
         except Exception as exc:
             return self._fail(run, event, original_status, str(exc))

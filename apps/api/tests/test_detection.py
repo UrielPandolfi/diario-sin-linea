@@ -8,7 +8,14 @@ from app.models import Event, PipelineRun, SourceItem
 from app.providers.fakes import FakeEmbeddingProvider, FakeStructuredLLM
 from app.providers.registry import ModelRole
 from app.schemas import SourceCreate, SourceItemCreate
-from app.schemas.detection import EditorialScope, EditorialTopic, EventCandidate, ExtractedEntity, RelevanceLevel
+from app.schemas.detection import (
+    AmbiguousDedupDecision,
+    EditorialScope,
+    EditorialTopic,
+    EventCandidate,
+    ExtractedEntity,
+    RelevanceLevel,
+)
 from app.services.detection_service import DetectionService
 from app.services.editorial_gate import EditorialFilterReason
 from app.services.source_item_service import SourceItemService
@@ -251,12 +258,29 @@ def test_entities_are_not_merged_across_events(db_session: Session) -> None:
             ]
         }
     )
-    service = DetectionService(db_session, light_llm=llm, embeddings=FakeEmbeddingProvider())
+    # Shared PERSON + same event_type/locality is a below-LOW coincidence signal
+    # (should_ask_ambiguous_dedup). Isolation tests must stub Terra; the registry
+    # has no AMBIGUOUS_DEDUP provider.
+    terra = FakeStructuredLLM(
+        {
+            "AmbiguousDedupDecision": AmbiguousDedupDecision(
+                decision="DIFFERENT_EVENT",
+                confidence=0.9,
+                reason="Hechos distintos pese a la misma persona",
+            )
+        }
+    )
+    service = DetectionService(
+        db_session, light_llm=llm, dedup_llm=terra, embeddings=FakeEmbeddingProvider()
+    )
 
     first = service.detect(item_a.id)
     second = service.detect(item_b.id)
 
+    assert first["created"] is True
+    assert second["created"] is True
     assert first["event_id"] != second["event_id"]
+    assert "AmbiguousDedupDecision" in terra.calls
     entity_count = db_session.execute(text("SELECT count(*) FROM entities")).scalar_one()
     assert entity_count == 2
 

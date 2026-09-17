@@ -34,6 +34,7 @@ from app.services.publication_outcome import (
     writing_no_material_change,
 )
 from app.schemas import SourceCreate, SourceUpdate
+from app.services.hero_image_service import ensure_in_own_session
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
 from app.services.pipeline_lock import is_write_audit_publish_busy
@@ -695,6 +696,7 @@ def enqueue_publish(
         return result
     inspection = PublishService(db).inspect_publish(event_id)
     if inspection["reason"] == "already_published":
+        ensure_in_own_session(article.id)
         return {"published": True, "reason": "already_published", "event_id": str(event_id)}
     if inspection["reason"] != "ready":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=inspection["reason"])

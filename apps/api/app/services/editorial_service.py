@@ -11,6 +11,7 @@ from app.models import Correction
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.schemas import ArticleContentUpdate
 from app.services.article_service import ArticleService
+from app.services.hero_image_service import schedule_after_commit
 from app.services.pipeline_lock import is_write_audit_publish_busy
 
 _KIND_REASON = {
@@ -124,6 +125,7 @@ class EditorialService:
             article.editorial_hold = True
             event.last_material_update_at = now
         self.session.flush()
+        schedule_after_commit(self.session, article.id)
         return {
             "published": True,
             "reason": "editorial_revised",

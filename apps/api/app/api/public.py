@@ -1,6 +1,10 @@
+from uuid import UUID
+
 from fastapi import APIRouter, HTTPException, Query, status
+from fastapi.responses import Response
 
 from app.api.deps import DbSession
+from app.models import ArticleHeroImage
 from app.services.feed_ranking import DEFAULT_LIMIT, FeedRankingService, clamp_limit
 from app.services.search_service import SearchService
 
@@ -11,6 +15,19 @@ def _public_error(exc: ValueError) -> HTTPException:
     detail = str(exc) or "invalid_request"
     code = status.HTTP_400_BAD_REQUEST
     return HTTPException(status_code=code, detail=detail)
+
+
+@router.get("/media/heroes/{article_id}.png")
+def get_hero_image(article_id: UUID, db: DbSession, v: str | None = None) -> Response:
+    del v
+    row = db.get(ArticleHeroImage, article_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagen no encontrada")
+    return Response(
+        content=bytes(row.png_bytes),
+        media_type="image/png",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.get("/articles/{key}")

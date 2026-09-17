@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, Computed, DateTime, Enum, ForeignKey, Index, Integer, String, Text, UniqueConstraint, Uuid, func
+from sqlalchemy import Boolean, Computed, DateTime, Enum, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, Uuid, func
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -112,4 +112,24 @@ class Correction(TimestampMixin, Base):
     reader_case: Mapped["ReaderCase | None"] = relationship(
         back_populates="authored_corrections",
         foreign_keys=[reader_case_id],
+    )
+
+
+class ArticleHeroImage(TimestampMixin, Base):
+    __tablename__ = "article_hero_images"
+
+    article_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("articles.id", ondelete="CASCADE"), primary_key=True
+    )
+    png_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(64), default="image/png", nullable=False)
+    width: Mapped[int] = mapped_column(Integer, default=1200, nullable=False)
+    height: Mapped[int] = mapped_column(Integer, default=630, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=func.now(),
+        nullable=False,
     )
