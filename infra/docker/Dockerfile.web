@@ -8,7 +8,9 @@ RUN npm install
 COPY apps/web ./
 
 ARG API_URL=http://api:8000
+ARG SITE_URL=http://localhost:3000
 ENV API_URL=$API_URL \
+    SITE_URL=$SITE_URL \
     NEXT_TELEMETRY_DISABLED=1
 
 RUN npm run build

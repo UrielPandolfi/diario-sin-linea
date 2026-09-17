@@ -112,3 +112,8 @@ def search(
 @router.get("/localities")
 def localities(db: DbSession) -> dict:
     return FeedRankingService(db).localities()
+
+
+@router.get("/sitemap-articles")
+def sitemap_articles(db: DbSession) -> dict:
+    return FeedRankingService(db).sitemap_articles()

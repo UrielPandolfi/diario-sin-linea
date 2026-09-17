@@ -29,7 +29,7 @@ Routers (`main.py`): `api/health.py`, `api/public.py`, `api/cases.py`, `api/admi
 | Research, claims, verify, write, audit, publish | `services/{research,claim,verification,writing,audit,publish}_service.py` + `pipeline_lock.py` |
 | Decisiones a preservar | `docs/ai/DECISIONS.md` (solo si hay evidencia de intención) |
 | Estado, stubs, hallazgos | `docs/ai/STATE.md` |
-| API pública / feed | `api/public.py`, `services/feed_ranking.py` |
+| API pública / feed | `api/public.py`, `services/feed_ranking.py`; sitemap `GET /api/v1/sitemap-articles`; web `app/sitemap.ts`, `app/robots.ts`, `lib/seo/` |
 | Admin pipeline | `api/admin.py`, `apps/web/app/admin/` (Publicaciones `/admin/publications`, costos en tablero y suceso) |
 | Casos de lectores / contacto | `api/cases.py`, `admin_cases.py`, `services/case_service.py`, `case_rate_limit.py`; UI `/contacto`, `/seguimiento/[token]`, `/admin/cases` |
 | Revisión editorial | `services/editorial_service.py`, `features/admin/editorial-revise-form.tsx` |

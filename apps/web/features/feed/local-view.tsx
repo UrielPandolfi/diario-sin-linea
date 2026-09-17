@@ -8,12 +8,14 @@ import { useEffect, useState } from "react";
 
 export function LocalView() {
   const [locality, setLocality] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     setLocality(readLocalityCookie());
+    setReady(true);
   }, []);
 
-  if (!locality) {
+  if (!ready) {
     return <div className="h-40 animate-pulse bg-surface" />;
   }
 
@@ -22,16 +24,22 @@ export function LocalView() {
       <header className="sticky top-0 z-10 space-y-3 border-b border-border bg-background px-4 py-3 md:px-5">
         <div>
           <p className="font-heading text-xs uppercase tracking-[0.16em] text-accent-ochre">Local</p>
-          <h1 className="font-heading text-lg text-primary">{locality}</h1>
+          <h1 className="font-heading text-lg text-primary">{locality ?? "Local"}</h1>
         </div>
-        <LocalitySelector current={locality} onSaved={setLocality} />
+        <LocalitySelector current={locality ?? ""} onSaved={setLocality} />
       </header>
-      <FeedList
-        kind="local"
-        locality={locality}
-        emptyTitle={`No hay sucesos recientes en ${locality}.`}
-        emptyDescription="Cuando ocurra algo relevante aparecerá acá."
-      />
+      {locality ? (
+        <FeedList
+          kind="local"
+          locality={locality}
+          emptyTitle={`No hay sucesos recientes en ${locality}.`}
+          emptyDescription="Cuando ocurra algo relevante aparecerá acá."
+        />
+      ) : (
+        <p className="px-4 py-8 font-sans text-sm text-secondary md:px-5">
+          Elegí una localidad para ver los sucesos de ese lugar.
+        </p>
+      )}
       <UpcomingFeature compact title="Mapa" description="Explorá qué está pasando alrededor tuyo." />
     </div>
   );

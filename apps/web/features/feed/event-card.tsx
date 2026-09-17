@@ -32,7 +32,7 @@ export function EventCard({ item }: { item: EventCardType }) {
           Actualizado <RelativeTime iso={item.updated_at} />
         </p>
       ) : null}
-      <CardActions share={<ShareButton href={href} />} />
+      <CardActions share={<ShareButton href={href} title={item.headline} text={item.summary} />} />
     </article>
   );
 }

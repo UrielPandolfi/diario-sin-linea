@@ -53,3 +53,12 @@ Solo políticas con evidencia de intención (spec, test que las fija, comentario
 - `unresolved=false` si la política fijó un status (incluida democión Sol→SINGLE_SOURCE). `final_reason` es de código; `llm_reason` es trazabilidad. Test: `test_sol_optimistic_keeps_policy_reason_and_resolved_false`.
 - La tarjeta pública serializa un DTO de presentación (`claim_card_presentation`, leído en `compact_public_claims`) a partir de `status` + `support_basis` + `demotion` + tipos de evidencia. No re-corre `assess_origins`. Histórico o par desparejado: cobertura desconocida, sin inventar conteos. Nunca `llm_reason` al público. `SINGLE_SOURCE` no convive con copy de corroboración independiente plural. Tests: `test_claim_card_presentation.py`, `test_sol_optimistic_keeps_policy_reason_and_resolved_false`.
 - Contrato `editorial-evidence-1` en `pipeline_runs.metadata_json`: par claim_run↔verify_run (`claims_fingerprint` + `based_on_claim_run_id`). Writing, labels y `is_strong_verification` leen ese par, no la última SUCCESS suelta por stage. Corridas históricas sin fingerprint: `unknown`; no CHECKED sobre verify desparejado. Test: `test_new_extract_plus_failed_verify_does_not_reuse_prior_approval`.
+
+## SEO público
+
+- Origen canónico: `SITE_URL` (URL absoluta, sin slash final). No usar `API_URL`, `VERCEL_URL` ni el Host del request cuando `SITE_URL` está definido. Tests: `apps/web/lib/seo/seo.test.ts`.
+- El slug del artículo se asigna al crear el draft y no cambia al actualizar titular/resumen/cuerpo. URL pública: `/noticias/{slug}`. Lookup por `public_id` redirige 308 con `permanentRedirect()`. Test: `test_domain.py` (slug estable).
+- Solo es indexable lo público: `published_at` + `published_version` + no archivado. Drafts y `READY_FOR_REVIEW` sin live no salen por la API pública ni por `GET /api/v1/sitemap-articles`. Tests: `test_public_api.py`, `test_sitemap_articles.py`.
+- `sl_locality` personaliza el feed; no es gate de crawl. `/`, `/en-vivo` y `/buscar` se sirven sin cookie. `/buscar` es `noindex, follow` y no va en `Disallow` de robots.txt.
+- Deploys con `VERCEL_ENV` distinto de `production` reciben `X-Robots-Tag: noindex, nofollow`. Si `VERCEL_ENV` no existe, no se aplica ese escudo.
+- Title y description de una noticia son el titular y el summary editoriales. No hay keywords ni títulos SEO paralelos.

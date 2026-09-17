@@ -8,6 +8,7 @@ import type {
   NearbyResponse,
   NowResponse,
   SearchResponse,
+  SitemapArticlesResponse,
 } from "./types";
 
 export class PublicApiError extends Error {
@@ -101,6 +102,10 @@ export function fetchLocalities(): Promise<LocalitiesResponse> {
 
 export function fetchArticle(key: string): Promise<Article> {
   return publicGet<Article>(`/api/v1/articles/${encodeURIComponent(key)}`);
+}
+
+export function fetchSitemapArticles(): Promise<SitemapArticlesResponse> {
+  return publicGet<SitemapArticlesResponse>("/api/v1/sitemap-articles");
 }
 
 export async function createCase(

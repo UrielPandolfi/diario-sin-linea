@@ -2,6 +2,7 @@ import { UpcomingFeature } from "@/features/upcoming/upcoming-feature";
 
 export const metadata = {
   title: "Notificaciones",
+  robots: { index: false, follow: false },
 };
 
 export default function NotificationsPage() {

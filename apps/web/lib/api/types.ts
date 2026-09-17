@@ -148,4 +148,14 @@ export type LocalitiesResponse = {
   items: string[];
 };
 
+export type SitemapArticle = {
+  slug: string;
+  published_at: string | null;
+  updated_at: string | null;
+};
+
+export type SitemapArticlesResponse = {
+  items: SitemapArticle[];
+};
+
 export type FeedScope = "main" | "local" | "argentina";

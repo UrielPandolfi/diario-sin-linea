@@ -58,27 +58,29 @@ export function ArticleView({ article }: { article: Article }) {
 
   return (
     <article className="mx-auto max-w-[42rem] px-4 py-8 md:px-6">
-      <p className="font-sans text-[11px] uppercase tracking-[0.14em] text-muted">
-        {article.locality}
-        {article.locality && article.published_at ? " · " : null}
-        {article.published_at ? formatDateTime(article.published_at) : null}
-      </p>
-      <h1 className="mt-3 font-heading text-3xl font-medium leading-tight text-primary">{article.headline}</h1>
-      {titleNotices.length > 0 ? (
-        <div className="mt-4 space-y-2 border border-border bg-surface px-3 py-3">
-          {titleNotices.map((notice) => (
-            <NoticeBlock key={`${notice.kind}-${notice.occurred_at}`} notice={notice} />
-          ))}
-        </div>
-      ) : null}
-      {article.summary ? (
-        <p className="mt-4 font-sans text-base leading-relaxed text-secondary">{article.summary}</p>
-      ) : null}
-      {updated ? (
-        <p className="mt-3 font-sans text-xs text-muted">
-          Actualizado <RelativeTime iso={article.updated_at} />
+      <header>
+        <p className="font-sans text-[11px] uppercase tracking-[0.14em] text-muted">
+          {article.locality}
+          {article.locality && article.published_at ? " · " : null}
+          {article.published_at ? <time dateTime={article.published_at}>{formatDateTime(article.published_at)}</time> : null}
         </p>
-      ) : null}
+        <h1 className="mt-3 font-heading text-3xl font-medium leading-tight text-primary">{article.headline}</h1>
+        {titleNotices.length > 0 ? (
+          <div className="mt-4 space-y-2 border border-border bg-surface px-3 py-3">
+            {titleNotices.map((notice) => (
+              <NoticeBlock key={`${notice.kind}-${notice.occurred_at}`} notice={notice} />
+            ))}
+          </div>
+        ) : null}
+        {article.summary ? (
+          <p className="mt-4 font-sans text-base leading-relaxed text-secondary">{article.summary}</p>
+        ) : null}
+        {updated ? (
+          <p className="mt-3 font-sans text-xs text-muted">
+            Actualizado <RelativeTime iso={article.updated_at} />
+          </p>
+        ) : null}
+      </header>
 
       {article.hero_image_url ? (
         <div className="relative mt-6 aspect-[16/9] overflow-hidden bg-surface">
@@ -146,7 +148,7 @@ export function ArticleView({ article }: { article: Article }) {
       </div>
 
       <div className="mt-6">
-        <ShareButton href={href} />
+        <ShareButton href={href} title={article.headline} text={article.summary} />
       </div>
     </article>
   );

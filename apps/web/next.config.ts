@@ -18,6 +18,7 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
+    const noIndex = [{ key: "X-Robots-Tag", value: "noindex, nofollow" }];
     return [
       {
         source: "/seguimiento/:path*",
@@ -27,6 +28,10 @@ const nextConfig: NextConfig = {
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],
       },
+      { source: "/admin", headers: noIndex },
+      { source: "/admin/:path*", headers: noIndex },
+      { source: "/entrar", headers: noIndex },
+      { source: "/onboarding", headers: noIndex },
     ];
   },
 };

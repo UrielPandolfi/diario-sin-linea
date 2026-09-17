@@ -23,7 +23,7 @@ Monolito modular + workers asíncronos:
 cp .env.example .env
 ```
 
-Para el Admin local, `.env.example` ya trae `ADMIN_PASSWORD=dev-admin` y `APP_SECRET=dev-secret-change-me`. Las claves de IA (M3) no hacen falta para levantar el stack ni para el poll manual; sí hacen falta en el **worker** para extraer/vincular sucesos con modelos reales. Compose define `DATABASE_URL` y `REDIS_URL` hacia los servicios internos.
+Para el Admin local, `.env.example` ya trae `ADMIN_PASSWORD=dev-admin` y `APP_SECRET=dev-secret-change-me`. `SITE_URL` es el origen público del frontend (canonical, Open Graph, sitemap); en Compose local queda `http://localhost:3000`. Las claves de IA (M3) no hacen falta para levantar el stack ni para el poll manual; sí hacen falta en el **worker** para extraer/vincular sucesos con modelos reales. Compose define `DATABASE_URL` y `REDIS_URL` hacia los servicios internos.
 
 2. Levantá todo:
 

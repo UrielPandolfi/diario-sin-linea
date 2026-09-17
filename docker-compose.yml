@@ -150,8 +150,10 @@ services:
       dockerfile: infra/docker/Dockerfile.web
       args:
         API_URL: http://api:8000
+        SITE_URL: http://localhost:3000
     environment:
       API_URL: http://api:8000
+      SITE_URL: http://localhost:3000
     ports:
       - "3000:3000"
     depends_on:

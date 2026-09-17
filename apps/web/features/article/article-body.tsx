@@ -48,29 +48,33 @@ export function ArticleBody({
 
   return (
     <div className="mt-6 space-y-4">
-      {bodyBlocks.map((block, blockIndex) => (
-        <div key={blockIndex} className="font-sans text-[17px] leading-[1.65] text-primary">
-          {(block.segments ?? []).map((segment, segmentIndex) => {
-            const key = `${blockIndex}-${segmentIndex}`;
-            const matched = claimsForIds(segment.claim_ids ?? [], claims);
-            if (matched.length === 0) {
-              return <span key={key}>{segment.text}</span>;
-            }
-            return (
-              <ClaimSegment
-                key={key}
-                segmentKey={key}
-                text={segment.text}
-                claims={matched}
-                open={openKey === key}
-                onOpen={() => setOpenKey(key)}
-                onClose={() => setOpenKey((current) => (current === key ? null : current))}
-                onToggle={() => setOpenKey((current) => (current === key ? null : key))}
-              />
-            );
-          })}
-        </div>
-      ))}
+      {bodyBlocks.map((block, blockIndex) => {
+        const hasClaims = (block.segments ?? []).some((segment) => (segment.claim_ids ?? []).length > 0);
+        const Tag = hasClaims ? "div" : "p";
+        return (
+          <Tag key={blockIndex} className="font-sans text-[17px] leading-[1.65] text-primary">
+            {(block.segments ?? []).map((segment, segmentIndex) => {
+              const key = `${blockIndex}-${segmentIndex}`;
+              const matched = claimsForIds(segment.claim_ids ?? [], claims);
+              if (matched.length === 0) {
+                return <span key={key}>{segment.text}</span>;
+              }
+              return (
+                <ClaimSegment
+                  key={key}
+                  segmentKey={key}
+                  text={segment.text}
+                  claims={matched}
+                  open={openKey === key}
+                  onOpen={() => setOpenKey(key)}
+                  onClose={() => setOpenKey((current) => (current === key ? null : current))}
+                  onToggle={() => setOpenKey((current) => (current === key ? null : key))}
+                />
+              );
+            })}
+          </Tag>
+        );
+      })}
     </div>
   );
 }

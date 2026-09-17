@@ -1,12 +1,14 @@
 # Estado
 
-Revisión: 2026-09-16. Portada determinista Fase A (`hero_image_url` post-commit, PNG en Postgres). Admin estadísticas de redacción (solo lectura). Polling automático cerrado (límite 5 / intervalo 300s) con toggle `auto_poll_enabled`. Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente.
+Revisión: 2026-09-17. Punto 7 SEO/OG/compartir validado (638 pytest passed; smoke Compose `:3000`). Portada determinista Fase A (`hero_image_url` post-commit, PNG en Postgres). Admin estadísticas de redacción (solo lectura). Polling automático cerrado (límite 5 / intervalo 300s) con toggle `auto_poll_enabled`. Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
+Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png`, inventario SEO `GET /api/v1/sitemap-articles` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
+
+Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open Graph/Twitter, JSON-LD `NewsArticle`, `sitemap.xml`, `robots.txt`. El middleware ya no exige cookie de localidad para rastrear `/`, `/en-vivo` o `/buscar`. `/admin`, `/entrar` y `/onboarding` van `noindex`. `/buscar` es `noindex, follow`. Preview con `VERCEL_ENV` no production envía `X-Robots-Tag: noindex, nofollow`.
 
 Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService.ensure_in_own_session` genera una plantilla Pillow 1200×630 y la guarda en `article_hero_images`. No entra a claims/writing/audit. `hero_image_url` null sigue siendo válido. Las cards del feed no muestran imagen.
 
@@ -20,7 +22,7 @@ Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `suppor
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`. Frontend: lint/typecheck/build en CI; **no** hay tests unitarios web.
+Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`. Frontend: lint/typecheck/build en CI más `npm test` de helpers SEO (`lib/seo/seo.test.ts`).
 
 ## Hallazgos de cableado (no decisiones)
 

@@ -35,6 +35,7 @@ from app.services.verification_outcome import verification_view_for_event
 PUBLIC_CANDIDATE_CAP = 200
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
+SITEMAP_CAP = 10_000
 
 
 class _StatusOverlay:
@@ -383,6 +384,30 @@ class FeedRankingService:
             names.append(label)
         names.sort(key=lambda value: value.casefold())
         return {"items": names}
+
+    def sitemap_articles(self) -> dict:
+        live = aliased(ArticleVersion)
+        stmt = (
+            select(Article.slug, Article.published_at, Event.last_material_update_at)
+            .join(Event, Event.id == Article.event_id)
+            .join(
+                live,
+                and_(live.article_id == Article.id, live.version_number == Article.published_version),
+            )
+            .where(*public_filters())
+            .order_by(Article.published_at.desc())
+            .limit(SITEMAP_CAP)
+        )
+        items = []
+        for slug, published_at, updated_at in self.session.execute(stmt):
+            items.append(
+                {
+                    "slug": slug,
+                    "published_at": iso(published_at),
+                    "updated_at": iso(updated_at),
+                }
+            )
+        return {"items": items}
 
     def get_article(self, key: str) -> dict | None:
         article = None
