@@ -23,6 +23,7 @@ Backend: además de la suite previa, `test_editorial_evidence`, `test_publicatio
 1. **Link no encola research.** `detect_event` solo llama `research_event` si `created` y hay `event_id`. Vincular o filtrar no reabre research→publish. **Track B:** no verificado ni reparado en A.
 2. **`AUTO_PUBLISH` no se lee** fuera de Settings. El path vivo publica por audit `passed` + no hold.
 3. **`READY_FOR_REVIEW` no se asigna** en servicios.
+4. **`DATABASE_URL` de Railway/Heroku** (`postgres://` o `postgresql://`) SQLAlchemy la trata como psycopg2. El runtime es `psycopg[binary]` v3; `Settings` reescribe a `postgresql+psycopg://`.
 
 ## Track B — no resuelto al cerrar A
 
