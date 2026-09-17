@@ -1,7 +1,25 @@
 from functools import lru_cache
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PSYCOPG2_DEFAULT_PREFIXES = (
+    "postgres://",
+    "postgresql://",
+)
+
+
+def normalize_database_url(url: str) -> str:
+    """Map libpq URLs to SQLAlchemy's psycopg v3 dialect.
+
+    Railway/Heroku expose postgres:// or postgresql://. SQLAlchemy treats those
+    as postgresql+psycopg2, which this project does not install.
+    """
+    stripped = url.strip()
+    for prefix in _PSYCOPG2_DEFAULT_PREFIXES:
+        if stripped.startswith(prefix):
+            return "postgresql+psycopg://" + stripped[len(prefix) :]
+    return stripped
 
 
 class Settings(BaseSettings):
@@ -16,6 +34,14 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://sin_linea:sin_linea@localhost:5432/sin_linea"
     )
+
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def coerce_psycopg3_database_url(cls, value: object) -> object:
+        if isinstance(value, str):
+            return normalize_database_url(value)
+        return value
+
     redis_url: str = "redis://localhost:6379/0"
     app_secret: str = "dev-secret-change-me"
     admin_password: str = "dev-admin"

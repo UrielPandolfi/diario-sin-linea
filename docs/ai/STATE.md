@@ -29,6 +29,7 @@ Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence
 1. **Link nuevo encola claims incremental, no research.** `already_linked` (EventSource ya existente) no reabre pipeline. Track A create sigue encolando research.
 2. **`AUTO_PUBLISH` se lee** en `audit_event_article`. true + passed + no hold → enqueue publish (V1 y V2). false + passed → `READY_FOR_REVIEW`.
 3. **`Event.status` READY_FOR_REVIEW / UPDATING** siguen sin usarse. La candidata se representa con `Event=PUBLISHED` + `Article=READY_FOR_REVIEW`.
+4. **`DATABASE_URL` de Railway/Heroku** (`postgres://` o `postgresql://`) SQLAlchemy la trata como psycopg2. El runtime es `psycopg[binary]` v3; `Settings` reescribe a `postgresql+psycopg://`.
 
 ## Track B — 2026-09-16
 
