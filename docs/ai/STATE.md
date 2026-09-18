@@ -10,7 +10,7 @@ Pipeline Celery: poll → detect → (create: research | link nuevo: claims incr
 
 Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open Graph/Twitter, JSON-LD `NewsArticle`, `sitemap.xml`, `robots.txt`. El middleware ya no exige cookie de localidad para rastrear `/`, `/en-vivo` o `/buscar`. `/admin`, `/entrar` y `/onboarding` van `noindex`. `/buscar` es `noindex, follow`. Preview con `VERCEL_ENV` no production envía `X-Robots-Tag: noindex, nofollow`.
 
-Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService.ensure_in_own_session` genera una plantilla Pillow 1200×630 y la guarda en `article_hero_images`. No entra a claims/writing/audit. `hero_image_url` null sigue siendo válido. Las cards del feed no muestran imagen.
+Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService.ensure_in_own_session` genera una plantilla Pillow 1200×630 y la guarda en `article_hero_images`. No entra a claims/writing/audit. `hero_image_url` null sigue siendo válido. Feed, live, nearby y búsqueda incluyen `hero_image_url` en cada card; el GET público intenta rellenar una portada faltante en sesión propia.
 
 Ingesta RSS (HTML no soportado en `ingestion_service.py`). Beat `poll_monitored_sources` cada `monitored_source_poll_interval_seconds` (default 300) si `auto_poll_enabled` (Admin, default activo); cada poll inspecciona `monitored_source_poll_limit` entradas recientes (default 5) antes de descargar HTML. Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
@@ -22,7 +22,7 @@ Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `suppor
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`. Frontend: lint/typecheck/build en CI más `npm test` de helpers SEO (`lib/seo/seo.test.ts`).
+Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`. Frontend: lint/typecheck/build en CI más `npm test` de helpers SEO (`lib/seo/seo.test.ts`). Cards públicas leen `hero_image_url`.
 
 ## Hallazgos de cableado (no decisiones)
 

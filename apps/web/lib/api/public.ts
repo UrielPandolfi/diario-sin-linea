@@ -23,7 +23,10 @@ export class PublicApiError extends Error {
 
 function apiOrigin(): string {
   if (typeof window === "undefined") {
-    return process.env.API_URL ?? "http://localhost:8000";
+    if (process.env.API_URL) return process.env.API_URL;
+    // On Vercel, never bake localhost into server fetches.
+    if (process.env.VERCEL) return "";
+    return "http://localhost:8000";
   }
   return "";
 }
@@ -44,7 +47,11 @@ function buildUrl(path: string, params?: Record<string, string | number | undefi
 }
 
 export async function publicGet<T>(path: string, params?: Record<string, string | number | undefined>): Promise<T> {
-  const response = await fetch(buildUrl(path, params), { cache: "no-store" });
+  const url = buildUrl(path, params);
+  if (typeof window === "undefined" && url.startsWith("/")) {
+    throw new PublicApiError("api_url_unconfigured", 503);
+  }
+  const response = await fetch(url, { cache: "no-store" });
   if (!response.ok) {
     throw new PublicApiError("request_failed", response.status);
   }
@@ -143,6 +150,9 @@ export async function fetchFollowUp(token: string): Promise<CaseFollowUp> {
   const url = origin
     ? `${origin}/api/v1/cases/follow-up/${encodeURIComponent(token)}`
     : `/api/v1/cases/follow-up/${encodeURIComponent(token)}`;
+  if (typeof window === "undefined" && url.startsWith("/")) {
+    throw new PublicApiError("api_url_unconfigured", 503);
+  }
   const response = await fetch(url, {
     cache: "no-store",
     headers: { "Cache-Control": "no-store" },

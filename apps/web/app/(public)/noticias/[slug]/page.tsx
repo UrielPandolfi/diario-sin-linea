@@ -17,7 +17,7 @@ const loadArticle = cache(async (slug: string): Promise<Article | null> => {
   try {
     return await fetchArticle(slug);
   } catch (error) {
-    if (error instanceof PublicApiError && error.status === 404) return null;
+    if (error instanceof PublicApiError && (error.status === 404 || error.status === 503)) return null;
     throw error;
   }
 });

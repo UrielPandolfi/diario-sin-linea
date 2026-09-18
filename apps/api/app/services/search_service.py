@@ -56,5 +56,5 @@ class SearchService:
         for event, article, live_row in self.session.execute(stmt):
             if wanted and normalize_locality(event.locality) != wanted:
                 continue
-            items.append(card_payload(event, article, live_row))
+            items.append(card_payload(event, article, live_row, session=self.session))
         return {"items": items, "query": q}

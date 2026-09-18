@@ -39,6 +39,30 @@ test("getSiteUrl falls back to localhost when unset", () => {
   assert.equal(getSiteUrl({ SITE_URL: `${ORIGIN}/` }), ORIGIN);
 });
 
+test("getSiteUrl uses VERCEL_URL when SITE_URL is unset", () => {
+  assert.equal(getSiteUrl({ VERCEL_URL: "sin-linea.vercel.app" }), "https://sin-linea.vercel.app");
+  assert.equal(getSiteUrl({ SITE_URL: ORIGIN, VERCEL_URL: "preview.vercel.app" }), ORIGIN);
+});
+
+test("getSiteUrl prefers production domain on Vercel production", () => {
+  assert.equal(
+    getSiteUrl({
+      VERCEL_ENV: "production",
+      VERCEL_PROJECT_PRODUCTION_URL: "sin-linea.vercel.app",
+      VERCEL_URL: "sin-linea-abc123.vercel.app",
+    }),
+    "https://sin-linea.vercel.app",
+  );
+  assert.equal(
+    getSiteUrl({
+      VERCEL_ENV: "preview",
+      VERCEL_PROJECT_PRODUCTION_URL: "sin-linea.vercel.app",
+      VERCEL_URL: "sin-linea-abc123.vercel.app",
+    }),
+    "https://sin-linea-abc123.vercel.app",
+  );
+});
+
 test("isIndexableDeploy treats missing VERCEL_ENV as indexable", () => {
   assert.equal(isIndexableDeploy({}), true);
   assert.equal(isIndexableDeploy({ VERCEL_ENV: "production" }), true);

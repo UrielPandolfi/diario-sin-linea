@@ -30,6 +30,7 @@ from app.services.claim_card_presentation import (
 from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.evidence_snapshot import evidence_snapshot_for_version
+from app.services.hero_image_service import fill_missing_hero
 from app.services.verification_outcome import verification_view_for_event
 
 PUBLIC_CANDIDATE_CAP = 200
@@ -134,7 +135,16 @@ def source_payloads(event: Event) -> list[dict]:
     return rows
 
 
-def card_payload(event: Event, article: Article, live: ArticleVersion, *, score: float | None = None) -> dict:
+def card_payload(
+    event: Event,
+    article: Article,
+    live: ArticleVersion,
+    *,
+    score: float | None = None,
+    session: Session | None = None,
+) -> dict:
+    if session is not None:
+        fill_missing_hero(session, article)
     payload = {
         "slug": article.slug,
         "public_id": str(event.public_id),
@@ -145,6 +155,7 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
         "published_at": iso(article.published_at),
         "updated_at": iso(event.last_material_update_at),
         "sources": source_payloads(event),
+        "hero_image_url": article.hero_image_url,
     }
     if score is not None:
         payload["score"] = score
@@ -259,7 +270,7 @@ def article_payload(event: Event, article: Article, live: ArticleVersion, *, ses
         ).all()
     )
     return {
-        **card_payload(event, article, live),
+        **card_payload(event, article, live, session=session),
         "body": live.body,
         "body_blocks": live.body_blocks,
         "hero_image_url": article.hero_image_url,
@@ -369,7 +380,10 @@ class FeedRankingService:
             if locality_matches(event.locality, wanted) and public_sort_at(event, article) >= cutoff
         ]
         rows.sort(key=lambda row: (public_sort_at(row[0], row[1]), str(row[1].id)), reverse=True)
-        items = [card_payload(event, article, live) for event, article, live in rows[: clamp_limit(limit)]]
+        items = [
+            card_payload(event, article, live, session=self.session)
+            for event, article, live in rows[: clamp_limit(limit)]
+        ]
         return {"items": items}
 
     def localities(self) -> dict:
@@ -510,7 +524,10 @@ class FeedRankingService:
             cursor_id = _decode_id_cursor(cursor)
             start = next((index + 1 for index, row in enumerate(ranked) if row[1].id == cursor_id), len(ranked))
         window = ranked[start : start + limit]
-        items = [card_payload(event, article, live, score=round(score, 6)) for score, article, event, live in window]
+        items = [
+            card_payload(event, article, live, score=round(score, 6), session=self.session)
+            for score, article, event, live in window
+        ]
         next_cursor = str(window[-1][1].id) if len(window) == limit and start + limit < len(ranked) else None
         return items, next_cursor
 
@@ -526,7 +543,7 @@ class FeedRankingService:
             cursor_id = _decode_id_cursor(cursor)
             start = next((index + 1 for index, row in enumerate(rows) if row[1].id == cursor_id), len(rows))
         window = rows[start : start + limit]
-        items = [card_payload(event, article, live) for event, article, live in window]
+        items = [card_payload(event, article, live, session=self.session) for event, article, live in window]
         next_cursor = str(window[-1][1].id) if len(window) == limit and start + limit < len(rows) else None
         return items, next_cursor
 

@@ -191,3 +191,39 @@ def test_public_article_allows_null_hero(db_session: Session, monkeypatch) -> No
         payload = client.get(f"/api/v1/articles/{article.slug}")
     assert payload.status_code == 200
     assert payload.json()["hero_image_url"] is None
+
+
+def test_feed_and_search_cards_include_hero_url(db_session: Session) -> None:
+    _event, article, _result = _publish_and_commit(db_session)
+    assert article.hero_image_url
+    with TestClient(app) as client:
+        feed = client.get("/api/v1/feed")
+        live = client.get("/api/v1/live")
+        search = client.get("/api/v1/search", params={"q": "Pellegrini"})
+    feed_item = next(item for item in feed.json()["items"] if item["slug"] == article.slug)
+    live_item = next(item for item in live.json()["items"] if item["slug"] == article.slug)
+    search_item = next(item for item in search.json()["items"] if item["slug"] == article.slug)
+    assert feed_item["hero_image_url"] == article.hero_image_url
+    assert live_item["hero_image_url"] == article.hero_image_url
+    assert search_item["hero_image_url"] == article.hero_image_url
+
+
+def test_public_get_fills_missing_hero(db_session: Session) -> None:
+    _event, article, _result = _publish_and_commit(db_session)
+    row = db_session.get(ArticleHeroImage, article.id)
+    assert row is not None
+    db_session.delete(row)
+    article.hero_image_url = None
+    db_session.commit()
+    with TestClient(app) as client:
+        payload = client.get(f"/api/v1/articles/{article.slug}")
+        feed = client.get("/api/v1/feed")
+        assert payload.status_code == 200
+        assert payload.json()["hero_image_url"]
+        image = client.get(payload.json()["hero_image_url"])
+    db_session.refresh(article)
+    assert article.hero_image_url == payload.json()["hero_image_url"]
+    feed_item = next(item for item in feed.json()["items"] if item["slug"] == article.slug)
+    assert feed_item["hero_image_url"] == article.hero_image_url
+    assert image.status_code == 200
+    assert image.headers["content-type"].startswith("image/png")

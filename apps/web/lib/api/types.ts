@@ -16,6 +16,7 @@ export type EventCard = {
   updated_at: string | null;
   sources: ArticleSource[];
   score?: number;
+  hero_image_url?: string | null;
 };
 
 export type ArticleBodySegment = {

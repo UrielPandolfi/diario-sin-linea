@@ -39,7 +39,14 @@ export function publicSiteOrigin(input: {
 }
 
 export function getSiteUrl(env: Record<string, string | undefined> = process.env): string {
-  return publicSiteOrigin({ siteUrl: env.SITE_URL });
+  const vercelHost =
+    env.VERCEL_ENV === "production"
+      ? env.VERCEL_PROJECT_PRODUCTION_URL || env.VERCEL_URL
+      : env.VERCEL_URL;
+  return publicSiteOrigin({
+    siteUrl: env.SITE_URL,
+    host: vercelHost,
+  });
 }
 
 export function isIndexableDeploy(env: Record<string, string | undefined> = process.env): boolean {

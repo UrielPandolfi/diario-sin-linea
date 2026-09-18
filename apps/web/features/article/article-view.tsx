@@ -1,13 +1,13 @@
 "use client";
 
 import { ArticleBody } from "@/features/article/article-body";
+import { PublicHero } from "@/features/article/public-hero";
 import { ShareButton } from "@/features/article/share-button";
 import { CaseForm } from "@/features/cases/case-form";
 import { SourceList } from "@/features/feed/source-list";
 import { RelativeTime } from "@/components/relative-time";
 import type { Article, ArticleHistoryItem, ArticleNotice } from "@/lib/api/types";
 import { formatDateTime, isMateriallyUpdated } from "@/lib/relative-time";
-import Image from "next/image";
 import { useState } from "react";
 
 function formatNoticeStamp(iso: string | null): string {
@@ -83,17 +83,12 @@ export function ArticleView({ article }: { article: Article }) {
       </header>
 
       {article.hero_image_url ? (
-        <div className="relative mt-6 aspect-[16/9] overflow-hidden bg-surface">
-          <Image
-            src={article.hero_image_url}
-            alt=""
-            fill
-            className="object-cover"
-            sizes="(min-width: 768px) 672px, 100vw"
-            priority
-            unoptimized
-          />
-        </div>
+        <PublicHero
+          src={article.hero_image_url}
+          className="mt-6"
+          sizes="(min-width: 768px) 672px, 100vw"
+          priority
+        />
       ) : null}
 
       <ArticleBody body={article.body} bodyBlocks={article.body_blocks} claims={article.claims} />

@@ -57,6 +57,15 @@ def ensure_in_own_session(article_id: UUID) -> None:
         session.close()
 
 
+def fill_missing_hero(session: Session, article: Article) -> None:
+    if article.hero_image_url:
+        return
+    if article.status != ArticleStatus.PUBLISHED or article.published_version is None:
+        return
+    ensure_in_own_session(article.id)
+    session.refresh(article)
+
+
 class HeroImageService:
     def __init__(self, session: Session, renderer: TemplateHeroRenderer | None = None) -> None:
         self.session = session

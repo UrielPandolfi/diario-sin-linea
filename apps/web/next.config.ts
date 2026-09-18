@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const apiUrl = process.env.API_URL ?? "http://localhost:8000";
+const apiUrl = process.env.API_URL ?? (process.env.VERCEL ? "" : "http://localhost:8000");
 
 const nextConfig: NextConfig = {
   images: {
@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
+    if (!apiUrl) return [];
     return [
       {
         source: "/api/v1/:path*",
