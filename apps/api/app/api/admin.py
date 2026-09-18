@@ -20,6 +20,9 @@ from app.repositories import (
     SourceItemRepository,
     SourceRepository,
 )
+from app.services.app_settings import AppSettingsService
+from app.services.editorial_analytics import WINDOWS, EditorialAnalyticsService
+from app.services.claim_card_presentation import presentation_for_claim, public_presentation_payload
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.verification_outcome import verification_view_for_event
 from app.services.cost_service import aggregate_usage_costs, event_direct_cost
@@ -33,6 +36,7 @@ from app.services.publication_outcome import (
     writing_no_material_change,
 )
 from app.schemas import SourceCreate, SourceUpdate
+from app.services.hero_image_service import ensure_in_own_session
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
 from app.services.pipeline_lock import is_write_audit_publish_busy
@@ -59,6 +63,10 @@ class PublishBody(BaseModel):
     override_editorial_hold: bool = False
     target_version: int | None = None
     base_published_version: int | None = None
+
+
+class IngestionSettingsPatch(BaseModel):
+    auto_poll_enabled: bool
 
 
 class SourceWrite(BaseModel):
@@ -144,7 +152,7 @@ def _open_failure_out(run) -> dict:
     }
 
 
-def _claim_out(claim, editorial=None) -> dict:
+def _claim_out(claim, editorial=None, presentation=None) -> dict:
     payload = {
         "id": str(claim.id),
         "canonical_text": claim.canonical_text,
@@ -161,13 +169,22 @@ def _claim_out(claim, editorial=None) -> dict:
         ],
     }
     payload.update(editorial_public_payload(editorial))
+    if presentation is not None:
+        payload["presentation"] = presentation
     return payload
 
 
 def _claims_out(event, db) -> list[dict]:
     _run, view = verification_view_for_event(db, event.id)
     editorials = labels_for_event_claims(list(event.claims), view)
-    return [_claim_out(claim, editorials.get(str(claim.id))) for claim in event.claims]
+    return [
+        _claim_out(
+            claim,
+            editorials.get(str(claim.id)),
+            public_presentation_payload(presentation_for_claim(claim, view)),
+        )
+        for claim in event.claims
+    ]
 
 
 def _article_out(article) -> dict:
@@ -209,7 +226,13 @@ def _write_audit_publish_running(db, event_id: UUID) -> bool:
     return is_write_audit_publish_busy(PipelineRunRepository(db), event_id)
 
 
-def _event_out(event, *, pipeline_stage: str | None = None, pipeline_run_status: str | None = None, tokens_total: int = 0) -> dict:
+def _event_out(
+    event,
+    *,
+    pipeline_stage: str | None = None,
+    pipeline_run_status: str | None = None,
+    tokens_total: int | None = None,
+) -> dict:
     return {
         "id": str(event.id),
         "title_internal": event.title_internal,
@@ -224,6 +247,12 @@ def _event_out(event, *, pipeline_stage: str | None = None, pipeline_run_status:
         "pipeline_run_status": pipeline_run_status,
         "tokens_total": tokens_total,
     }
+
+
+def _header_tokens(*, calls: int, total_tokens: int) -> int | None:
+    if calls <= 0:
+        return None
+    return total_tokens
 
 
 @router.post("/login")
@@ -279,7 +308,25 @@ def stats(db: DbSession) -> dict:
         "sources_added_24h": EventRepository(db).count_links_added_since(since),
         "no_material_change_24h": sum(1 for run in writing_runs if writing_no_material_change(run)),
         "costs_24h": aggregate_usage_costs(db, since=since),
+        "auto_poll_enabled": AppSettingsService(db).is_auto_poll_enabled(),
     }
+
+
+@router.get("/analytics", dependencies=[Depends(require_admin)])
+def editorial_analytics(db: DbSession, window: str = Query(default="all")) -> dict:
+    chosen = window if window in WINDOWS else "all"
+    return EditorialAnalyticsService(db).snapshot(window=chosen)
+
+
+@router.get("/ingestion", dependencies=[Depends(require_admin)])
+def get_ingestion_settings(db: DbSession) -> dict:
+    return AppSettingsService(db).ingestion_payload()
+
+
+@router.patch("/ingestion", dependencies=[Depends(require_admin_origin)])
+def patch_ingestion_settings(payload: IngestionSettingsPatch, db: DbSession) -> dict:
+    AppSettingsService(db).set_auto_poll_enabled(payload.auto_poll_enabled)
+    return AppSettingsService(db).ingestion_payload()
 
 
 @router.get("/sources", dependencies=[Depends(require_admin)])
@@ -482,7 +529,12 @@ def list_events(db: DbSession, limit: int = 50) -> list[dict]:
             pipeline_run_status=(
                 latest_runs[event.id].status.value if event.id in latest_runs else None
             ),
-            tokens_total=token_totals.get(event.id, 0),
+            tokens_total=_header_tokens(
+                calls=token_totals[event.id]["calls"],
+                total_tokens=token_totals[event.id]["total_tokens"],
+            )
+            if event.id in token_totals
+            else None,
         )
         for event in events
     ]
@@ -517,7 +569,10 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             event,
             pipeline_stage=latest.stage if latest else None,
             pipeline_run_status=latest.status.value if latest else None,
-            tokens_total=token_totals["total_tokens"],
+            tokens_total=_header_tokens(
+                calls=token_totals["calls"],
+                total_tokens=token_totals["total_tokens"],
+            ),
         ),
         "country_code": event.country_code,
         "neighborhood": event.neighborhood,
@@ -665,6 +720,7 @@ def enqueue_publish(
         return result
     inspection = PublishService(db).inspect_publish(event_id)
     if inspection["reason"] == "already_published":
+        ensure_in_own_session(article.id)
         return {"published": True, "reason": "already_published", "event_id": str(event_id)}
     if inspection["reason"] != "ready":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=inspection["reason"])

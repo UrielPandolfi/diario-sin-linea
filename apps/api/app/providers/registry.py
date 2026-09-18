@@ -67,7 +67,10 @@ def _structured_role_config(role: ModelRole) -> tuple[str | None, str | None]:
     }
     if role not in mapping:
         raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
-    return mapping[role]
+    provider_name, model = mapping[role]
+    if role == ModelRole.AMBIGUOUS_DEDUP and (not provider_name or not model):
+        return settings.claim_resolution_provider, settings.claim_resolution_model
+    return provider_name, model
 
 
 def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:

@@ -93,7 +93,8 @@ export default function AdminSourcesPage() {
         </p>
         <h1 className="mt-2 font-heading text-3xl font-medium text-primary">RSS vigilado</h1>
         <p className="mt-2 font-sans text-secondary">
-          Alta RSS, marcar vigilada y poll manual. Beat repite el poll cada 900 s por defecto.
+          Alta RSS, marcar vigilada y poll manual. El procesamiento automático se corta con el
+          interruptor de la barra; el poll de cada fuente sigue andando aunque esté pausado.
         </p>
       </div>
 

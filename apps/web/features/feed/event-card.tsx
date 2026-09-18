@@ -1,6 +1,7 @@
 "use client";
 
 import { ShareButton } from "@/features/article/share-button";
+import { PublicHero } from "@/features/article/public-hero";
 import { CardActions, SourceList } from "@/features/feed/source-list";
 import { RelativeTime } from "@/components/relative-time";
 import type { EventCard as EventCardType } from "@/lib/api/types";
@@ -18,6 +19,14 @@ export function EventCard({ item }: { item: EventCardType }) {
         {item.locality && item.published_at ? <span> · </span> : null}
         <RelativeTime iso={item.published_at} />
       </p>
+      {item.hero_image_url ? (
+        <PublicHero
+          src={item.hero_image_url}
+          href={href}
+          className="mt-3"
+          sizes="(min-width: 768px) 672px, 100vw"
+        />
+      ) : null}
       <h2 className="mt-1.5 font-heading text-lg font-medium leading-snug text-primary">
         <Link href={href} className="text-primary hover:text-accent-blue">
           {item.headline}
@@ -32,7 +41,7 @@ export function EventCard({ item }: { item: EventCardType }) {
           Actualizado <RelativeTime iso={item.updated_at} />
         </p>
       ) : null}
-      <CardActions share={<ShareButton href={href} />} />
+      <CardActions share={<ShareButton href={href} title={item.headline} text={item.summary} />} />
     </article>
   );
 }

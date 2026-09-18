@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Tu localidad",
+  robots: { index: false, follow: false },
 };
 
 export default function OnboardingLayout({ children }: { children: ReactNode }) {

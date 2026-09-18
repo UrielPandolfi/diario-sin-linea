@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 export const metadata: Metadata = {
   title: "Contacto",
   description: "Consultas generales a Sin Línea, sin crear una cuenta.",
+  alternates: { canonical: "/contacto" },
 };
 
 export default function ContactoPage() {

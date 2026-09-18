@@ -9,6 +9,7 @@ from app.core.config import get_settings
 from app.core.text import content_fingerprint
 from app.domain.enums import IngestionMethod, SourceItemStatus
 from app.schemas import SourceCreate
+from app.services.app_settings import AppSettingsService
 from app.services.fetching import FetchResult
 from app.services.ingestion_service import IngestionService
 from app.services.source_service import SourceService
@@ -65,6 +66,43 @@ def _service(session: Session, fetcher: FakeFetcher, queued: list[UUID], extract
         extract=extract or (lambda html, url: EXTRACTED),
         enqueue_detection=queued.append,
     )
+
+
+def _rss_feed(count: int, *, dated: bool = False) -> str:
+    items: list[str] = []
+    for index in range(1, count + 1):
+        pub = f"<pubDate>Wed, 16 Sep 2026 {index:02d}:00:00 GMT</pubDate>" if dated else ""
+        items.append(
+            f"""    <item>
+      <title>Nota {index}</title>
+      <link>https://www.ejemplo.test/nota-{index}</link>
+      <guid>guid-nota-{index}</guid>
+      <description>Resumen {index}.</description>
+      {pub}
+    </item>"""
+        )
+    joined = "\n".join(items)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        "<rss version=\"2.0\"><channel>\n"
+        "<title>Fuente de prueba</title>\n"
+        f"{joined}\n"
+        "</channel></rss>\n"
+    )
+
+
+def _feed_pages(xml: str, count: int) -> dict[str, FetchResult]:
+    pages = {
+        FEED_URL: FetchResult(url=FEED_URL, body=xml, content_type="application/rss+xml"),
+    }
+    for index in range(1, count + 1):
+        url = f"https://www.ejemplo.test/nota-{index}"
+        pages[url] = FetchResult(url=url, body=ARTICLE_HTML, content_type="text/html")
+    return pages
+
+
+def _article_calls(fetcher: FakeFetcher) -> list[str]:
+    return [url for url in fetcher.calls if url != FEED_URL]
 
 
 def test_rss_poll_creates_item_with_content_hash(db_session: Session) -> None:
@@ -297,3 +335,187 @@ def test_poll_source_task_caps_detection_enqueue(monkeypatch) -> None:
     assert events[2:] == [f"enqueue:{item_a}"]
     assert result["detection_queued"] == 1
     assert result["item_ids"] == [str(item_a), str(item_b), str(item_c)]
+
+
+def test_poll_limit_caps_candidates_before_article_fetch(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "monitored_source_poll_limit", 5)
+    source = _source(db_session)
+    queued: list[UUID] = []
+    fetcher = FakeFetcher(_feed_pages(_rss_feed(15), 15))
+    result = _service(db_session, fetcher, queued).poll_source(source.id)
+
+    assert result.skipped is False
+    assert result.seen == 5
+    assert result.created == 5
+    assert len(queued) == 5
+    assert _article_calls(fetcher) == [
+        f"https://www.ejemplo.test/nota-{index}" for index in range(1, 6)
+    ]
+    count = db_session.execute(text("SELECT count(*) FROM source_items")).scalar_one()
+    assert count == 5
+
+
+def test_capped_poll_is_idempotent(db_session: Session, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(get_settings(), "monitored_source_poll_limit", 5)
+    source = _source(db_session)
+    queued: list[UUID] = []
+    fetcher = FakeFetcher(_feed_pages(_rss_feed(15), 15))
+    service = _service(db_session, fetcher, queued)
+
+    first = service.poll_source(source.id)
+    second = service.poll_source(source.id)
+
+    assert first.created == 5
+    assert second.created == 0
+    assert second.updated == 0
+    assert second.seen == 5
+    assert len(queued) == 5
+    count = db_session.execute(text("SELECT count(*) FROM source_items")).scalar_one()
+    assert count == 5
+
+
+def test_dated_feed_selects_newest_entries(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(get_settings(), "monitored_source_poll_limit", 5)
+    source = _source(db_session)
+    queued: list[UUID] = []
+    fetcher = FakeFetcher(_feed_pages(_rss_feed(15, dated=True), 15))
+    result = _service(db_session, fetcher, queued).poll_source(source.id)
+
+    assert result.created == 5
+    titles = set(
+        db_session.execute(text("SELECT title FROM source_items")).scalars().all()
+    )
+    assert titles == {f"Nota {index}" for index in range(11, 16)}
+    assert _article_calls(fetcher) == [
+        f"https://www.ejemplo.test/nota-{index}" for index in range(15, 10, -1)
+    ]
+
+
+def test_disabled_source_is_not_polled(db_session: Session) -> None:
+    source = _source(db_session, is_enabled=False)
+    fetcher = FakeFetcher({})
+    service = IngestionService(db_session, fetcher=fetcher, extract=lambda html, url: "no")
+
+    result = service.poll_source(source.id)
+
+    assert result.skipped is True
+    assert result.reason == "not_pollable"
+    assert fetcher.calls == []
+    assert db_session.execute(text("SELECT count(*) FROM source_items")).scalar_one() == 0
+
+
+def test_poll_monitored_isolates_source_failures(db_session: Session) -> None:
+    good = _source(db_session, name="Buena", domain="bueno.test")
+    bad = _source(
+        db_session,
+        name="Rota",
+        domain="roto.test",
+        feed_url="https://www.roto.test/rss.xml",
+    )
+    queued: list[UUID] = []
+    fetcher = FakeFetcher(
+        {
+            FEED_URL: FetchResult(url=FEED_URL, body=RSS_XML, content_type="application/rss+xml"),
+            ARTICLE_URL: FetchResult(url=ARTICLE_URL, body=ARTICLE_HTML, content_type="text/html"),
+        }
+    )
+
+    results = _service(db_session, fetcher, queued).poll_monitored()
+    by_id = dict(results)
+
+    assert by_id[good.id].created == 1
+    assert isinstance(by_id[bad.id], Exception)
+    assert len(queued) == 1
+    assert good.last_success_at is not None
+    assert good.failure_count == 0
+    assert bad.last_failure_at is not None
+    assert bad.failure_count == 1
+    assert db_session.execute(text("SELECT count(*) FROM source_items")).scalar_one() == 1
+
+
+def test_poll_monitored_sources_enqueues_only_pollable(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    watched = _source(db_session, name="Vigilada", domain="vigilada.test")
+    extra = _source(db_session, name="Otra vigilada", domain="otra.test", feed_url="https://otra.test/rss.xml")
+    _source(db_session, name="No vigilada", domain="novig.test", is_monitored=False)
+    _source(db_session, name="Apagada", domain="apagada.test", is_enabled=False)
+    db_session.flush()
+
+    class _KeepOpen:
+        def close(self) -> None:
+            return None
+
+        def __getattr__(self, name: str):
+            return getattr(db_session, name)
+
+    delayed: list[str] = []
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", lambda: _KeepOpen())
+    monkeypatch.setattr(
+        "app.workers.tasks.poll_source.delay",
+        lambda source_id: delayed.append(source_id),
+    )
+    from app.workers.tasks import poll_monitored_sources
+
+    result = poll_monitored_sources.run()
+    assert result == {"queued": 2}
+    assert set(delayed) == {str(watched.id), str(extra.id)}
+
+
+def test_poll_monitored_sources_skips_when_auto_poll_disabled(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _source(db_session, name="Vigilada", domain="vigilada.test")
+    AppSettingsService(db_session).set_auto_poll_enabled(False)
+    db_session.flush()
+
+    class _KeepOpen:
+        def close(self) -> None:
+            return None
+
+        def __getattr__(self, name: str):
+            return getattr(db_session, name)
+
+    delayed: list[str] = []
+    monkeypatch.setattr("app.workers.tasks.SessionLocal", lambda: _KeepOpen())
+    monkeypatch.setattr(
+        "app.workers.tasks.poll_source.delay",
+        lambda source_id: delayed.append(source_id),
+    )
+    from app.workers.tasks import poll_monitored_sources
+
+    result = poll_monitored_sources.run()
+    assert result == {"queued": 0, "skipped": True, "reason": "auto_poll_disabled"}
+    assert delayed == []
+
+
+def test_manual_poll_still_runs_when_auto_poll_disabled(db_session: Session) -> None:
+    AppSettingsService(db_session).set_auto_poll_enabled(False)
+    source = _source(db_session)
+    queued: list[UUID] = []
+    fetcher = FakeFetcher(
+        {
+            FEED_URL: FetchResult(url=FEED_URL, body=RSS_XML, content_type="application/rss+xml"),
+            ARTICLE_URL: FetchResult(url=ARTICLE_URL, body=ARTICLE_HTML, content_type="text/html"),
+        }
+    )
+    result = _service(db_session, fetcher, queued).poll_source(source.id)
+
+    assert result.created == 1
+    assert len(queued) == 1
+
+
+def test_beat_schedule_registers_poll_monitored_sources() -> None:
+    from datetime import timedelta
+
+    from app.workers.celery_app import celery_app
+
+    entry = celery_app.conf.beat_schedule["poll-monitored-sources"]
+    assert entry["task"] == "app.workers.tasks.poll_monitored_sources"
+    assert entry["schedule"] == timedelta(
+        seconds=get_settings().monitored_source_poll_interval_seconds
+    )

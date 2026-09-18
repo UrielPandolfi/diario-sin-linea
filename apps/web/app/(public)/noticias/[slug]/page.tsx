@@ -1,48 +1,47 @@
 import { ArticleView } from "@/features/article/article-view";
 import { fetchArticle, PublicApiError } from "@/lib/api/public";
+import type { Article } from "@/lib/api/types";
+import { breadcrumbJsonLd, newsArticleJsonLd } from "@/lib/seo/json-ld";
+import { JsonLd } from "@/lib/seo/json-ld-script";
+import { buildArticleMetadata, notFoundArticleMetadata } from "@/lib/seo/metadata";
+import { getSiteUrl } from "@/lib/seo/site-url";
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { notFound, permanentRedirect } from "next/navigation";
+import { cache } from "react";
 
 export const dynamic = "force-dynamic";
 
 type Params = { slug: string };
 
-async function loadArticle(slug: string) {
+const loadArticle = cache(async (slug: string): Promise<Article | null> => {
   try {
     return await fetchArticle(slug);
   } catch (error) {
-    if (error instanceof PublicApiError && error.status === 404) return null;
+    if (error instanceof PublicApiError && (error.status === 404 || error.status === 503)) return null;
     throw error;
   }
-}
+});
 
 export async function generateMetadata({ params }: { params: Promise<Params> }): Promise<Metadata> {
   const { slug } = await params;
   const article = await loadArticle(slug);
-  if (!article) {
-    return { title: "Noticia no encontrada" };
-  }
-  return {
-    title: article.headline,
-    description: article.summary,
-    alternates: { canonical: `/noticias/${article.slug}` },
-    openGraph: {
-      title: article.headline,
-      description: article.summary,
-      type: "article",
-      url: `/noticias/${article.slug}`,
-      images: article.hero_image_url ? [{ url: article.hero_image_url }] : undefined,
-    },
-  };
+  if (!article) return notFoundArticleMetadata();
+  return buildArticleMetadata(article, getSiteUrl());
 }
 
 export default async function ArticlePage({ params }: { params: Promise<Params> }) {
   const { slug } = await params;
   const article = await loadArticle(slug);
   if (!article) notFound();
+  if (slug !== article.slug) {
+    permanentRedirect(`/noticias/${article.slug}`);
+  }
 
+  const origin = getSiteUrl();
   return (
     <div className="min-h-screen border-x border-border">
+      <JsonLd data={newsArticleJsonLd(article, origin)} />
+      <JsonLd data={breadcrumbJsonLd(article, origin)} />
       <ArticleView article={article} />
     </div>
   );

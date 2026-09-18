@@ -2,9 +2,10 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+import httpx
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
 from tests.origin import ADMIN_ORIGIN
@@ -18,7 +19,7 @@ from app.domain.enums import (
     PipelineStatus,
 )
 from app.main import app
-from app.models import Claim, ClaimEvidence, EventSource, PipelineRun, SourceItem
+from app.models import Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import SearchHit
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM, RecordingFetcher
 from app.schemas import EventCreate, SourceCreate, SourceItemCreate
@@ -35,6 +36,7 @@ from app.schemas.verification import (
 )
 from app.services.claim_service import CLAIM_STAGE
 from app.services.event_service import EventService
+from app.services.feed_ranking import source_payloads
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_policy import canonicalize_claim_type, select_claims
@@ -203,7 +205,7 @@ def test_policy_selects_declaration_hard_types_and_aliases() -> None:
 
 def test_policy_m5_flag_selects_unless_vetoed() -> None:
     flagged = _ns(claim_type="hecho", importance=ClaimImportance.MEDIUM, status=ClaimStatus.UNCERTAIN)
-    vetoed = _ns(claim_type="hecho", importance=ClaimImportance.LOW, status=ClaimStatus.SINGLE_SOURCE)
+    vetoed = _ns(claim_type="hecho", importance=ClaimImportance.LOW, status=ClaimStatus.OUTDATED)
     selected, skipped = select_claims(
         [flagged, vetoed],
         flagged_ids={flagged.id, vetoed.id},
@@ -304,6 +306,114 @@ def test_declaration_runs_claim_queries_not_event_research(db_session: Session) 
         )
     ).all()
     assert all(link.relation_type == EventSourceRelation.ADDITIONAL for link in extra)
+
+
+def test_off_topic_search_hits_stay_candidates_not_event_sources(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://prensa.rionorte.test/anuncio",
+        title="Anuncio",
+        body="Pérez afirmó que el costo será de 40.000 millones.",
+        content_hash="h1",
+    )
+    event = _event(db_session, item, title_internal="Pérez anuncia baja impositiva", event_type="anuncio")
+    claim = _claim(
+        db_session,
+        event,
+        text="Pérez afirmó que el costo será de 40.000 millones",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        normalized_value="40000",
+        unit="pesos",
+    )
+    useful = "https://hacienda.rionorte.test/proyecto"
+    mexico = "https://mexico.test/subsidio-47300"
+    rionegro = "https://rionegro.test/ingresos-brutos"
+    useful_page = "<article><p>Pérez afirmó que el costo será de 40.000 millones anuales.</p></article>"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="Pérez afirmó que el costo será de 40.000 millones anuales.",
+                        confidence=0.9,
+                        reason="repite la declaración",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=2,
+                        relation=EvidenceJudgementType.MENTIONS,
+                        excerpt="47 mil millones de pesos por subsidios",
+                        confidence=0.4,
+                        reason="mismo tema fiscal, otro país",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=3,
+                        relation=EvidenceJudgementType.DOES_NOT_ESTABLISH,
+                        excerpt=None,
+                        confidence=0.3,
+                        reason="otra provincia y otro proyecto",
+                    ),
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    search = FakeSearchProvider(
+        [
+            SearchHit(
+                title="Hacienda publica el proyecto",
+                url=useful,
+                snippet="Pérez afirmó que el costo será de 40.000 millones anuales.",
+            ),
+            SearchHit(
+                title="Subsidios a combustibles",
+                url=mexico,
+                snippet="Dejan de ingresar 47 mil millones de pesos por subsidios a combustibles",
+            ),
+            SearchHit(
+                title="Alivio de Ingresos Brutos",
+                url=rionegro,
+                snippet="Proponen reducir Ingresos Brutos en Río Negro",
+            ),
+        ]
+    )
+    fetcher = RecordingFetcher(
+        {
+            useful: useful_page,
+            mexico: "<article><p>Dejan de ingresar 47 mil millones de pesos por subsidios a combustibles</p></article>",
+            rionegro: "<article><p>Proponen reducir Ingresos Brutos en Río Negro</p></article>",
+        }
+    )
+    result = _service(
+        db_session, FakeStructuredLLM(), search, fetcher, assessor=assessor
+    ).verify(event.id, trigger="admin")
+    packet_urls = {row["url"] for row in result["packets"][str(claim.id)]}
+    assert useful in packet_urls
+    assert mexico in packet_urls
+    assert rionegro in packet_urls
+    linked = {
+        link.source_item.url
+        for link in db_session.scalars(select(EventSource).where(EventSource.event_id == event.id))
+        if link.source_item is not None
+    }
+    assert item.url in linked
+    assert useful in linked
+    assert mexico not in linked
+    assert rionegro not in linked
+    extra = db_session.scalars(
+        select(EventSource).where(
+            EventSource.event_id == event.id,
+            EventSource.source_item_id != item.id,
+        )
+    ).all()
+    assert len(extra) == 1
+    assert extra[0].relation_type == EventSourceRelation.ADDITIONAL
+    assert extra[0].source_item.url == useful
 
 
 def test_conflicting_unresolved_keeps_status_and_value(db_session: Session) -> None:
@@ -690,7 +800,11 @@ def test_official_site_query_falls_back_to_general_search(db_session: Session) -
     )
     general_url = "https://diario.test/nota"
     hits_by_query: dict[str, list[SearchHit]] = {}
-    search = FakeSearchProvider(hits_by_query)
+    class DirectedFakeSearch(FakeSearchProvider):
+        def search(self, query):
+            self.queries.append(query)
+            return [] if query.include_domains else hits_by_query.get(query.text, [])
+    search = DirectedFakeSearch()
     llm = FakeStructuredLLM(
         {"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True, reason="sin primaria")}
     )
@@ -706,8 +820,8 @@ def test_official_site_query_falls_back_to_general_search(db_session: Session) -
         else:
             hits_by_query[query] = [SearchHit(title="Nota", url=general_url, snippet="mencionan la designación")]
     result = _service(db_session, llm, search).verify(event.id, trigger="admin")
-    assert any("site:boletinoficial.gob.ar" in query.text for query in search.queries)
-    assert any("site:" not in query.text for query in search.queries)
+    assert any("boletinoficial.gob.ar" in (query.include_domains or []) for query in search.queries)
+    assert any(not query.include_domains for query in search.queries)
     assert result["queries"][str(claim.id)]
     assert any("site:" not in query for query in result["queries"][str(claim.id)])
 
@@ -884,7 +998,7 @@ def test_sol_cannot_mark_supported_without_required_primary(db_session: Session)
     assert claim.status != ClaimStatus.SUPPORTED
 
 
-def test_strong_verification_disproves_incompatible_sibling(db_session: Session) -> None:
+def test_strong_verification_does_not_disprove_sibling_without_its_own_comparison(db_session: Session) -> None:
     source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
     source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
     item_a = _item(
@@ -937,7 +1051,7 @@ def test_strong_verification_disproves_incompatible_sibling(db_session: Session)
     service = VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))
     service._reconcile_verified_competitors([loser, winner], payload)
     assert winner.status == ClaimStatus.SUPPORTED
-    assert loser.status == ClaimStatus.DISPROVEN
+    assert loser.status == ClaimStatus.CONFLICTING
 
 
 def test_strong_verification_does_not_disprove_temporal_update(db_session: Session) -> None:
@@ -1118,3 +1232,155 @@ def test_attach_upgrades_existing_mentions_to_supports(db_session: Session) -> N
     db_session.flush()
     db_session.refresh(row)
     assert row.evidence_type == EvidenceType.SUPPORTS
+
+
+class _BoomSearch:
+    def __init__(self) -> None:
+        self.queries = []
+
+    def search(self, query):
+        self.queries.append(query)
+        request = httpx.Request("POST", "https://api.exa.ai/search")
+        response = httpx.Response(503, request=request)
+        raise httpx.HTTPStatusError("503", request=request, response=response)
+
+
+def test_search_503_does_not_block_or_invent_support(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/costo",
+        title="Anuncio",
+        body="Pérez afirmó que el costo será de 40.000 millones.",
+        content_hash="v503",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Juan Pérez afirmó que el costo será de 40.000 millones.",
+        claim_type="cifra",
+        importance=ClaimImportance.MEDIUM,
+        status=ClaimStatus.SINGLE_SOURCE,
+        normalized_value="40000",
+        unit="millones de pesos",
+    )
+    _evidence(db_session, claim, item, excerpt="Pérez afirmó que el costo será de 40.000 millones.")
+    llm = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SINGLE_SOURCE)})
+    search = _BoomSearch()
+    result = _service(db_session, llm, search).verify(event.id, trigger="test")
+    db_session.refresh(claim)
+    assert "error" not in result
+    assert result.get("search_unavailable") is True
+    assert search.queries
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    assert claim.status != ClaimStatus.SUPPORTED
+
+
+def test_other_jurisdiction_generic_overlap_is_evidence_not_public_source(db_session: Session) -> None:
+    source = _source(db_session, domain="educacion.rionorte.test", feed_url="https://educacion.rionorte.test/rss.xml")
+    item = _item(
+        db_session,
+        source.id,
+        url="https://educacion.rionorte.test/calendario",
+        title="Aguilar anuncia el 2 de marzo",
+        body="La ministra de Educación de Río Norte, Marta Aguilar, anunció que el ciclo lectivo comenzará el 2 de marzo.",
+        content_hash="c1",
+    )
+    event = _event(
+        db_session,
+        item,
+        title_internal="La ministra de Educación de Río Norte, Marta Aguilar, anunció que el ciclo lectivo comenzará el 2 de marzo",
+        event_type="anuncio_oficial",
+        province="Río Norte",
+        locality=None,
+        short_summary="Aguilar anunció el inicio del ciclo lectivo el 2 de marzo.",
+    )
+    claim = _claim(
+        db_session,
+        event,
+        text="El ciclo lectivo comenzará el 2 de marzo.",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        normalized_value="2",
+        unit="marzo",
+    )
+    related = "https://calendario.rionorte.test/oficial"
+    other = "https://www.rionegro.com.ar/ciclo-lectivo-2026"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="El Ministerio de Educación de Río Norte publicó el calendario y confirmó el 2 de marzo.",
+                        confidence=0.9,
+                        reason="misma jurisdicción y el mismo anuncio",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=2,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.",
+                        confidence=0.8,
+                        reason="misma fecha genérica",
+                    ),
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    search = FakeSearchProvider(
+        [
+            SearchHit(
+                title="Educación de Río Norte confirma el 2 de marzo",
+                url=related,
+                snippet="El Ministerio de Educación de Río Norte publicó el calendario y confirmó el 2 de marzo.",
+            ),
+            SearchHit(
+                title="Río Negro puso en marcha el ciclo lectivo 2026",
+                url=other,
+                snippet="Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.",
+            ),
+        ]
+    )
+    fetcher = RecordingFetcher(
+        {
+            related: "<article><p>El Ministerio de Educación de Río Norte publicó el calendario y confirmó el 2 de marzo.</p></article>",
+            other: "<article><p>Este lunes 2 de marzo comenzó el ciclo lectivo 2026 en Río Negro.</p></article>",
+        }
+    )
+    _service(db_session, FakeStructuredLLM(), search, fetcher, assessor=assessor).verify(
+        event.id, trigger="admin"
+    )
+    evidence_urls = {
+        row.source_url
+        for row in db_session.scalars(select(ClaimEvidence).where(ClaimEvidence.claim_id == claim.id))
+    }
+    assert related in evidence_urls
+    assert other in evidence_urls
+    linked = {
+        link.source_item.url
+        for link in db_session.scalars(select(EventSource).where(EventSource.event_id == event.id))
+        if link.source_item is not None
+    }
+    assert item.url in linked
+    assert related in linked
+    assert other not in linked
+    db_session.expire_all()
+    loaded = db_session.scalars(
+        select(Event)
+        .options(
+            selectinload(Event.event_sources)
+            .selectinload(EventSource.source_item)
+            .selectinload(SourceItem.source)
+        )
+        .where(Event.id == event.id)
+    ).one()
+    public_urls = {row["url"] for row in source_payloads(loaded)}
+    assert item.url in public_urls
+    assert related in public_urls
+    assert other not in public_urls
+

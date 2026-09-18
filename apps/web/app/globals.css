@@ -87,3 +87,104 @@ a:hover {
 summary::-webkit-details-marker {
   display: none;
 }
+
+/* Retícula de fondo del hero. */
+.sl-grid {
+  background-image:
+    linear-gradient(to right, var(--border) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--border) 1px, transparent 1px);
+  background-size: 5.5rem 5.5rem;
+  background-position: center top;
+  opacity: 0.5;
+  -webkit-mask-image: radial-gradient(ellipse 78% 62% at 50% 22%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(ellipse 78% 62% at 50% 22%, #000 0%, transparent 78%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sl-reveal {
+    opacity: 0;
+    transform: translateY(0.625rem);
+    transition:
+      opacity 640ms cubic-bezier(0.22, 0.61, 0.36, 1),
+      transform 640ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    transition-delay: var(--sl-delay, 0ms);
+  }
+
+  .sl-reveal[data-visible="true"] {
+    opacity: 1;
+    transform: none;
+  }
+
+  .sl-draw {
+    stroke-dasharray: var(--sl-len);
+    stroke-dashoffset: var(--sl-len);
+    animation: sl-draw 1600ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+    animation-delay: var(--sl-delay, 0ms);
+  }
+
+  .sl-fade {
+    opacity: 0;
+    animation: sl-fade 900ms ease forwards;
+    animation-delay: var(--sl-delay, 0ms);
+  }
+
+  .sl-pulse {
+    animation: sl-pulse 3200ms ease-in-out infinite;
+  }
+
+  .sl-travel {
+    animation: sl-travel 11s linear infinite;
+  }
+
+  .sl-panel {
+    animation: sl-panel 420ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
+  }
+}
+
+@keyframes sl-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes sl-fade {
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes sl-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes sl-travel {
+  0% {
+    left: 0%;
+    opacity: 0;
+  }
+  8%,
+  92% {
+    opacity: 1;
+  }
+  100% {
+    left: 100%;
+    opacity: 0;
+  }
+}
+
+@keyframes sl-panel {
+  from {
+    opacity: 0;
+    transform: translateY(0.375rem);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}

@@ -23,7 +23,7 @@ Monolito modular + workers asíncronos:
 cp .env.example .env
 ```
 
-Para el Admin local, `.env.example` ya trae `ADMIN_PASSWORD=dev-admin` y `APP_SECRET=dev-secret-change-me`. Las claves de IA (M3) no hacen falta para levantar el stack ni para el poll manual; sí hacen falta en el **worker** para extraer/vincular sucesos con modelos reales. Compose define `DATABASE_URL` y `REDIS_URL` hacia los servicios internos.
+Para el Admin local, `.env.example` ya trae `ADMIN_PASSWORD=dev-admin` y `APP_SECRET=dev-secret-change-me`. `SITE_URL` es el origen público del frontend (canonical, Open Graph, sitemap); en Compose local queda `http://localhost:3000`. Las claves de IA (M3) no hacen falta para levantar el stack ni para el poll manual; sí hacen falta en el **worker** para extraer/vincular sucesos con modelos reales. Compose define `DATABASE_URL` y `REDIS_URL` hacia los servicios internos.
 
 2. Levantá todo:
 
@@ -56,7 +56,7 @@ Entrar en http://localhost:3000/admin con `ADMIN_PASSWORD`. Flujo operativo:
 6. Si research no quedó `skipped`, se encola `resolve_event_claims` en `claim_resolution` (extracción Luna + resolución DeepSeek). También se puede disparar a mano con **Resolver claims**.
 7. Si claims no quedó `skipped`, se encola `verify_event_claims` en `verification` (Brave por claim + Sol). También se puede disparar a mano con **Verificar**. Si la policy no selecciona nada, el run termina `SUCCESS` sin Brave ni Sol.
 8. Si verification quedó `SUCCESS` (no `FAILED` ni `skipped`), se encola `write_event_article` en `writing`. También se puede disparar a mano con **Redactar**. Un segundo clic con `writing`, `auditing` o `publishing` en `RUNNING` responde HTTP 409 (un solo índice parcial cubre los tres stages).
-9. Si writing quedó `written=True`, se encola `audit_event_article` en `auditing`. También se puede disparar a mano con **Auditar**. Sol revisa el draft; si falla, Claude reescribe hasta `MAX_AUDIT_REWRITE_CYCLES` (default 2) y Sol vuelve a auditar. Si `passed=true`, el worker encola `publish_event_article` (sin gate `AUTO_PUBLISH`). Si el cap se agota con `passed=false`, el `Article` sigue `DRAFT` y **no** se publica. `READY_FOR_REVIEW` no se usa como cola humana. `Event.status` pasa a `PUBLISHED` solo en publish.
+9. Si writing quedó `written=True`, se encola `audit_event_article` en `auditing`. También se puede disparar a mano con **Auditar**. Sol revisa el draft; si falla, Claude reescribe hasta `MAX_AUDIT_REWRITE_CYCLES` (default 2) y Sol vuelve a auditar. Si `passed=true` y `AUTO_PUBLISH=true`, el worker encola `publish_event_article` (V1 y actualizaciones). Si `AUTO_PUBLISH=false`, el Article queda `READY_FOR_REVIEW`. Si el cap se agota con `passed=false`, el `Article` sigue `DRAFT` (o el live previo) y **no** se publica la candidata. `Event.status` pasa a `PUBLISHED` solo en publish.
 10. Un artículo publicado aparece en `GET /api/v1/feed`, `/live`, `/now`, `/local?locality=`, `/nearby`, `/search` y `/articles/{slug|public_id}`. Un update material reescribe un working copy `DRAFT` sin sacar el live (`published_version` anterior) hasta que Sol vuelva a aprobar.
 
 M4 no es un crawler ni un radar de homepages: parte de un Event ya existente, arma pocas consultas con ventana temporal (`pd`/`pw`/`pm`/`py`), prefiltra por URL/dominio (máx. 3 hits por dominio) y solo descarga las URLs nuevas que Luna marca como el mismo suceso. Si el `SourceItem` ya existe en la base y no está ligado a ese Event, se reutiliza y se adjunta como `ADDITIONAL` sin volver a bajar la página. Un segundo clic mientras hay un `pipeline_run` `research` en `RUNNING` no dispara otra búsqueda (HTTP 409). `Event.status` no se degrada.
@@ -69,11 +69,11 @@ M7 arma un `ArticleContext` (claims, fuentes, verificación compacta; sin HTML c
 
 M8 audita ese draft con Sol (`AUDITING_PROVIDER` OpenAI o DeepSeek; Anthropic no es auditor). Issues viven en `pipeline_runs.metadata_json` del stage `auditing` (no en `Correction`). Writing, auditing y publishing no corren a la vez sobre el mismo Event (pre-check + un índice único parcial compartido). Cada rewrite persistido es una `ArticleVersion` (`change_reason=audit_rewrite`) antes del siguiente Sol; si Sol falla después, el run queda `FAILED` y el Article sigue `DRAFT` en esa versión para reintentar con **Auditar**. M8 no setea `READY_FOR_REVIEW`.
 
-M9 publica solo si el último audit `SUCCESS` tiene `passed=true` sobre `current_version`. `AUTO_PUBLISH` en `.env.example` no es gate. `POST /api/v1/admin/events/{id}/publish` es retry ops (202 / 200 already_published / 409 `audit_not_passed`). No hay rechazo editorial. `scope=local` filtra en estricto por localidad.
+M9 publica solo si el último audit `SUCCESS` tiene `passed=true` sobre `current_version`. `AUTO_PUBLISH=true` encola esa publicación; `false` deja `READY_FOR_REVIEW`. `POST /api/v1/admin/events/{id}/publish` es retry ops (202 / 200 already_published / 409 `audit_not_passed`). No hay rechazo editorial. `scope=local` filtra en estricto por localidad.
 
 Caps: `INITIAL_RESEARCH_QUERIES` (2) y `MAX_RESEARCH_QUERIES_PER_EVENT` (4, solo si hay escalación). `MAX_STANDARD_EVENT_SOURCES` (4) / `MAX_ESCALATED_EVENT_SOURCES` (8) limitan INITIAL+ADDITIONAL. `MAX_RESEARCH_RESULTS_PER_QUERY` (5), `MAX_RESEARCH_RESULTS_PER_DOMAIN` (3). M6: `MAX_VERIFICATION_CLAIMS_PER_EVENT` (5), `MAX_VERIFICATION_QUERIES_PER_CLAIM` (2), `MAX_VERIFICATION_RESULTS_PER_QUERY` (3). M7: `MAX_WRITING_CLAIMS_PER_EVENT` (40, solo el prompt a Claude; el detector de cambio material ve todos los claims), `MAX_WRITING_SOURCES_PER_EVENT` (20). M8: `MAX_AUDIT_REWRITE_CYCLES` (2). Búsqueda: `SEARCH_PROVIDER=exa` o `brave` más `EXA_API_KEY` / `BRAVE_API_KEY` en el worker. Sin clave del provider elegido, research/verification quedan `FAILED` y verification **no** encola writing.
 
-El poll manual del Admin es el criterio de aceptación de M2. Beat es el periódico: cada `INGESTION_POLL_INTERVAL_SECONDS` (default **900**). Para testeo acotado: `MAX_NEW_EVENTS_PER_POLL=3` (default `0` = sin tope) limita cuántas **noticias** encola un Poll a detección (tokens de Ultra/Luna). **Procesar N más** en el tablero busca hasta N **sucesos nuevos**: si una nota se fusiona a un suceso ya existente o el gate la marca SKIPPED, prueba la siguiente PENDING. **Investigar** a mano no usa ese tope.
+El poll manual del Admin es el criterio de aceptación de M2. Beat es el periódico: cada `MONITORED_SOURCE_POLL_INTERVAL_SECONDS` (default **300**). Cada poll inspecciona como máximo `MONITORED_SOURCE_POLL_LIMIT` entradas recientes (default **5**). Para testeo acotado: `MAX_NEW_EVENTS_PER_POLL=3` (default `0` = sin tope) limita cuántas **noticias** encola un Poll a detección (tokens de Ultra/Luna). **Procesar N más** en el tablero busca hasta N **sucesos nuevos**: si una nota se fusiona a un suceso ya existente o el gate la marca SKIPPED, prueba la siguiente PENDING. **Investigar** a mano no usa ese tope.
 
 ## Variables de entorno
 
@@ -123,7 +123,7 @@ Worker y Beat arrancan con Compose. El worker escucha `ingestion`, `event_detect
 docker compose exec api celery -A app.workers.celery_app inspect ping
 ```
 
-Poll periódico (Beat): tarea `app.workers.tasks.poll_monitored_sources`, intervalo default 900s.
+Poll periódico (Beat): tarea `app.workers.tasks.poll_monitored_sources`, intervalo default 300s.
 
 ## Stack
 

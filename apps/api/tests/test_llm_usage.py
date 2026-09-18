@@ -175,5 +175,22 @@ def test_admin_stats_and_event_tokens(db_session: Session) -> None:
         assert payload["token_usage"]["total_tokens"] == 70
         assert payload["token_usage"]["by_role_stage"][0]["model_role"] == "claim_resolution"
 
+        empty = EventService(db_session).create(
+            EventCreate(
+                title_internal="Sin tokens",
+                event_type="otro",
+                source_item_id=item.id,
+                short_summary="sin usage",
+            )
+        )
+        db_session.commit()
+        listing = client.get("/api/v1/admin/events?limit=20")
+        blank = next(row for row in listing.json() if row["id"] == str(empty.id))
+        assert blank["tokens_total"] is None
+        detail_empty = client.get(f"/api/v1/admin/events/{empty.id}")
+        assert detail_empty.status_code == 200
+        assert detail_empty.json()["tokens_total"] is None
+        assert detail_empty.json()["token_usage"]["calls"] == 0
+
     totals = LlmUsageRepository(db_session).totals_for_event(event.id)
     assert totals["calls"] == 1

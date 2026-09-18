@@ -11,6 +11,9 @@ class BraveSearchProvider:
 
     def search(self, query: SearchQuery) -> list[SearchHit]:
         params: dict[str, str | int] = {"q": query.text, "count": query.count}
+        if query.include_domains:
+            sites = " OR ".join(f"site:{domain}" for domain in query.include_domains)
+            params["q"] = f"{query.text} ({sites})"
         freshness = query.freshness
         if not freshness and query.since and query.until:
             freshness = f"{query.since.date()}to{query.until.date()}"

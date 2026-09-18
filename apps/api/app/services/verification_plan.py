@@ -8,6 +8,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.domain.enums import ClaimImportance, ClaimStatus
 from app.models import Claim
+from app.providers.base import SearchQuery
 from app.schemas.verification import (
     CheapClaimEvidenceAssessment,
     EvidenceJudgementType,
@@ -22,15 +23,24 @@ from app.services.evidence_source_registry import infer_judicial_forum, is_prefe
 from app.services.claim_coverage import is_mixed_proposition, proposition_role_for
 from app.schemas.editorial_evidence import PropositionRole, StatementEvidenceClass
 from app.services.information_origin import assess_origins, has_support_evidence
+from app.services.claim_meaning import attributed_statement, temporal_comparison, material_query
 from app.services.verification_policy import (
     canonicalize_claim_type,
     independent_support_count,
     is_documentary_claim,
+    is_material_figure,
     is_well_supported,
+    looks_judicial_filing,
+    looks_judicial_record,
+    looks_sensitive_accusation,
+    requires_authoritative_source,
 )
 
 _YEAR_RE = re.compile(r"\b((?:19|20)\d{2})\b")
 _NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+_REGULATORY_COUNT = re.compile(
+    r"\b(?:normas?|normativas?|decretos?|resoluciones?|art[ií]culos?|regulaciones?|disposiciones?|ley(?:es)?)\b", re.I
+)
 _DATED_SCOPES = {
     TemporalScope.HISTORICAL,
     TemporalScope.EXACT_DATE,
@@ -63,38 +73,15 @@ _TARIFF_TOKENS = (
     "metrogas",
     "camuzzi",
 )
-_JUDICIAL_ACT_MARKERS = (
-    "denuncia penal",
-    "presentó una denuncia",
-    "presento una denuncia",
-    "presentó denuncia",
-    "presento denuncia",
-    "radicó una denuncia",
-    "radico una denuncia",
-    "formuló una denuncia",
-    "formulo una denuncia",
-    "demanda judicial",
-    "recurso de casación",
-    "recurso de casacion",
-    "recurso extraordinario",
-    "sobreseimiento",
-    "sobreseyó",
-    "sobreseyo",
-    "sentencia",
-    "fallo judicial",
-    "procesamiento",
-    "desestimó el recurso",
-    "desestimo el recurso",
-    "suprema corte",
-    "corte suprema",
-    "casación",
-    "casacion",
-)
 _BELOW_MARKERS = ("por debajo", "menor que", "inferior a", "menos de", "menos que")
 _ABOVE_MARKERS = ("por encima", "mayor que", "superior a", "más de", "mas de", "más que")
 
 
 def year_hint_from_claim(claim: Claim) -> int | None:
+    if temporal_comparison(claim.canonical_text or ""):
+        # A trajectory has two endpoints; a year found in a retrieved document
+        # cannot stand in for either of them.
+        return None
     if claim.occurred_at is not None:
         return claim.occurred_at.year
     years = [int(match) for match in _YEAR_RE.findall(claim.canonical_text or "")]
@@ -104,6 +91,8 @@ def year_hint_from_claim(claim: Claim) -> int | None:
 
 
 def temporal_scope_for_claim(claim: Claim, year_hint: int | None, *, now: datetime | None = None) -> TemporalScope:
+    if temporal_comparison(claim.canonical_text or ""):
+        return TemporalScope.UNKNOWN_PERIOD
     clock = now or utc_now()
     if claim.occurred_at is not None:
         when = claim.occurred_at
@@ -132,12 +121,15 @@ def normalize_temporal_scope(plan: VerificationPlan, *, now: datetime | None = N
     return plan.model_copy(update={"temporal_scope": scope})
 
 
-def _looks_judicial_act(text: str) -> bool:
-    return any(marker in text for marker in _JUDICIAL_ACT_MARKERS)
-
-
 def _looks_regulated_tariff(text: str) -> bool:
     return any(token in text for token in _TARIFF_TOKENS)
+
+
+def is_regulatory_count(claim: Claim) -> bool:
+    text = claim.canonical_text or ""
+    count = bool(re.search(r"\d+(?:[.,]\d+)*\s+(?:normas?|normativas?|decretos?|resoluciones?|art[ií]culos?|regulaciones?|disposiciones?|leyes)\b", text, re.I))
+    return bool(count
+                and not attributed_statement(text) and canonicalize_claim_type(claim.claim_type) != "declaracion")
 
 
 def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> VerificationPlan:
@@ -152,7 +144,10 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
     corroboration = False
     forum = JudicialForum.UNKNOWN
     text = (claim.canonical_text or "").lower()
-    if _looks_judicial_act(text):
+    if attributed_statement(text) and not is_mixed_proposition(text, claim.claim_type):
+        target = VerificationTarget.PRIMARY_STATEMENT
+        subject = VerificationSubject.PUBLIC_STATEMENT
+    elif looks_judicial_record(text):
         target = VerificationTarget.JUDICIAL_RECORD
         subject = VerificationSubject.JUDICIAL_CASE
         primary = True
@@ -160,6 +155,20 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
             forum = JudicialForum(infer_judicial_forum(claim.canonical_text))
         except ValueError:
             forum = JudicialForum.UNKNOWN
+    elif looks_judicial_filing(text):
+        target = VerificationTarget.JUDICIAL_RECORD
+        subject = VerificationSubject.JUDICIAL_CASE
+        corroboration = True
+        try:
+            forum = JudicialForum(infer_judicial_forum(claim.canonical_text))
+        except ValueError:
+            forum = JudicialForum.UNKNOWN
+    elif is_regulatory_count(claim) and not _looks_regulated_tariff(text):
+        target = VerificationTarget.OFFICIAL_RECORD
+        subject = VerificationSubject.LAW_OR_DECREE
+        primary = True
+        if scope == TemporalScope.TIMELESS:
+            scope = TemporalScope.UNKNOWN_PERIOD
     elif kind == "documento":
         target = VerificationTarget.OFFICIAL_RECORD
         subject = VerificationSubject.LAW_OR_DECREE
@@ -168,10 +177,14 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
         if _looks_regulated_tariff(text):
             target = VerificationTarget.OFFICIAL_RECORD
             subject = VerificationSubject.REGULATED_TARIFF
-        else:
+            primary = True
+        elif is_material_figure(claim):
             target = VerificationTarget.OFFICIAL_STATISTICS
             subject = VerificationSubject.STATISTICS
-        primary = True
+            primary = True
+        else:
+            target = VerificationTarget.INDEPENDENT_CORROBORATION
+            corroboration = True
     elif kind == "declaracion":
         if is_mixed_proposition(claim.canonical_text or "", claim.claim_type):
             target = VerificationTarget.INDEPENDENT_CORROBORATION
@@ -181,11 +194,14 @@ def heuristic_plan(claim: Claim, *, jurisdiction: str | None = None) -> Verifica
         else:
             target = VerificationTarget.PRIMARY_STATEMENT
             subject = VerificationSubject.PUBLIC_STATEMENT
-    elif kind == "hecho" and claim.importance == ClaimImportance.HIGH:
-        if claim.status in {ClaimStatus.SINGLE_SOURCE, ClaimStatus.UNCERTAIN, ClaimStatus.CONFLICTING}:
-            subject = VerificationSubject.ACCUSATION
-            target = VerificationTarget.INDEPENDENT_CORROBORATION
-            corroboration = True
+    elif looks_sensitive_accusation(claim):
+        subject = VerificationSubject.ACCUSATION
+        target = VerificationTarget.INDEPENDENT_CORROBORATION
+        corroboration = True
+    if requires_authoritative_source(claim):
+        primary = True
+    else:
+        primary = False
     return normalize_temporal_scope(
         VerificationPlan(
             verification_target=target,
@@ -224,6 +240,9 @@ def refine_plan(
     clock = now or utc_now()
     year_hint = _choose_year_hint(planned, fallback, now=clock)
     scope = planned.temporal_scope
+    if claim is not None and temporal_comparison(claim.canonical_text or ""):
+        scope = TemporalScope.UNKNOWN_PERIOD
+        year_hint = None
     if fallback.temporal_scope == TemporalScope.HISTORICAL and scope in {
         TemporalScope.CURRENT,
         TemporalScope.RECENT,
@@ -245,6 +264,13 @@ def refine_plan(
     if claim is not None:
         mixed = is_mixed_proposition(claim.canonical_text or "", claim.claim_type)
         role = proposition_role_for(claim)
+        if requires_authoritative_source(claim):
+            primary = True
+        else:
+            primary = False
+    if claim is not None and is_regulatory_count(claim) and not _looks_regulated_tariff(claim.canonical_text.lower()):
+        target, subject, primary = fallback.verification_target, fallback.subject, True
+        scope, year_hint = fallback.temporal_scope, fallback.year_hint
     if fallback.subject == VerificationSubject.REGULATED_TARIFF:
         subject = fallback.subject
         if planned.verification_target == VerificationTarget.OFFICIAL_STATISTICS:
@@ -286,6 +312,7 @@ def refine_plan(
                 "judicial_forum": forum,
                 "independent_corroboration_required": corroboration,
                 "primary_source_required": primary,
+                "search_terms": [material_query(claim)] if claim is not None and material_query(claim) else planned.search_terms,
             }
         ),
         now=clock,
@@ -326,6 +353,8 @@ def try_resolve_numeric_comparison(
     siblings: Sequence[Claim] | None = None,
 ) -> ClaimStatus | None:
     text = (claim.canonical_text or "").casefold()
+    if attributed_statement(text) or temporal_comparison(text):
+        return None
     if any(marker in text for marker in _BELOW_MARKERS):
         direction = "lt"
     elif any(marker in text for marker in _ABOVE_MARKERS):
@@ -349,7 +378,8 @@ def try_resolve_numeric_comparison(
     if not left:
         return None
     matched = all(value < threshold for value in left) if direction == "lt" else all(value > threshold for value in left)
-    return ClaimStatus.SUPPORTED if matched else ClaimStatus.DISPROVEN
+    # Sibling numbers alone do not establish matching indicator, scope or period.
+    return ClaimStatus.SUPPORTED if matched else None
 
 
 def freshness_for_plan(plan: VerificationPlan) -> str | None:
@@ -385,9 +415,12 @@ def search_window_for(plan: VerificationPlan, claim: Claim, *, now: datetime | N
 
 
 def core_search_text(claim: Claim, plan: VerificationPlan) -> str:
+    preserved = material_query(claim)
+    if preserved:
+        return preserved
     terms = [token.strip() for token in plan.search_terms if token and token.strip()]
     if terms:
-        parts = [f'"{token}"' if " " in token else token for token in terms[:4]]
+        parts = [f'"{token}"' if " " in token else token for token in terms]
         core = " ".join(parts)
     else:
         core = (claim.canonical_text or "").strip()
@@ -425,6 +458,25 @@ def build_verification_queries(
     return unique[: max(0, limit)]
 
 
+def build_verification_searches(claim: Claim, plan: VerificationPlan, domains: list[str], *,
+                                limit: int, count: int) -> list[SearchQuery]:
+    """One official search across preferred domains, then a bounded open fallback.
+
+    Keep the text-only builder available to legacy callers; new searches carry
+    domain constraints explicitly so providers can use their native contract.
+    """
+    core = core_search_text(claim, plan)
+    if not core or limit <= 0:
+        return []
+    window = search_window_for(plan, claim)
+    base = dict(text=core, count=count, freshness=window.freshness, since=window.since, until=window.until)
+    queries = []
+    if domains:
+        queries.append(SearchQuery(**base, include_domains=list(dict.fromkeys(domains))))
+    queries.append(SearchQuery(**base))
+    return queries[:limit]
+
+
 def claim_has_preferred_evidence(claim: Claim, preferred: list[str]) -> bool:
     if not preferred:
         return False
@@ -448,6 +500,15 @@ def skip_directed_search(claim: Claim, plan: VerificationPlan, preferred: list[s
     if plan.independent_corroboration_required:
         return False
     if plan.subject == VerificationSubject.ACCUSATION:
+        return False
+    if plan.verification_target in {
+        VerificationTarget.JUDICIAL_RECORD,
+        VerificationTarget.OFFICIAL_RECORD,
+        VerificationTarget.OFFICIAL_LAW,
+        VerificationTarget.OFFICIAL_STATISTICS,
+        VerificationTarget.ELECTION_AUTHORITY,
+        VerificationTarget.FINANCIAL_OFFICIAL_DATA,
+    }:
         return False
     if plan.primary_source_required and not claim_has_preferred_evidence(claim, preferred):
         return False
@@ -506,25 +567,26 @@ def apply_primary_requirement(
     has_support = has_support_evidence(claim)
     mixed = is_mixed_proposition(claim.canonical_text or "", claim.claim_type)
     role = proposition_role_for(claim)
+    required = bool(plan.primary_source_required) or requires_authoritative_source(claim)
     if mixed:
-        if plan.primary_source_required and not primary_supports:
+        if required and not primary_supports and assessment.authoritative_independent < 2:
             return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
-        if count >= 2:
+        if count >= 2 and not required:
+            return ClaimStatus.SUPPORTED
+        if primary_supports or assessment.authoritative_independent >= 2:
             return ClaimStatus.SUPPORTED
         return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
     if role == PropositionRole.UTTERANCE or plan.subject == VerificationSubject.PUBLIC_STATEMENT:
         if assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
             return ClaimStatus.SUPPORTED
-        if plan.primary_source_required and not primary_supports:
-            return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
         if count >= 2:
             return ClaimStatus.SUPPORTED
         return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
-    if plan.primary_source_required and not primary_supports:
-        if claim.status == ClaimStatus.SUPPORTED and count >= 2:
+    if required and not primary_supports:
+        if assessment.authoritative_independent >= 2:
             return ClaimStatus.SUPPORTED
         return ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
-    if primary_supports and (is_documentary_claim(claim) or plan.primary_source_required):
+    if primary_supports and (is_documentary_claim(claim) or required):
         return ClaimStatus.SUPPORTED
     if count >= 2:
         return ClaimStatus.SUPPORTED

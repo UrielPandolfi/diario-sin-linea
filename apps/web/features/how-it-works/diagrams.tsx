@@ -1,69 +1,27 @@
 const PANEL = "border border-border bg-surface";
 
-const PIPELINE = [
-  { label: "FUENTES", accent: false },
-  { label: "SUCESO", accent: false },
-  { label: "INVESTIGACIÓN", accent: false },
-  { label: "AFIRMACIONES", accent: true },
-  { label: "EVIDENCIA", accent: false },
-  { label: "VERIFICACIÓN", accent: false },
-  { label: "REDACCIÓN", accent: false },
-  { label: "AUDITORÍA", accent: false },
-] as const;
-
 const SOURCES = ["Rosario3", "La Capital", "Gobierno", "Agencia"] as const;
 
 const RESEARCH_LANES = [
-  { desktop: "MEDIO QUE LO PUBLICÓ", mobile: "MEDIO", question: "¿Qué informó?", official: false },
-  { desktop: "FUENTE OFICIAL", mobile: "FUENTE OFICIAL", question: "¿Qué anunció realmente?", official: true },
-  { desktop: "OTROS MEDIOS", mobile: "OTROS MEDIOS", question: "¿Qué información adicional aportan?", official: false },
-  { desktop: "DOCUMENTOS", mobile: "DOCUMENTOS", question: "¿Existe resolución, decreto o dato público?", official: false },
+  { label: "MEDIO QUE LO PUBLICÓ", question: "¿Qué informó?", official: false },
+  { label: "FUENTE OFICIAL", question: "¿Qué anunció realmente?", official: true },
+  { label: "OTROS MEDIOS", question: "¿Qué información adicional aportan?", official: false },
+  { label: "DOCUMENTOS", question: "¿Existe resolución, decreto o dato público?", official: false },
 ] as const;
 
 const CLAIMS = [
   { id: "01", text: "El Gobierno anunció una reducción de tarifas.", status: "RESPALDADO", tone: "petrol" },
   { id: "02", text: "La reducción anunciada sería del 15%.", status: "RESPALDADO", tone: "petrol" },
   { id: "03", text: "Entraría en vigencia en octubre.", status: "FUENTE ÚNICA", tone: "ochre" },
-  {
-    id: "04",
-    text: "El Gobierno afirma que alcanzaría a 4 millones de hogares.",
-    mobileText: "Alcanzaría a 4 millones de hogares.",
-    status: "ATRIBUIDO",
-    tone: "blue",
-  },
+  { id: "04", text: "Alcanzaría a 4 millones de hogares.", status: "ATRIBUIDO", tone: "blue" },
 ] as const;
 
 const STATES = [
-  {
-    label: "RESPALDADO",
-    tone: "petrol",
-    desktop: "Varias evidencias compatibles sostienen la afirmación.",
-    mobile: "Varias evidencias compatibles sostienen la afirmación.",
-  },
-  {
-    label: "FUENTE ÚNICA",
-    tone: "ochre",
-    desktop: "La información proviene por ahora de una sola fuente relevante.",
-    mobile: "Proviene por ahora de una sola fuente relevante.",
-  },
-  {
-    label: "EN DISPUTA",
-    tone: "blue",
-    desktop: "Distintas fuentes sostienen versiones incompatibles.",
-    mobile: "Distintas fuentes sostienen versiones incompatibles.",
-  },
-  {
-    label: "CONTRADICHO",
-    tone: "muted",
-    desktop: "Evidencia sólida contradice la afirmación.",
-    mobile: "Evidencia sólida contradice la afirmación.",
-  },
-  {
-    label: "CHEQUEADO",
-    tone: "petrol",
-    desktop: "Sin Línea realizó una verificación adicional.",
-    mobile: "Sin Línea realizó una verificación adicional.",
-  },
+  { label: "RESPALDADO", tone: "petrol", text: "Varias evidencias compatibles la sostienen." },
+  { label: "FUENTE ÚNICA", tone: "ochre", text: "Por ahora proviene de una sola fuente relevante." },
+  { label: "EN DISPUTA", tone: "blue", text: "Distintas fuentes sostienen versiones incompatibles." },
+  { label: "CONTRADICHO", tone: "muted", text: "Evidencia sólida contradice la afirmación." },
+  { label: "CHEQUEADO", tone: "petrol", text: "Sin Línea hizo una verificación adicional." },
 ] as const;
 
 const VERIFY_ITEMS = [
@@ -109,36 +67,6 @@ function pillBorder(tone: "petrol" | "ochre" | "blue" | "muted"): string {
   return "border-accent-petrol text-accent-petrol";
 }
 
-export function PipelineStrip() {
-  return (
-    <ol className="mt-10 space-y-2.5 md:mt-14 md:flex md:flex-nowrap md:items-center md:gap-x-1 md:space-y-0 md:overflow-x-auto">
-      {PIPELINE.map((step, index) => (
-        <li key={step.label} className="flex items-center gap-1 md:shrink-0">
-          <div
-            className={`${PANEL} flex h-11 w-full items-center rounded-[9px] px-3.5 md:h-[54px] md:w-auto md:justify-center md:rounded-[10px] md:px-3`}
-          >
-            <span className="font-sans text-[10px] font-semibold tracking-[0.04em] text-secondary md:hidden">
-              {String(index + 1).padStart(2, "0")}
-            </span>
-            <span
-              className={`font-sans text-[11px] font-semibold tracking-[0.06em] md:text-center ${
-                step.accent ? "text-accent-ochre" : "text-primary"
-              } ml-3 md:ml-0`}
-            >
-              {step.label}
-            </span>
-          </div>
-          {index < PIPELINE.length - 1 ? (
-            <span className="hidden font-sans text-lg leading-none text-secondary md:inline" aria-hidden>
-              →
-            </span>
-          ) : null}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
 export function EventMergeDiagram() {
   return (
     <>
@@ -147,17 +75,15 @@ export function EventMergeDiagram() {
           {SOURCES.map((name) => (
             <li
               key={name}
-              className={`${PANEL} flex h-[42px] items-center rounded-xl px-3 font-sans text-[13px] font-medium text-primary`}
+              className={`${PANEL} flex h-[2.625rem] items-center rounded-xl px-3 font-sans text-[13px] font-medium text-primary`}
             >
               {name}
             </li>
           ))}
         </ul>
-        <div
-          className={`${PANEL} flex flex-col justify-start rounded-[14px] border-accent-petrol px-4 py-[22px]`}
-        >
+        <div className={`${PANEL} flex flex-col justify-start rounded-[0.875rem] border-accent-petrol px-4 py-[1.375rem]`}>
           <p className="font-sans text-[10px] font-semibold tracking-[0.06em] text-accent-petrol">UN SUCESO</p>
-          <p className="mt-4 font-heading text-xl font-semibold leading-[27px] text-primary">
+          <p className="mt-4 font-heading text-xl font-semibold leading-[1.7rem] text-primary">
             Una historia que evoluciona
           </p>
         </div>
@@ -168,26 +94,26 @@ export function EventMergeDiagram() {
           {SOURCES.map((name) => (
             <li
               key={name}
-              className={`${PANEL} flex h-[54px] items-center rounded-[10px] px-4 font-sans text-sm font-medium text-primary`}
+              className={`${PANEL} flex h-[3.375rem] items-center rounded-[0.625rem] px-4 font-sans text-sm font-medium text-primary`}
             >
               {name}
             </li>
           ))}
         </ul>
-        <div className="flex flex-col justify-around py-[26px]" aria-hidden>
+        <div className="flex flex-col justify-around py-[1.625rem]" aria-hidden>
           {SOURCES.map((name) => (
             <div key={name} className="h-0.5 bg-border" />
           ))}
         </div>
         <div className="flex items-center">
           <div
-            className={`${PANEL} relative flex h-[130px] w-full flex-col justify-start overflow-hidden rounded-[18px] border-accent-petrol px-7 pt-8`}
+            className={`${PANEL} relative flex h-[8.125rem] w-full flex-col justify-start overflow-hidden rounded-[1.125rem] border-accent-petrol px-7 pt-8`}
           >
             <p className="font-sans text-xs font-semibold tracking-[0.06em] text-accent-petrol">UN SUCESO</p>
-            <p className="mt-2 font-heading text-xl font-semibold leading-[26px] text-primary">
+            <p className="mt-2 font-heading text-xl font-semibold leading-[1.625rem] text-primary">
               Una historia que evoluciona
             </p>
-            <span className="absolute inset-x-0 bottom-0 h-[3px] bg-accent-petrol" aria-hidden />
+            <span className="absolute inset-x-0 bottom-0 h-[0.1875rem] bg-accent-petrol" aria-hidden />
           </div>
         </div>
       </div>
@@ -197,7 +123,7 @@ export function EventMergeDiagram() {
 
 export function RadarDiagram() {
   return (
-    <div className={`${PANEL} rounded-[14px] px-[18px] py-[18px] md:rounded-[18px] md:px-7 md:py-7`}>
+    <div className={`${PANEL} max-w-[26rem] rounded-[0.875rem] px-[1.125rem] py-[1.125rem] md:rounded-[1.125rem] md:px-7 md:py-7`}>
       <p className="font-sans text-[10px] font-semibold tracking-[0.08em] text-accent-blue md:text-xs">
         FUENTES VIGILADAS
       </p>
@@ -211,7 +137,7 @@ export function RadarDiagram() {
           </li>
         ))}
       </ul>
-      <p className="mt-4 text-center font-sans text-lg text-secondary md:mt-5 md:text-[22px]" aria-hidden>
+      <p className="mt-4 text-center font-sans text-lg text-secondary md:mt-5 md:text-[1.375rem]" aria-hidden>
         ↓
       </p>
       <p className="mt-1 text-center font-sans text-[10px] font-semibold tracking-[0.08em] text-accent-ochre md:text-xs">
@@ -223,27 +149,26 @@ export function RadarDiagram() {
 
 export function ResearchDiagram() {
   return (
-    <div className="mt-8 space-y-3.5 md:mt-10 md:space-y-6">
-      <div className={`${PANEL} rounded-xl px-4 py-4 md:rounded-[14px] md:px-[26px] md:py-[22px]`}>
+    <div className="space-y-3.5 md:space-y-5">
+      <div className={`${PANEL} rounded-xl px-4 py-4 md:rounded-[0.875rem] md:px-[1.625rem] md:py-[1.375rem]`}>
         <p className="font-sans text-[10px] font-semibold tracking-[0.08em] text-accent-ochre md:text-[11px]">
           SE DETECTA
         </p>
-        <p className="mt-2 font-heading text-lg font-semibold leading-6 text-primary md:mt-3 md:text-2xl md:leading-[31px]">
+        <p className="mt-2 font-heading text-lg font-semibold leading-6 text-primary md:mt-3 md:text-2xl md:leading-[1.9375rem]">
           “El Gobierno anunció cambios en las tarifas eléctricas.”
         </p>
       </div>
-      <ul className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4 xl:gap-4">
+      <ul className="grid gap-2.5 sm:grid-cols-2 md:gap-4">
         {RESEARCH_LANES.map((lane) => (
-          <li key={lane.desktop} className={`${PANEL} min-h-[88px] rounded-xl px-3.5 py-3.5 md:min-h-[156px] md:rounded-[14px] md:px-5 md:py-[22px]`}>
+          <li key={lane.label} className={`${PANEL} rounded-xl px-3.5 py-3.5 md:rounded-[0.875rem] md:px-5 md:py-5`}>
             <p
               className={`font-sans text-[9px] font-semibold tracking-[0.08em] md:text-[11px] ${
                 lane.official ? "text-accent-petrol" : "text-secondary"
               }`}
             >
-              <span className="md:hidden">{lane.mobile}</span>
-              <span className="hidden md:inline">{lane.desktop}</span>
+              {lane.label}
             </p>
-            <p className="mt-3 font-sans text-sm font-medium leading-5 text-primary md:mt-6 md:text-[17px] md:leading-[25px]">
+            <p className="mt-3 font-sans text-sm font-medium leading-5 text-primary md:mt-4 md:text-[17px] md:leading-[1.5625rem]">
               {lane.question}
             </p>
           </li>
@@ -255,12 +180,12 @@ export function ResearchDiagram() {
 
 export function ClaimsDiagram() {
   return (
-    <div className="mt-8 space-y-2.5 md:mt-10">
-      <div className={`${PANEL} rounded-xl px-3.5 py-3.5 md:rounded-[14px] md:px-6 md:py-5`}>
+    <div className="space-y-2.5">
+      <div className={`${PANEL} rounded-xl px-3.5 py-3.5 md:rounded-[0.875rem] md:px-6 md:py-5`}>
         <p className="font-sans text-[10px] font-semibold tracking-[0.08em] text-secondary md:text-[11px]">
           PUBLICACIÓN
         </p>
-        <p className="mt-2 font-sans text-[15px] leading-6 text-primary md:mt-3 md:text-xl md:leading-[30px]">
+        <p className="mt-2 font-sans text-[15px] leading-6 text-primary md:mt-3 md:text-lg md:leading-[1.75rem]">
           El Gobierno anunció que reducirá las tarifas un 15% desde octubre y aseguró que la medida beneficiará a 4
           millones de hogares.
         </p>
@@ -269,22 +194,15 @@ export function ClaimsDiagram() {
         {CLAIMS.map((claim) => (
           <li
             key={claim.id}
-            className={`${PANEL} rounded-xl px-3.5 py-3.5 md:flex md:h-[82px] md:items-start md:rounded-xl md:px-[18px] md:py-4`}
+            className={`${PANEL} flex items-start gap-3 rounded-xl px-3.5 py-3.5 md:px-[1.125rem] md:py-4`}
           >
-            <span className="font-sans text-xs font-semibold text-secondary">{claim.id}</span>
-            <div className="mt-1 flex-1 md:ml-4 md:mt-0 md:flex md:items-center md:justify-between md:gap-6">
-              <p className="font-sans text-[15px] font-medium leading-5 text-primary md:text-[17px] md:leading-6">
-                {"mobileText" in claim ? (
-                  <>
-                    <span className="md:hidden">{claim.mobileText}</span>
-                    <span className="hidden md:inline">{claim.text}</span>
-                  </>
-                ) : (
-                  claim.text
-                )}
+            <span className="font-sans text-xs font-semibold leading-5 text-secondary">{claim.id}</span>
+            <div className="flex flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+              <p className="font-sans text-[15px] font-medium leading-5 text-primary md:text-base md:leading-6">
+                {claim.text}
               </p>
               <p
-                className={`mt-3 font-sans text-[11px] font-semibold tracking-[0.08em] md:mt-0 md:w-[230px] md:text-right ${statusClass(claim.tone)}`}
+                className={`shrink-0 font-sans text-[11px] font-semibold tracking-[0.08em] ${statusClass(claim.tone)}`}
               >
                 {claim.status}
               </p>
@@ -298,18 +216,15 @@ export function ClaimsDiagram() {
 
 export function StatusGrid() {
   return (
-    <ul className="mt-8 grid gap-2.5 md:mt-10 md:grid-cols-2 md:gap-4 xl:grid-cols-3">
+    <ul className="grid gap-2.5 sm:grid-cols-2 md:gap-4 xl:grid-cols-3">
       {STATES.map((state) => (
-        <li key={state.label} className={`${PANEL} rounded-[14px] px-3.5 py-3.5 md:min-h-[132px] md:px-[18px] md:py-[18px]`}>
+        <li key={state.label} className={`${PANEL} rounded-[0.875rem] px-4 py-4 md:px-[1.125rem] md:py-[1.125rem]`}>
           <p
             className={`inline-flex h-7 items-center rounded-full border bg-background px-3 font-sans text-[10px] font-semibold tracking-[0.06em] ${pillBorder(state.tone)}`}
           >
             {state.label}
           </p>
-          <p className="mt-3 font-sans text-sm leading-5 text-secondary md:mt-4 md:leading-[22px]">
-            <span className="md:hidden">{state.mobile}</span>
-            <span className="hidden md:inline">{state.desktop}</span>
-          </p>
+          <p className="mt-3 font-sans text-sm leading-5 text-secondary md:mt-4 md:leading-[1.375rem]">{state.text}</p>
         </li>
       ))}
     </ul>
@@ -320,21 +235,25 @@ export function UncertaintyDiagram() {
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2 md:gap-4">
-        <div className={`${PANEL} rounded-[14px] px-3 py-3 md:px-[18px] md:py-[18px]`}>
+        <div className={`${PANEL} rounded-[0.875rem] px-3 py-3 md:px-[1.125rem] md:py-[1.125rem]`}>
           <p className="font-sans text-[10px] font-semibold tracking-[0.08em] text-secondary">FUENTE A</p>
-          <p className="mt-2 font-heading text-xl font-semibold leading-7 text-primary md:text-[21px]">200 personas</p>
+          <p className="mt-2 font-heading text-xl font-semibold leading-7 text-primary md:text-[1.3125rem]">
+            200 personas
+          </p>
         </div>
-        <p className="font-sans text-xl text-accent-ochre md:text-[30px] md:leading-[34px]" aria-hidden>
+        <p className="font-sans text-xl text-accent-ochre md:text-[1.875rem] md:leading-[2.125rem]" aria-hidden>
           ≠
         </p>
-        <div className={`${PANEL} rounded-[14px] px-3 py-3 md:px-[18px] md:py-[18px]`}>
+        <div className={`${PANEL} rounded-[0.875rem] px-3 py-3 md:px-[1.125rem] md:py-[1.125rem]`}>
           <p className="font-sans text-[10px] font-semibold tracking-[0.08em] text-secondary">FUENTE B</p>
-          <p className="mt-2 font-heading text-xl font-semibold leading-7 text-primary md:text-[21px]">600 personas</p>
+          <p className="mt-2 font-heading text-xl font-semibold leading-7 text-primary md:text-[1.3125rem]">
+            600 personas
+          </p>
         </div>
       </div>
-      <div className={`${PANEL} rounded-[14px] border-accent-ochre px-3.5 py-3.5 md:px-5 md:py-5`}>
+      <div className={`${PANEL} rounded-[0.875rem] border-accent-ochre px-3.5 py-3.5 md:px-5 md:py-5`}>
         <p className="font-sans text-[11px] font-semibold tracking-[0.08em] text-accent-ochre">EN DISPUTA</p>
-        <p className="mt-2 font-sans text-sm leading-[22px] text-primary md:text-base md:leading-[25px]">
+        <p className="mt-2 font-sans text-sm leading-[1.375rem] text-primary md:text-base md:leading-[1.5625rem]">
           No existe información independiente suficiente para resolver la diferencia.
         </p>
       </div>
@@ -344,8 +263,8 @@ export function UncertaintyDiagram() {
 
 export function VerificationList() {
   return (
-    <div>
-      <ul className={`${PANEL} space-y-4 rounded-2xl px-4 py-6 md:px-7 md:py-7`}>
+    <div className="max-w-[34rem]">
+      <ul className={`${PANEL} grid gap-3.5 rounded-2xl px-4 py-6 sm:grid-cols-2 md:px-7 md:py-7`}>
         {VERIFY_ITEMS.map((item) => (
           <li key={item} className="flex items-center gap-3">
             <span className="size-2 shrink-0 rounded-full bg-accent-petrol" aria-hidden />
@@ -353,15 +272,8 @@ export function VerificationList() {
           </li>
         ))}
       </ul>
-      <p className="mt-4 font-sans text-sm leading-[22px] text-secondary md:mt-6">
-        <span className="md:hidden">
-          No verificamos cada frase por rutina: concentramos el esfuerzo donde puede cambiar materialmente la
-          comprensión del hecho.
-        </span>
-        <span className="hidden md:inline">
-          No verificamos cada frase por rutina. La verificación adicional se concentra donde puede cambiar
-          materialmente la comprensión del hecho.
-        </span>
+      <p className="mt-4 font-sans text-sm leading-[1.375rem] text-secondary md:mt-5">
+        No verificamos cada frase por rutina. El esfuerzo se concentra donde puede cambiar la comprensión del hecho.
       </p>
     </div>
   );
@@ -369,12 +281,12 @@ export function VerificationList() {
 
 export function AiStack() {
   return (
-    <ol className="mx-auto w-full max-w-[300px] space-y-0">
+    <ol className="w-full max-w-[18.75rem] space-y-0">
       {AI_STEPS.map((step, index) => (
         <li key={step} className="flex flex-col items-center">
           <div
-            className={`${PANEL} flex h-[42px] w-full items-center rounded-[10px] px-3.5 md:h-12 ${
-              step === "IA REDACTA" ? "text-accent-blue" : "text-primary"
+            className={`${PANEL} flex h-[2.625rem] w-full items-center rounded-[0.625rem] px-3.5 md:h-12 ${
+              step === "IA REDACTA" ? "border-accent-blue text-accent-blue" : "text-primary"
             }`}
           >
             <span className="font-sans text-[11px] font-semibold tracking-[0.08em] md:text-xs">{step}</span>
@@ -392,9 +304,9 @@ export function AiStack() {
 
 export function AuditList() {
   return (
-    <div className={`${PANEL} rounded-2xl px-4 py-4 md:px-6 md:py-6`}>
+    <div className={`${PANEL} max-w-[26rem] rounded-2xl px-4 py-5 md:px-6 md:py-6`}>
       <p className="font-sans text-[11px] font-semibold tracking-[0.08em] text-accent-ochre">AUDITORÍA</p>
-      <ul className="mt-4 space-y-1.5">
+      <ul className="mt-4 space-y-2">
         {AUDIT_ITEMS.map((item) => (
           <li key={item} className="flex items-center gap-2">
             <span className="w-5 font-sans text-[13px] font-semibold text-accent-petrol" aria-hidden>
@@ -415,7 +327,7 @@ export function EventTimeline() {
         {TIMELINE.map((item) => (
           <li key={item.time} className="relative pb-6 last:pb-0">
             <span
-              className={`absolute -left-[31px] top-1 size-[9px] rounded-full ${
+              className={`absolute -left-[1.9375rem] top-1 size-[0.5625rem] rounded-full ${
                 item.current ? "bg-accent-ochre" : "bg-accent-petrol"
               }`}
               aria-hidden
@@ -427,7 +339,7 @@ export function EventTimeline() {
       </ol>
       <div className="hidden md:block">
         <div className="relative pt-1">
-          <div className="absolute left-1.5 right-8 top-[7px] h-[3px] bg-border" aria-hidden />
+          <div className="absolute left-1.5 right-8 top-[0.4375rem] h-[0.1875rem] bg-border" aria-hidden />
           <ol className="grid grid-cols-4 gap-3">
             {TIMELINE.map((item) => (
               <li key={item.time}>
@@ -438,7 +350,7 @@ export function EventTimeline() {
                   aria-hidden
                 />
                 <p className="font-sans text-xs font-semibold text-primary">{item.time}</p>
-                <p className="mt-1 max-w-[135px] font-sans text-xs leading-[18px] text-secondary">{item.label}</p>
+                <p className="mt-1 max-w-[9rem] font-sans text-xs leading-[1.125rem] text-secondary">{item.label}</p>
               </li>
             ))}
           </ol>
@@ -455,32 +367,29 @@ export function ArticleEvidenceDemo() {
         <p className="font-sans text-[10px] font-semibold tracking-[0.12em] text-secondary">
           ARGENTINA · ACTUALIZADO HACE 8 MIN
         </p>
-        <h3 className="mt-3 font-heading text-[26px] font-semibold leading-[34px] text-primary max-md:text-xl max-md:leading-7">
+        <h3 className="mt-3 font-heading text-xl font-semibold leading-7 text-primary md:text-[1.625rem] md:leading-[2.125rem]">
           El Gobierno anunció cambios en las tarifas eléctricas desde octubre
         </h3>
-        <p className="mt-4 font-sans text-sm leading-[22px] text-primary md:text-base md:leading-[26px]">
+        <p className="mt-4 font-sans text-sm leading-[1.375rem] text-primary md:text-base md:leading-[1.625rem]">
           La medida contempla una reducción anunciada del 15% y entraría en vigencia en octubre.
         </p>
-        <p className="mt-6 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-accent-petrol bg-background px-2.5 py-3 md:max-w-[500px] md:px-3.5">
+        <p className="mt-6 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-accent-petrol bg-background px-2.5 py-3 md:max-w-[31.25rem] md:px-3.5">
           <span className="font-sans text-[13px] font-medium text-primary md:text-sm">
             “reducción anunciada del 15%”
           </span>
           <span className="font-sans text-[10px] font-semibold tracking-[0.08em] text-accent-petrol">RESPALDADO</span>
         </p>
         <p className="mt-6 font-sans text-[13px] leading-5 text-secondary">
-          <span className="md:hidden">Fuentes: Boletín Oficial · Ministerio · otros medios</span>
-          <span className="hidden md:inline">
-            Fuentes utilizadas: Boletín Oficial · Ministerio · medios consultados
-          </span>
+          Fuentes utilizadas: Boletín Oficial · Ministerio · medios consultados
         </p>
       </article>
-      <aside className={`${PANEL} rounded-2xl border-accent-petrol px-3.5 py-4 md:px-[22px] md:py-[22px]`}>
+      <aside className={`${PANEL} rounded-2xl border-accent-petrol px-3.5 py-4 md:px-[1.375rem] md:py-[1.375rem]`}>
         <p className="font-sans text-[11px] font-semibold tracking-[0.08em] text-accent-petrol">RESPALDADO POR</p>
         <ul className="mt-4">
           {EVIDENCE_SOURCES.map((source, index) => (
             <li
               key={source}
-              className={`font-sans text-[15px] font-medium leading-[21px] text-primary ${
+              className={`font-sans text-[15px] font-medium leading-[1.3125rem] text-primary ${
                 index > 0 ? "mt-3 border-t border-border pt-3" : ""
               }`}
             >
@@ -490,22 +399,5 @@ export function ArticleEvidenceDemo() {
         </ul>
       </aside>
     </div>
-  );
-}
-
-export function Principles() {
-  return (
-    <ul className="mt-6 grid gap-2 md:mt-8 md:grid-cols-4 md:gap-8">
-      {["PRECISIÓN", "CLARIDAD", "CONTEXTO", "BREVEDAD"].map((item, index) => (
-        <li
-          key={item}
-          className={`font-heading text-[27px] font-semibold leading-[34px] ${
-            index === 0 ? "text-primary" : "text-secondary"
-          }`}
-        >
-          {item}
-        </li>
-      ))}
-    </ul>
   );
 }

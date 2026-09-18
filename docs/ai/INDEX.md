@@ -10,7 +10,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 | --- | --- |
 | `apps/web/` | Next.js 15 (App Router): UI pública + `/admin` |
 | `apps/api/app/` | FastAPI, dominio, servicios, workers Celery |
-| `apps/api/migrations/versions/` | Alembic (`0001` … `0014_llm_costs`) |
+| `apps/api/migrations/versions/` | Alembic (`0001` … `0016_article_hero_images`) |
 | `apps/api/tests/` | Pytest |
 | `docker-compose.yml` | postgres, redis, api, worker, beat, web |
 | `scripts/run_editorial_eval.py` | Eval editorial (fixtures; no RSS) |
@@ -29,7 +29,7 @@ Routers (`main.py`): `api/health.py`, `api/public.py`, `api/cases.py`, `api/admi
 | Research, claims, verify, write, audit, publish | `services/{research,claim,verification,writing,audit,publish}_service.py` + `pipeline_lock.py` |
 | Decisiones a preservar | `docs/ai/DECISIONS.md` (solo si hay evidencia de intención) |
 | Estado, stubs, hallazgos | `docs/ai/STATE.md` |
-| API pública / feed | `api/public.py`, `services/feed_ranking.py` |
+| API pública / feed | `api/public.py`, `services/feed_ranking.py`; sitemap `GET /api/v1/sitemap-articles`; web `app/sitemap.ts`, `app/robots.ts`, `lib/seo/` |
 | Admin pipeline | `api/admin.py`, `apps/web/app/admin/` (Publicaciones `/admin/publications`, costos en tablero y suceso) |
 | Casos de lectores / contacto | `api/cases.py`, `admin_cases.py`, `services/case_service.py`, `case_rate_limit.py`; UI `/contacto`, `/seguimiento/[token]`, `/admin/cases` |
 | Revisión editorial | `services/editorial_service.py`, `features/admin/editorial-revise-form.tsx` |
@@ -37,7 +37,9 @@ Routers (`main.py`): `api/health.py`, `api/public.py`, `api/cases.py`, `api/admi
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/como-funciona`, `/contacto`, `/seguimiento/[token]`, `/perfil`). Stubs: `/seguidos`, `/notificaciones`, `/guardados`. Localidad: `/entrar`, `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`). Stubs: `/seguidos`, `/notificaciones`, `/guardados`. Localidad: `/entrar`, `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
+
+`/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
 
 ## Validación (comandos en CI / README)
 

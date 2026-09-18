@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+import re
 from typing import Any
 from uuid import UUID
 
@@ -15,7 +16,7 @@ from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.source_content import has_extracted_body
 from app.core.source_snippet import select_source_snippet
-from app.core.text import excerpt_in_source, normalize_name
+from app.core.text import excerpt_in_source, normalize_name, token_set
 from app.core.urls import url_domain
 from app.core.usage_context import usage_scope
 from app.domain.enums import (
@@ -46,9 +47,11 @@ from app.services.claim_coverage import (
     record_drop,
     recover_expected_from_dropped,
     recover_from_source_body,
+    salvage_excerpt,
     split_compound_extracted,
 )
 from app.services.information_origin import assess_origins, has_support_evidence
+from app.services.claim_meaning import attributed_statement, preserve_extracted_meaning, split_attributed_content
 from app.services.verification_outcome import (
     is_verification_locked,
     verification_view_for_event,
@@ -64,10 +67,63 @@ _EVIDENCE_RANK = {
 }
 
 _PROTECTED_STATUSES = {ClaimStatus.DISPROVEN, ClaimStatus.OUTDATED}
+_DOCUMENT_ACT = re.compile(
+    r"\b(confirm[oó]|establece|fija|dispone|determina|public[oó]|indica)\s+que\b",
+    re.I,
+)
+_MONTHS = (
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "setiembre", "octubre", "noviembre", "diciembre",
+)
+_CALENDAR_DATE = re.compile(
+    r"\b(\d{1,2})\s+de\s+(" + "|".join(_MONTHS) + r")\b",
+    re.I,
+)
+_YEAR_TOKEN = re.compile(r"\b((?:19|20)\d{2})\b")
+_PROP_STOP = {
+    "que", "del", "una", "unos", "unas", "para", "con", "por", "los", "las",
+    "el", "la", "de", "en", "un", "al", "es", "fue", "ser", "como", "este",
+    "esta", "estos", "estas", "segun", "sera", "seran", "hacia", "desde",
+}
+
+
+def is_utterance_claim(claim: Claim | ExtractedClaim) -> bool:
+    return looks_like_speech_act(
+        canonical_text=claim.canonical_text,
+        predicate=getattr(claim, "predicate", None),
+        claim_type=getattr(claim, "claim_type", None),
+    )
 
 
 def _item_body(item: SourceItem) -> str:
     return (item.clean_text or "").strip()
+
+
+def _figure_digits(claim: Claim | ExtractedClaim) -> str:
+    digits = re.sub(r"\D", "", getattr(claim, "normalized_value", None) or "")
+    if len(digits) >= 4:
+        return digits
+    digits = re.sub(r"\D", "", getattr(claim, "canonical_text", None) or "")
+    return digits if len(digits) >= 4 else ""
+
+
+def _sources_support_figure(
+    raw: ExtractedClaim,
+    sources: list[SourceItem],
+    valid_evidence: dict[UUID, _PendingEvidence],
+) -> bool:
+    digits = _figure_digits(raw)
+    if not digits:
+        return True
+    by_id = {item.id: item for item in sources}
+    for item_id in valid_evidence:
+        item = by_id.get(item_id)
+        if item is None:
+            continue
+        haystack = re.sub(r"\D", "", " ".join(filter(None, [item.clean_text, item.excerpt, item.title])))
+        if digits in haystack:
+            return True
+    return False
 
 
 def build_assertion_key(
@@ -87,6 +143,43 @@ def build_assertion_key(
     return normalize_name(canonical_text or "")
 
 
+def looks_like_speech_act(
+    *,
+    canonical_text: str | None = None,
+    predicate: str | None = None,
+    claim_type: str | None = None,
+) -> bool:
+    if (claim_type or "").strip().lower() == "declaracion":
+        return True
+    blob = f"{predicate or ''} {canonical_text or ''}"
+    return attributed_statement(blob) or bool(_DOCUMENT_ACT.search(blob))
+
+
+def calendar_dates(text: str | None) -> set[str]:
+    folded = normalize_name(text or "")
+    return {f"{day} {month}" for day, month in _CALENDAR_DATE.findall(folded)}
+
+
+def proposition_fingerprint(text: str | None) -> str:
+    folded = normalize_name(text or "")
+    years = sorted(set(_YEAR_TOKEN.findall(folded)))
+    dates = sorted(calendar_dates(folded))
+    cleaned = _CALENDAR_DATE.sub(" ", folded)
+    cleaned = _YEAR_TOKEN.sub(" ", cleaned)
+    cleaned = re.sub(r"\d+(?:[.,]\d+)?", " ", cleaned)
+    tokens = sorted(
+        token for token in token_set(cleaned) - _PROP_STOP if len(token) >= 4
+    )
+    parts: list[str] = []
+    if years:
+        parts.append("y:" + ",".join(years))
+    if dates:
+        parts.append("d:" + ",".join(dates))
+    if tokens:
+        parts.append("t:" + ",".join(tokens))
+    return "|".join(parts)
+
+
 def build_comparison_key(
     *,
     canonical_text: str,
@@ -95,11 +188,20 @@ def build_comparison_key(
     unit: str | None = None,
     normalized_value: str | None = None,
     object_text: str | None = None,
+    claim_type: str | None = None,
 ) -> str:
+    if looks_like_speech_act(canonical_text=canonical_text, predicate=predicate, claim_type=claim_type):
+        core = (object_text or "").strip() or (canonical_text or "")
+        fingerprint = proposition_fingerprint(core)
+        if fingerprint:
+            return f"prop|{fingerprint}|{normalize_name(unit or '')}"
     subj = (subject or "").strip()
     pred = (predicate or "").strip()
     if subj and pred:
         return f"{normalize_name(subj)}|{normalize_name(pred)}|{normalize_name(unit or '')}"
+    fallback = proposition_fingerprint((object_text or "").strip() or canonical_text)
+    if fallback:
+        return f"prop|{fallback}|{normalize_name(unit or '')}"
     return build_assertion_key(
         canonical_text=canonical_text,
         subject=subject,
@@ -129,6 +231,7 @@ def comparison_key_for(claim: Claim | ExtractedClaim) -> str:
         normalized_value=claim.normalized_value,
         object_text=claim.object_text,
         unit=claim.unit,
+        claim_type=getattr(claim, "claim_type", None),
     )
 
 
@@ -222,6 +325,13 @@ class _PendingClaim:
     evidence: dict[UUID, _PendingEvidence] = field(default_factory=dict)
 
 
+@dataclass
+class PersistResult:
+    claims: list[Claim]
+    touched_ids: set[UUID] = field(default_factory=set)
+    new_evidence: int = 0
+
+
 class ClaimService:
     def __init__(
         self,
@@ -238,7 +348,15 @@ class ClaimService:
         self.resolver_llm = resolver_llm
         self.escalated_resolver_llm = escalated_resolver_llm
 
-    def resolve(self, event_id: UUID, *, trigger: str, context: dict | None = None) -> dict:
+    def resolve(
+        self,
+        event_id: UUID,
+        *,
+        trigger: str,
+        context: dict | None = None,
+        claim_id: UUID | None = None,
+        source_item_id: UUID | None = None,
+    ) -> dict:
         event = self._load_event(event_id)
         if event is None:
             raise ValueError("event_not_found")
@@ -256,7 +374,12 @@ class ClaimService:
             event_id=event.id,
             stage=CLAIM_STAGE,
             status=PipelineStatus.RUNNING,
-            metadata_json={"trigger": trigger, "context": context or {}},
+            metadata_json={
+                "trigger": trigger,
+                "context": context or {},
+                "target_claim_id": str(claim_id) if claim_id else None,
+                "source_item_id": str(source_item_id) if source_item_id else None,
+            },
         )
         self.pipeline.add(run)
         try:
@@ -277,7 +400,13 @@ class ClaimService:
                 event_id=event.id,
                 pipeline_run_id=run.id,
             ):
-                result = self._run(event)
+                if claim_id:
+                    with self.session.begin_nested():
+                        result = self._run(event, claim_id=claim_id)
+                elif source_item_id is not None:
+                    result = self._run_incremental(event, source_item_id)
+                else:
+                    result = self._run(event)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}
@@ -316,7 +445,9 @@ class ClaimService:
         )
         return self.session.scalars(stmt).first()
 
-    def _run(self, event: Event) -> dict:
+    def _run(self, event: Event, *, claim_id: UUID | None = None) -> dict:
+        if claim_id is not None:
+            return self._reextract_one(event, claim_id)
         sources = self._numbered_sources(event)
         if not sources:
             return {
@@ -335,10 +466,19 @@ class ClaimService:
             schema=ClaimExtractionBatch,
         )
         split_claims: list[ExtractedClaim] = []
+        pair_keys: list[tuple[str, str]] = []
         for raw in batch.claims:
-            split_claims.extend(split_compound_extracted(raw))
+            raw = preserve_extracted_meaning(raw, sources)
+            layers = [
+                preserve_extracted_meaning(layer, sources, restore_attribution=False)
+                for layer in split_attributed_content(raw)
+            ]
+            if len(layers) == 2:
+                pair_keys.append((assertion_key_for(layers[0]), assertion_key_for(layers[1])))
+            for layer in layers:
+                split_claims.extend(split_compound_extracted(layer))
         outcome = self._merge_extracted(split_claims, sources)
-        claims = self._persist(event, outcome.pending)
+        claims = self._persist(event, outcome.pending).claims
         self.session.flush()
         claims = self._reload_claims(event.id) if claims else []
         expected = match_expected_to_claims(expected_centrals_from_event(event), claims)
@@ -371,7 +511,13 @@ class ClaimService:
                     elif recovered:
                         row.gap_reason = row.gap_reason or GapReason.RECOVERY_FAILED.value
         fingerprint = claims_fingerprint(claims)
+        ids_by_key = {assertion_key_for(claim): str(claim.id) for claim in claims}
+        attribution_pairs = [
+            {"attribution_claim_id": ids_by_key[a], "factual_claim_id": ids_by_key[b]}
+            for a, b in dict.fromkeys(pair_keys) if a in ids_by_key and b in ids_by_key
+        ]
         empty = {
+            "attribution_pairs": attribution_pairs,
             "extracted": len(batch.claims),
             "persisted": len(claims),
             "resolved": 0,
@@ -420,10 +566,197 @@ class ClaimService:
             "resolved": len(claims),
             "needs_external_verification": needs,
             "escalated_claim_refs": escalated_done,
+            "attribution_pairs": attribution_pairs,
             "contract_version": CONTRACT_VERSION,
             "claims_fingerprint": fingerprint,
             "coverage": coverage.model_dump(mode="json"),
         }
+
+    def _run_incremental(self, event: Event, source_item_id: UUID) -> dict:
+        item = next(
+            (
+                link.source_item
+                for link in event.event_sources
+                if link.source_item is not None and link.source_item_id == source_item_id
+            ),
+            None,
+        )
+        empty = {
+            "extracted": 0,
+            "persisted": 0,
+            "resolved": 0,
+            "changed": False,
+            "new_evidence": 0,
+            "needs_external_verification": [],
+            "escalated_claim_refs": [],
+            "contract_version": CONTRACT_VERSION,
+        }
+        if item is None:
+            return {**empty, "reason": "source_not_linked"}
+        if item.processing_status in (SourceItemStatus.FAILED, SourceItemStatus.SKIPPED):
+            return {**empty, "reason": "source_not_usable"}
+        if not has_extracted_body(item):
+            return {**empty, "reason": "no_usable_sources"}
+        if self._source_item_already_extracted(event, source_item_id):
+            claims = self._reload_claims(event.id)
+            coverage = build_coverage_contract(event=event, claims=claims, dropped=[])
+            return {
+                **empty,
+                "persisted": len(claims),
+                "changed": self._needs_verify_after_source(event.id, source_item_id),
+                "reason": "source_already_extracted",
+                "claims_fingerprint": claims_fingerprint(claims),
+                "coverage": coverage.model_dump(mode="json"),
+            }
+
+        sources = [item]
+        extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+        batch = extractor.generate_structured(
+            system_prompt=load_prompt("claim_extraction.md"),
+            user_prompt=self._extraction_prompt(event, sources, identity_only=True),
+            schema=ClaimExtractionBatch,
+        )
+        split_claims: list[ExtractedClaim] = []
+        for raw in batch.claims:
+            raw = preserve_extracted_meaning(raw, sources)
+            for layer in split_attributed_content(raw):
+                split_claims.extend(
+                    split_compound_extracted(
+                        preserve_extracted_meaning(layer, sources, restore_attribution=False)
+                    )
+                )
+        outcome = self._merge_extracted(split_claims, sources)
+        persisted = self._persist(event, outcome.pending, overwrite_matched=False)
+        self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        fingerprint = claims_fingerprint(claims)
+        changed = bool(persisted.touched_ids) or persisted.new_evidence > 0
+        base = {
+            "extracted": len(batch.claims),
+            "persisted": len(claims),
+            "resolved": 0,
+            "changed": changed,
+            "new_evidence": persisted.new_evidence,
+            "needs_external_verification": [],
+            "escalated_claim_refs": [],
+            "contract_version": CONTRACT_VERSION,
+            "claims_fingerprint": fingerprint,
+            "coverage": coverage.model_dump(mode="json"),
+            "incremental": True,
+        }
+        if not claims or not persisted.touched_ids:
+            return base
+
+        affected = self._affected_claims(claims, persisted.touched_ids)
+        resolver = self.resolver_llm or get_claim_resolution_provider(escalated=False)
+        resolution = resolver.generate_structured(
+            system_prompt=load_prompt("claim_resolution.md"),
+            user_prompt=self._resolution_prompt(event, affected),
+            schema=ClaimResolutionBatch,
+        )
+        needs = self._apply_resolution(affected, resolution, event_id=event.id)
+        self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        return {
+            **base,
+            "resolved": len(affected),
+            "needs_external_verification": needs,
+            "claims_fingerprint": claims_fingerprint(claims),
+            "coverage": coverage.model_dump(mode="json"),
+            "changed": True,
+        }
+
+    def _source_item_already_extracted(self, event: Event, source_item_id: UUID) -> bool:
+        for claim in event.claims:
+            for row in claim.evidence:
+                if row.source_item_id == source_item_id:
+                    return True
+        return False
+
+    def _needs_verify_after_source(self, event_id: UUID, source_item_id: UUID) -> bool:
+        runs = self.pipeline.list_for_event(event_id, limit=50)
+        claims_for_item = [
+            run
+            for run in runs
+            if run.stage == CLAIM_STAGE
+            and run.status == PipelineStatus.SUCCESS
+            and str((run.metadata_json or {}).get("source_item_id") or "") == str(source_item_id)
+        ]
+        if not claims_for_item:
+            return True
+        first = min(claims_for_item, key=lambda run: run.started_at or utc_now())
+        first_done = first.finished_at or first.started_at
+        for run in runs:
+            if run.stage != "verification" or run.status != PipelineStatus.SUCCESS:
+                continue
+            when = run.finished_at or run.started_at
+            if first_done is None or when is None or when >= first_done:
+                return False
+        return True
+
+    def _affected_claims(self, claims: list[Claim], touched_ids: set[UUID]) -> list[Claim]:
+        groups: dict[str, list[Claim]] = defaultdict(list)
+        by_id = {claim.id: claim for claim in claims}
+        for claim in claims:
+            groups[comparison_key_for(claim)].append(claim)
+        selected: dict[UUID, Claim] = {}
+        for claim_id in touched_ids:
+            claim = by_id.get(claim_id)
+            if claim is None:
+                continue
+            for member in groups[comparison_key_for(claim)]:
+                selected[member.id] = member
+        ordered = [claim for claim in claims if claim.id in selected]
+        return ordered or list(selected.values())
+
+    def _reextract_one(self, event: Event, claim_id: UUID) -> dict:
+        """Explicit recheck through extraction/resolution, preserving identity and runs."""
+        target = self.session.get(Claim, claim_id)
+        if target is None or target.event_id != event.id:
+            raise ValueError("claim_not_in_event")
+        before = {key: getattr(target, key) for key in (
+            "canonical_text", "claim_type", "subject", "predicate", "object_text", "normalized_value", "unit"
+        )}
+        before["status"] = target.status.value
+        before["evidence"] = [
+            {"source_item_id": str(ev.source_item_id), "evidence_type": ev.evidence_type.value,
+             "excerpt": ev.excerpt, "confidence": ev.confidence} for ev in target.evidence
+        ]
+        sources = self._numbered_sources(event)
+        prompt = self._extraction_prompt(event, sources) + (
+            "\nReextraé exclusivamente esta proposición, manteniendo su atribución y su identidad. "
+            "No extraigas otros claims ni conviertas el dicho en su contenido factual. "
+            f"Devolvé exactamente un claim: {target.canonical_text}"
+        )
+        extractor = self.extractor_llm or get_structured_provider(ModelRole.LIGHT_PROCESSING)
+        batch = extractor.generate_structured(system_prompt=load_prompt("claim_extraction.md"),
+                                               user_prompt=prompt, schema=ClaimExtractionBatch)
+        if len(batch.claims) != 1:
+            raise ValueError("targeted_extraction_requires_one_claim")
+        raw = preserve_extracted_meaning(batch.claims[0], sources)
+        # A targeted extraction cannot silently change speech into a world fact.
+        from app.services.claim_meaning import attributed_statement
+        if attributed_statement(target.canonical_text) and not attributed_statement(raw.canonical_text):
+            raise ValueError("targeted_extraction_lost_attribution")
+        outcome = self._merge_extracted([raw], sources)
+        if len(outcome.pending) != 1:
+            raise ValueError("targeted_extraction_invalid_evidence")
+        self._persist(event, outcome.pending, target_claim=target)
+        resolver = self.resolver_llm or get_claim_resolution_provider(escalated=False)
+        resolution = resolver.generate_structured(system_prompt=load_prompt("claim_resolution.md"),
+                                                  user_prompt=self._resolution_prompt(event, [target]),
+                                                  schema=ClaimResolutionBatch)
+        needs = self._apply_resolution([target], resolution, event_id=event.id, recheck=True)
+        self.session.flush()
+        claims = self._reload_claims(event.id)
+        coverage = build_coverage_contract(event=event, claims=claims, dropped=outcome.dropped)
+        return {"extracted": 1, "persisted": 1, "resolved": 1, "needs_external_verification": needs,
+                "escalated_claim_refs": [], "contract_version": CONTRACT_VERSION,
+                "claims_fingerprint": claims_fingerprint(claims), "coverage": coverage.model_dump(mode="json"),
+                "claim_before": before, "extraction": raw.model_dump(mode="json"),
+                "resolution": resolution.model_dump(mode="json")}
 
     def _numbered_sources(self, event: Event) -> list[SourceItem]:
         links = [link for link in event.event_sources if link.source_item is not None]
@@ -456,15 +789,27 @@ class ClaimService:
             address=event.address_text,
         )
 
-    def _extraction_prompt(self, event: Event, sources: list[SourceItem]) -> str:
+    def _extraction_prompt(
+        self, event: Event, sources: list[SourceItem], *, identity_only: bool = False
+    ) -> str:
         when = event.started_at or event.detected_at
-        lines = [
-            f"Título interno: {event.title_internal}",
-            f"Tipo interno (puede estar mal; extraé hechos del texto, no del tipo): {event.event_type}",
-            f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
-            f"Fecha: {when}",
-            "Fuentes (source_ref 1..N, snippet truncado). Extraé los hechos concretos aunque no coincidan con el tipo interno.",
-        ]
+        if identity_only:
+            place = f"{event.locality or ''} {event.province or ''}".strip()
+            lines = [
+                "Identidad del suceso (no es una fuente; no extraigas cifras ni hechos de este bloque): "
+                f"tipo={event.event_type}; lugar={place}; fecha={when}",
+                "Extraé únicamente lo que afirman los snippets. Si una fuente trae una magnitud distinta, "
+                "creá un Claim nuevo con ese valor. No copies cifras históricas que no estén en el snippet.",
+                "Fuentes (source_ref 1..N, snippet truncado).",
+            ]
+        else:
+            lines = [
+                f"Título interno: {event.title_internal}",
+                f"Tipo interno (puede estar mal; extraé hechos del texto, no del tipo): {event.event_type}",
+                f"Lugar: {event.locality or ''} {event.province or ''}".strip(),
+                f"Fecha: {when}",
+                "Fuentes (source_ref 1..N, snippet truncado). Extraé los hechos concretos aunque no coincidan con el tipo interno.",
+            ]
         for index, item in enumerate(sources, start=1):
             published = item.published_at.isoformat() if item.published_at else ""
             lines.append(
@@ -490,6 +835,20 @@ class ClaimService:
                 dropped_raw.append((raw, DropReason.EMPTY_CANONICAL.value))
                 continue
             valid_evidence = self._valid_evidence(raw.evidence, sources, require_body=require_body)
+            if not valid_evidence:
+                repaired: list[ExtractedEvidence] = []
+                for row in raw.evidence:
+                    if row.source_ref < 1 or row.source_ref > len(sources):
+                        continue
+                    item = sources[row.source_ref - 1]
+                    salvaged = salvage_excerpt(canonical, item.clean_text)
+                    if not salvaged:
+                        continue
+                    repaired.append(row.model_copy(update={"excerpt": salvaged}))
+                if repaired:
+                    valid_evidence = self._valid_evidence(repaired, sources, require_body=require_body)
+            if valid_evidence and not _sources_support_figure(raw, sources, valid_evidence):
+                valid_evidence = {}
             if not valid_evidence:
                 dropped.append(
                     record_drop(canonical_text=canonical, reason=DropReason.INVALID_EXCERPT.value)
@@ -577,7 +936,14 @@ class ClaimService:
                 valid[item.id] = pending
         return valid
 
-    def _persist(self, event: Event, pending_by_key: dict[str, _PendingClaim]) -> list[Claim]:
+    def _persist(
+        self,
+        event: Event,
+        pending_by_key: dict[str, _PendingClaim],
+        *,
+        target_claim: Claim | None = None,
+        overwrite_matched: bool = True,
+    ) -> PersistResult:
         existing_rows = list(
             self.session.scalars(
                 select(Claim)
@@ -587,8 +953,11 @@ class ClaimService:
         )
         existing = {assertion_key_for(claim): claim for claim in existing_rows}
         persisted: list[Claim] = []
+        touched_ids: set[UUID] = set()
+        new_evidence = 0
         for key, pending in pending_by_key.items():
-            claim = existing.get(key)
+            claim = target_claim or existing.get(key)
+            created = False
             if claim is None:
                 claim = Claim(
                     event_id=event.id,
@@ -606,7 +975,8 @@ class ClaimService:
                 self.session.add(claim)
                 self.session.flush()
                 existing[key] = claim
-            else:
+                created = True
+            elif overwrite_matched:
                 claim.canonical_text = pending.canonical_text
                 claim.claim_type = pending.claim_type
                 claim.importance = pending.importance
@@ -616,6 +986,8 @@ class ClaimService:
                 claim.normalized_value = pending.normalized_value
                 claim.unit = pending.unit
                 claim.occurred_at = pending.occurred_at
+            if created:
+                touched_ids.add(claim.id)
             by_item = {row.source_item_id: row for row in claim.evidence}
             for item_id, ev in pending.evidence.items():
                 row = by_item.get(item_id)
@@ -630,17 +1002,26 @@ class ClaimService:
                     )
                     self.session.add(row)
                     claim.evidence.append(row)
+                    new_evidence += 1
+                    touched_ids.add(claim.id)
                 else:
-                    if _EVIDENCE_RANK[ev.evidence_type] >= _EVIDENCE_RANK[row.evidence_type]:
+                    upgraded = False
+                    if _EVIDENCE_RANK[ev.evidence_type] > _EVIDENCE_RANK[row.evidence_type]:
+                        row.evidence_type = ev.evidence_type
+                        upgraded = True
+                    elif _EVIDENCE_RANK[ev.evidence_type] == _EVIDENCE_RANK[row.evidence_type]:
                         row.evidence_type = ev.evidence_type
                     if ev.excerpt and not row.excerpt:
                         row.excerpt = ev.excerpt
+                        upgraded = True
                     if ev.confidence is not None:
                         row.confidence = ev.confidence
                     if ev.source_url:
                         row.source_url = ev.source_url
+                    if upgraded:
+                        touched_ids.add(claim.id)
             persisted.append(claim)
-        return persisted
+        return PersistResult(claims=persisted, touched_ids=touched_ids, new_evidence=new_evidence)
 
     def _reload_claims(self, event_id: UUID) -> list[Claim]:
         stmt = (
@@ -703,6 +1084,7 @@ class ClaimService:
         batch: ClaimResolutionBatch,
         *,
         event_id: UUID,
+        recheck: bool = False,
     ) -> list[dict]:
         verify_run, view = verification_view_for_event(self.session, event_id)
         groups: dict[str, list[Claim]] = defaultdict(list)
@@ -713,7 +1095,7 @@ class ClaimService:
         for index, claim in enumerate(claims, start=1):
             item = by_ref.get(index)
             members = groups[comparison_key_for(claim)]
-            if is_verification_locked(claim, members, view, verify_run):
+            if not recheck and is_verification_locked(claim, members, view, verify_run):
                 if item is not None and item.needs_external_verification:
                     needs.append({"claim_id": str(claim.id), "claim_ref": index})
                 continue
@@ -721,6 +1103,11 @@ class ClaimService:
             if status is None:
                 status = self._heuristic_status(claim)
             status = self._clamp_supported(claim, status)
+            if status == ClaimStatus.DISPROVEN:
+                # Claims resolution has no grounded contradiction contract.
+                # Verification must establish relevance before declaring falsehood.
+                status = ClaimStatus.UNCERTAIN
+                needs.append({"claim_id": str(claim.id), "claim_ref": index})
             types = {row.evidence_type for row in claim.evidence}
             if EvidenceType.SUPPORTS in types and EvidenceType.CONTRADICTS in types:
                 status = ClaimStatus.CONFLICTING
@@ -736,20 +1123,20 @@ class ClaimService:
         for claim in claims:
             groups[comparison_key_for(claim)].append(claim)
         for members in groups.values():
-            keys = {assertion_key_for(claim) for claim in members}
-            if len(keys) < 2:
+            world = [claim for claim in members if not is_utterance_claim(claim)]
+            if len({assertion_key_for(claim) for claim in world}) < 2:
                 continue
-            clock = _competing_clock(members)
+            clock = _competing_clock(world)
             if clock is None:
-                for claim in members:
+                for claim in world:
                     if is_verification_locked(claim, members, view, verify_run):
                         continue
                     if claim.status not in _PROTECTED_STATUSES:
                         claim.status = ClaimStatus.UNCERTAIN
                 continue
             latest = max(clock.values())
-            latest_members = [claim for claim in members if clock[claim] == latest]
-            for claim in members:
+            latest_members = [claim for claim in world if clock[claim] == latest]
+            for claim in world:
                 if clock[claim] < latest and claim.status != ClaimStatus.DISPROVEN:
                     claim.status = ClaimStatus.OUTDATED
             latest_keys = {assertion_key_for(claim) for claim in latest_members}
@@ -781,6 +1168,7 @@ def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
     if status != ClaimStatus.SUPPORTED:
         return status
     from app.schemas.editorial_evidence import PropositionRole, StatementEvidenceClass
+    from app.services.verification_policy import requires_authoritative_source
 
     assessment = assess_origins(claim)
     role = None
@@ -792,6 +1180,12 @@ def clamp_supported_status(claim: Claim, status: ClaimStatus) -> ClaimStatus:
         role = None
     if role == PropositionRole.UTTERANCE and assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
         return ClaimStatus.SUPPORTED
+    if requires_authoritative_source(claim):
+        if assessment.authoritative_independent >= 2:
+            return ClaimStatus.SUPPORTED
+        if has_support_evidence(claim) or assessment.unknown_groups or assessment.known_independent == 1:
+            return ClaimStatus.SINGLE_SOURCE
+        return ClaimStatus.UNCERTAIN
     if assessment.known_independent >= 2:
         return ClaimStatus.SUPPORTED
     if has_support_evidence(claim) or assessment.unknown_groups or assessment.known_independent == 1:

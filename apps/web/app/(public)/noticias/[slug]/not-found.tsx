@@ -1,4 +1,11 @@
+import { NO_INDEX_NO_FOLLOW } from "@/lib/seo/metadata";
 import Link from "next/link";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Noticia no encontrada",
+  robots: NO_INDEX_NO_FOLLOW,
+};
 
 export default function ArticleNotFound() {
   return (

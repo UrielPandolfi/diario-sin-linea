@@ -1,36 +1,23 @@
+import { isIndexableDeploy } from "@/lib/seo/site-url";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 const LOCALITY_COOKIE = "sl_locality";
 
-const OPEN_WITHOUT_LOCALITY = [
-  /^\/entrar\/?$/,
-  /^\/onboarding\/?$/,
-  /^\/como-funciona\/?$/,
-  /^\/contacto\/?$/,
-  /^\/seguimiento(\/|$)/,
-  /^\/noticias(\/|$)/,
-  /^\/admin(\/|$)/,
-  /^\/api(\/|$)/,
-];
-
-function isOpen(pathname: string): boolean {
-  return OPEN_WITHOUT_LOCALITY.some((pattern) => pattern.test(pathname));
-}
-
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const locality = request.cookies.get(LOCALITY_COOKIE)?.value;
 
-  if (pathname === "/entrar" && locality) {
-    return NextResponse.redirect(new URL("/", request.url));
+  const response =
+    pathname === "/entrar" && locality
+      ? NextResponse.redirect(new URL("/", request.url))
+      : NextResponse.next();
+
+  if (!isIndexableDeploy()) {
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
 
-  if (!isOpen(pathname) && !locality) {
-    return NextResponse.redirect(new URL("/entrar", request.url));
-  }
-
-  return NextResponse.next();
+  return response;
 }
 
 export const config = {

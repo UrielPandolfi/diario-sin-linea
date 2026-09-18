@@ -6,7 +6,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test lib/seo/seo.test.ts"
   },
   "dependencies": {
     "lucide-react": "^1.37.0",
@@ -24,6 +25,7 @@
     "eslint-config-next": "15.5.7",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.2"
   }
 }

@@ -150,6 +150,7 @@ def test_article_update_preserves_previous_version(db_session: Session) -> None:
     )
     assert created is True
     original_headline = article.headline
+    original_slug = article.slug
 
     article_service.update_content(
         article,
@@ -162,6 +163,7 @@ def test_article_update_preserves_previous_version(db_session: Session) -> None:
     )
 
     db_session.refresh(article)
+    assert article.slug == original_slug
     assert article.current_version == 2
     assert len(article.versions) == 2
     first_version = next(version for version in article.versions if version.version_number == 1)

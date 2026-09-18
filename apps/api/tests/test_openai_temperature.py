@@ -22,8 +22,8 @@ def test_temperature_zero_blocked_for_reasoning_style_models() -> None:
     assert _model_allows_temperature_zero("o1") is False
 
 
-def test_reasoning_effort_minimal_only_for_nano() -> None:
-    assert _reasoning_effort_for_model("gpt-5-nano") == "minimal"
+def test_reasoning_effort_is_not_inferred_for_chat_completions() -> None:
+    assert _reasoning_effort_for_model("gpt-5-nano") is None
     assert _reasoning_effort_for_model("gpt-5") is None
     assert _reasoning_effort_for_model("gpt-5.6-luna") is None
     assert _reasoning_effort_for_model("gpt-4o-mini") is None
@@ -75,12 +75,14 @@ def test_luna_does_not_infer_minimal_reasoning_effort(monkeypatch) -> None:
     assert "reasoning_effort" not in captured
 
 
-def test_nano_sends_minimal_reasoning_effort(monkeypatch) -> None:
+def test_nano_does_not_send_inferred_reasoning_effort(monkeypatch) -> None:
     monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
     captured: dict = {}
+    calls: list[dict] = []
 
     class Completions:
         def create(self, **kwargs):
+            calls.append(dict(kwargs))
             captured.update(kwargs)
             return SimpleNamespace(
                 usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
@@ -91,7 +93,8 @@ def test_nano_sends_minimal_reasoning_effort(monkeypatch) -> None:
     provider = OpenAIStructuredProvider(api_key="k", model="gpt-5-nano", client=client)
     result = provider.generate_structured(system_prompt="s", user_prompt="u", schema=_Tiny)
     assert result.x == 1
-    assert captured["reasoning_effort"] == "minimal"
+    assert len(calls) == 1
+    assert "reasoning_effort" not in captured
     assert "temperature" not in captured
     assert captured["response_format"]["type"] == "json_schema"
 
@@ -161,3 +164,59 @@ def test_json_schema_falls_back_to_json_object(monkeypatch) -> None:
     assert recorded[0]["usage_reported"] is False
     assert recorded[1].get("failed") is not True
     assert recorded[1]["prompt_tokens"] == 1
+
+
+def test_deepseek_uses_json_object_without_schema_400(monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    formats: list[str] = []
+
+    class Completions:
+        def create(self, **kwargs):
+            kind = kwargs["response_format"]["type"]
+            formats.append(kind)
+            if kind == "json_schema":
+                raise AssertionError("deepseek must not send json_schema")
+            return SimpleNamespace(
+                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                choices=[SimpleNamespace(message=SimpleNamespace(content='{"x": 3}'))],
+            )
+
+    client = SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+    provider = OpenAIStructuredProvider(
+        api_key="k",
+        model="deepseek-chat",
+        provider_name="deepseek",
+        client=client,
+    )
+    result = provider.generate_structured(system_prompt="s", user_prompt="u", schema=_Tiny)
+    assert result.x == 3
+    assert formats == ["json_object"]
+
+
+def _assert_openai_strict_schema(node: object) -> None:
+    if isinstance(node, dict):
+        if "$ref" in node:
+            assert set(node.keys()) == {"$ref"}
+        assert "default" not in node
+        for value in node.values():
+            _assert_openai_strict_schema(value)
+    elif isinstance(node, list):
+        for value in node:
+            _assert_openai_strict_schema(value)
+
+
+def test_event_candidate_schema_omits_ref_defaults() -> None:
+    from app.providers.structured_format import openai_json_schema_format
+    from app.schemas.detection import EventCandidate
+
+    payload = openai_json_schema_format(EventCandidate)
+    _assert_openai_strict_schema(payload["json_schema"]["schema"])
+
+
+def test_claim_resolution_schema_omits_ref_defaults() -> None:
+    from app.providers.structured_format import openai_json_schema_format
+    from app.schemas.claims import ClaimExtractionBatch, ClaimResolutionBatch
+
+    for schema in (ClaimResolutionBatch, ClaimExtractionBatch):
+        payload = openai_json_schema_format(schema)
+        _assert_openai_strict_schema(payload["json_schema"]["schema"])

@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.core.text import is_placeholder_text
 from app.domain.enums import EntityType
 
 
@@ -58,12 +59,22 @@ def _normalize_enum_token(value: object) -> object:
 class EventCandidate(BaseModel):
     event_type: str = "unknown"
     what_happened: str
-    occurred_at: datetime | None = None
-    country_code: str | None = "AR"
-    province: str | None = None
-    locality: str | None = None
-    neighborhood: str | None = None
-    address_text: str | None = None
+    occurred_at: datetime | None = Field(
+        default=None,
+        description="Instante del suceso solo con hora explícita y fecha identificable en la fuente. "
+        "Fecha sin hora u hora aproximada: null. No usar la hora de publicación ni completar con medianoche.",
+    )
+    country_code: str | None = Field(default="AR", description="País del suceso, código ISO 3166-1 alpha-2.")
+    province: str | None = Field(
+        default=None, description="Jurisdicción de primer nivel: provincia o ciudad autónoma. "
+        "CABA: Ciudad Autónoma de Buenos Aires; distinta de la provincia de Buenos Aires.",
+    )
+    locality: str | None = Field(
+        default=None, description="Ciudad o localidad del suceso, no provincia ni barrio. "
+        "Para CABA: Ciudad Autónoma de Buenos Aires.",
+    )
+    neighborhood: str | None = Field(default=None, description="Barrio dentro de la localidad, solo si está identificado.")
+    address_text: str | None = Field(default=None, description="Dirección o intersección explícita del suceso.")
     latitude: float | None = None
     longitude: float | None = None
     entities: list[ExtractedEntity] = Field(default_factory=list)
@@ -79,6 +90,33 @@ class EventCandidate(BaseModel):
     gate_reason: str | None = None
     location_confidence: float = Field(default=0.5, ge=0.0, le=1.0)
 
+    @field_validator(
+        "country_code", "province", "locality", "neighborhood", "address_text",
+        "editorial_reason", "gate_reason", "occurred_at", "latitude", "longitude",
+        mode="before",
+    )
+    @classmethod
+    def _normalize_optional_values(cls, value: object) -> object:
+        if isinstance(value, str):
+            return None if is_placeholder_text(value) else value.strip()
+        return value
+
+    @field_validator("occurred_at", mode="before")
+    @classmethod
+    def _do_not_promote_date_to_midnight(cls, value: object) -> object:
+        # A date alone is not an instant. Keep the existing datetime schema;
+        # the source/what_happened can retain the date without inventing an hour.
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return None
+        if isinstance(value, str):
+            try:
+                date.fromisoformat(value.strip())
+            except ValueError:
+                pass
+            else:
+                return None
+        return value
+
     @field_validator("editorial_scope", "editorial_topic", "political_relevance", "public_interest_relevance", mode="before")
     @classmethod
     def _normalize_editorial_enums(cls, value: object) -> object:
@@ -90,3 +128,25 @@ class DedupDecision(BaseModel):
     event_id: UUID | None = None
     confidence: float = 0.0
     reason: str = ""
+
+
+class AmbiguousDedupDecision(BaseModel):
+    decision: Literal["SAME_EVENT", "DIFFERENT_EVENT", "UNSURE"]
+    confidence: float = 0.0
+    reason: str = ""
+
+    @field_validator("decision", mode="before")
+    @classmethod
+    def _normalize_decision(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        token = value.strip().upper().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "EXISTING_EVENT": "SAME_EVENT",
+            "SAME": "SAME_EVENT",
+            "NEW_EVENT": "DIFFERENT_EVENT",
+            "DIFFERENT": "DIFFERENT_EVENT",
+            "UNKNOWN": "UNSURE",
+            "UNCERTAIN": "UNSURE",
+        }
+        return aliases.get(token, token)

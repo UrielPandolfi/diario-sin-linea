@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from app.core.article_body import context_claim_ref_map, resolve_article_draft
+from app.core.article_body import block_plain_text, context_claim_ref_map, resolve_article_draft, split_body_paragraphs
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
@@ -16,27 +16,50 @@ from app.core.usage_context import bind_model_role, usage_scope
 from app.domain.enums import ArticleStatus, PipelineStatus
 from app.models import Article, Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
+from app.providers.rate_limit import is_quota_error, is_transient_rate_limit, openai_error_code
 from app.providers.registry import ModelRole, get_structured_provider
 from app.repositories import ArticleRepository, EntityRepository, PipelineRunRepository
 from app.schemas import ArticleContentUpdate
 from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSeverity
-from app.schemas.writing import ArticleDraft
-from app.services.article_context import build_article_context
+from app.schemas.writing import ArticleContext, ArticleDraft
 from app.services.article_service import ArticleService
+from app.services.audit_policy import (
+    merge_audit_result,
+    structural_blocks_rewrite,
+    structural_findings,
+)
+from app.services.evidence_snapshot import (
+    article_context_from_snapshot,
+    bind_snapshot_to_version,
+    evidence_snapshot_for_version,
+)
 from app.services.pipeline_lock import AUDITING_STAGE, is_write_audit_publish_busy
 
 AUDITING_ROLE = "auditing"
 REWRITE_CHANGE_REASON = "audit_rewrite"
 
 
-def normalize_audit_result(result: ArticleAuditResult) -> ArticleAuditResult:
-    """LOW nunca bloquea: passed=false solo con issues HIGH o MEDIUM."""
-    blocking = [
-        issue
-        for issue in result.issues
-        if issue.severity in (AuditIssueSeverity.HIGH, AuditIssueSeverity.MEDIUM)
-    ]
-    return ArticleAuditResult(passed=not blocking, issues=list(result.issues))
+def normalize_audit_result(
+    result: ArticleAuditResult,
+    *,
+    structural: list[AuditIssue] | None = None,
+    article: Article | None = None,
+    snapshot: dict[str, Any] | None = None,
+) -> ArticleAuditResult:
+    """LOW nunca bloquea. Findings estructurales no se pueden silenciar con issues=[]."""
+    from app.services.audit_policy import merge_audit_result
+
+    return merge_audit_result(result, structural=structural, article=article, snapshot=snapshot)
+
+
+def _lead_text(article: Article) -> str:
+    blocks = article.body_blocks
+    if isinstance(blocks, list) and blocks:
+        lead = block_plain_text(blocks[0])
+        if lead:
+            return lead
+    parts = split_body_paragraphs(article.body or "")
+    return parts[0] if parts else ""
 
 
 class AuditService:
@@ -107,13 +130,28 @@ class AuditService:
         except ProviderNotConfiguredError as exc:
             return self._fail(run, event, original_status, str(exc))
         except Exception as exc:
-            return self._fail(run, event, original_status, str(exc))
+            extra: dict[str, Any] = {"technical_ok": False, "passed": None, "audited": False}
+            if is_quota_error(exc):
+                extra["reason"] = "insufficient_quota"
+            elif is_transient_rate_limit(exc) or openai_error_code(exc) == "rate_limit_exceeded":
+                extra["reason"] = "rate_limit_exceeded"
+            return self._fail(run, event, original_status, str(exc), extra=extra)
 
-    def _fail(self, run: PipelineRun, event: Event, original_status: Any, message: str) -> dict:
+    def _fail(
+        self,
+        run: PipelineRun,
+        event: Event,
+        original_status: Any,
+        message: str,
+        *,
+        extra: dict[str, Any] | None = None,
+    ) -> dict:
         run.status = PipelineStatus.FAILED
         run.error_message = message
         run.finished_at = utc_now()
         event.status = original_status
+        meta = {**(run.metadata_json or {}), **(extra or {})}
+        run.metadata_json = meta
         self.session.flush()
         self.session.commit()
         return {
@@ -121,6 +159,8 @@ class AuditService:
             "event_id": str(event.id),
             "audited": False,
             "error": message,
+            "passed": None,
+            **{key: meta[key] for key in ("reason", "technical_ok") if key in meta},
         }
 
     def _load_event(self, event_id: UUID) -> Event | None:
@@ -159,20 +199,17 @@ class AuditService:
         if article is None:
             base["reason"] = "no_article"
             return base
-        if article.status != ArticleStatus.DRAFT:
+        if article.status not in {ArticleStatus.DRAFT, ArticleStatus.READY_FOR_REVIEW}:
             base["reason"] = "article_not_draft"
             return base
 
-        article_context = build_article_context(
-            event,
-            entities=self.entities.list_for_event(event.id),
-            pipeline_runs=self.pipeline.list_for_event(event.id, limit=50),
-            max_claims=self.settings.max_writing_claims_per_event,
-            max_sources=self.settings.max_writing_sources_per_event,
-            excerpt_chars=self.settings.writing_excerpt_chars,
-            max_source_contexts=self.settings.max_writing_source_contexts,
-            source_context_chars=self.settings.writing_source_context_chars,
-        )
+        article_context = None
+        snapshot = None
+        if article is not None and article.status in {ArticleStatus.DRAFT, ArticleStatus.READY_FOR_REVIEW}:
+            runs = self.pipeline.list_for_event(event.id, limit=50)
+            snapshot = evidence_snapshot_for_version(runs, article.current_version)
+            article_context = article_context_from_snapshot(snapshot)
+
         cap = self.settings.max_audit_rewrite_cycles
         rewrites = 0
         audits = 0
@@ -181,29 +218,44 @@ class AuditService:
 
         while True:
             bind_model_role(ModelRole.AUDITING.value, provider=self.settings.auditing_provider)
+            structural = structural_findings(snapshot, article)
+            user_prompt = self._audit_user_prompt(article, article_context)
+            self.session.commit()
+            llm_result = auditor.generate_structured(
+                system_prompt=load_prompt("article_audit.md"),
+                user_prompt=user_prompt,
+                schema=ArticleAuditResult,
+            )
             result = normalize_audit_result(
-                auditor.generate_structured(
-                    system_prompt=load_prompt("article_audit.md"),
-                    user_prompt=self._audit_user_prompt(article_context, article),
-                    schema=ArticleAuditResult,
-                )
+                llm_result,
+                structural=structural,
+                article=article,
+                snapshot=snapshot,
             )
             audits += 1
-            # Solo issues bloqueantes alimentan el rewrite; LOW no dispara otro ciclo.
             rewrite_issues = [
                 issue
                 for issue in result.issues
                 if issue.severity in (AuditIssueSeverity.HIGH, AuditIssueSeverity.MEDIUM)
+                and not (issue.reason and structural_blocks_rewrite([issue]))
             ]
             issues = [issue.model_dump(mode="json") for issue in result.issues]
+            bound_snapshot = bind_snapshot_to_version(snapshot, article.current_version) if snapshot else None
             base.update(
                 {
                     "audited": True,
                     "passed": result.passed,
+                    "editorial_passed": result.editorial_passed,
                     "issues": issues,
                     "audit_count": audits,
                     "rewrite_count": rewrites,
                     "version_after": article.current_version,
+                    "structural_issue_count": len(structural),
+                    "claims_fingerprint": (snapshot or {}).get("claims_fingerprint"),
+                    "coverage_run_id": (snapshot or {}).get("coverage_run_id"),
+                    "verification_run_id": (snapshot or {}).get("verification_run_id"),
+                    "evidence_snapshot": bound_snapshot,
+                    "technical_ok": True,
                 }
             )
             run.metadata_json = {**(run.metadata_json or {}), **base}
@@ -212,20 +264,36 @@ class AuditService:
             if result.passed:
                 base["reason"] = "passed"
                 base["cap_exhausted"] = False
+                article.status = ArticleStatus.READY_FOR_REVIEW
+                self.session.flush()
                 return base
 
+            if structural_blocks_rewrite(structural):
+                base["reason"] = "structural_block"
+                base["cap_exhausted"] = False
+                base["passed"] = False
+                article.status = ArticleStatus.DRAFT
+                return base
+
+            # Cap = rewrites máximos. El rewrite #cap se audita en la
+            # siguiente iteración antes de poder devolver cap_exhausted.
             if rewrites >= cap:
                 base["reason"] = "cap_exhausted"
                 base["cap_exhausted"] = True
                 base["passed"] = False
+                article.status = ArticleStatus.DRAFT
                 return base
 
             if writer is None:
                 writer = get_structured_provider(ModelRole.WRITING)
             bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
+            if article_context is None:
+                raise RuntimeError("article_context_missing_for_rewrite")
+            rewrite_prompt = self._rewrite_user_prompt(article_context, article, rewrite_issues)
+            self.session.commit()
             draft = writer.generate_structured(
                 system_prompt=load_prompt("article_writing.md"),
-                user_prompt=self._rewrite_user_prompt(article_context, article, rewrite_issues),
+                user_prompt=rewrite_prompt,
                 schema=ArticleDraft,
             )
             body, body_blocks = resolve_article_draft(
@@ -243,8 +311,11 @@ class AuditService:
                 ),
             )
             rewrites += 1
+            if snapshot is not None:
+                snapshot = bind_snapshot_to_version(snapshot, article.current_version)
             base["rewrite_count"] = rewrites
             base["version_after"] = article.current_version
+            base["evidence_snapshot"] = snapshot
             run.metadata_json = {**(run.metadata_json or {}), **base}
             self.session.flush()
             self.session.commit()
@@ -256,38 +327,52 @@ class AuditService:
 
         raise RuntimeError("audit_loop_escaped")
 
-    def _audit_user_prompt(self, article_context, article: Article) -> str:
+    def _audit_user_prompt(self, article: Article, article_context: ArticleContext | None = None) -> str:
         payload = {
-            "context": json.loads(article_context.model_dump_json()),
-            "draft": {
-                "headline": article.headline,
-                "summary": article.summary,
-                "body": article.body,
-                "body_blocks": article.body_blocks,
-            },
+            "headline": article.headline,
+            "summary": article.summary,
+            "body": article.body,
+            "body_blocks": article.body_blocks,
         }
-        weak = [
-            f"{claim.ref} ({claim.status.value}): {claim.canonical_text}"
-            for claim in (*article_context.single_source_claims, *article_context.uncertain_claims)
-        ]
-        reminder = ""
-        if weak:
-            reminder = (
-                "Claims SINGLE_SOURCE o UNCERTAIN: si el draft los afirma como hecho de Sin Línea "
-                "sin atribución explícita ni incertidumbre, reportá ATTRIBUTION.\n"
-                + "\n".join(weak)
-                + "\n\n"
+        if article_context is not None:
+            from app.services.audit_policy import _claim_ids_from_blocks
+            used = set(_claim_ids_from_blocks(article.body_blocks))
+            claims = [claim for bucket in (article_context.confirmed_claims, article_context.single_source_claims,
+                       article_context.conflicting_claims, article_context.uncertain_claims,
+                       article_context.disproven_claims, article_context.outdated_claims) for claim in bucket]
+            related = {cid for claim in claims if claim.id in used for cid in claim.related_claim_ids}
+            def compact(claim):
+                return {
+                    "claim_id": claim.id, "claim_ref": claim.ref, "canonical_text": claim.canonical_text,
+                    "claim_type": claim.claim_type, "importance": claim.importance.value,
+                    "status": claim.status.value, "proposition_role": claim.proposition_role,
+                    "final_reason": claim.final_reason, "related_claim_ids": claim.related_claim_ids,
+                    "support_basis": claim.support_basis.model_dump(exclude={"document_keys", "information_origins", "evaluated_canonical_text"}) if claim.support_basis else None,
+                }
+            payload["evidence_posture"] = [compact(c) for c in claims if c.id in used | related]
+            # Headline/summary have no claim_refs in the current contract. These
+            # compact candidates let Audit identify their claims without new I/O.
+            payload["headline_claim_candidates"] = [compact(c) for c in claims if c.id not in used | related]
+        payload["lead"] = _lead_text(article)
+        extra = ""
+        if article.published_version is not None:
+            extra = (
+                "Esta es una candidata de actualización. Validala contra evidence_posture actual, "
+                "no contra el artículo live anterior. Marcá si Writing conservó una afirmación "
+                "DISPROVEN u OUTDATED, ocultó un conflicto, agregó algo no respaldado o eliminó "
+                "una atribución necesaria.\n"
             )
         return (
-            "Audita este draft contra el ArticleContext JSON. "
+            extra
+            + "Auditá el lenguaje y que el nivel de certeza respete evidence_posture de esta versión. "
+            "Juzgá titular, bajada y lead por sí mismos: un cuerpo bien atribuido no sana un titular categórico. "
+            "No verifiques hechos ni reevalúes la evidencia o cobertura. "
             "No reescribas el artículo; devolvé passed e issues. "
-            "Revisá también body_blocks y las annotations de claims.\n"
-            + reminder
-            + "\n"
+            "Los candidatos adicionales solo sirven si se usan en titular/bajada; no exijas incluirlos.\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 
-    def _rewrite_user_prompt(self, article_context, article: Article, issues: list[AuditIssue]) -> str:
+    def _rewrite_user_prompt(self, article_context: ArticleContext, article: Article, issues: list[AuditIssue]) -> str:
         payload = {
             "context": json.loads(article_context.model_dump_json()),
             "draft": {
@@ -299,8 +384,11 @@ class AuditService:
             "issues": [issue.model_dump(mode="json") for issue in issues],
         }
         return (
-            "Corregí el draft según estos issues de auditoría. "
-            "No inventes claims fuera del context. "
+            "Corregí el sesgo o el exceso de certeza señalado, respetando el support_basis del snapshot. "
+            "Si el exceso está en titular, bajada o lead, atribuí o calificá ahí; no borres el dato. "
+            "Preservá datos, citas literales y atribuciones. "
+            "No neutralices declaraciones claramente atribuidas. "
+            "No inventes hechos ni uses el context para reabrir verificación factual. "
             "Devolvé body_blocks con claim_refs C1/C2, nunca UUIDs.\n\n"
             + json.dumps(payload, ensure_ascii=False)
         )

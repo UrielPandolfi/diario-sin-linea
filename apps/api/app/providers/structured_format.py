@@ -22,6 +22,25 @@ def format_schema_retry_feedback(exc: Exception) -> str:
     )
 
 
+def _strip_openai_strict_incompatible(node: dict) -> None:
+    """chat.completions json_schema strict: $ref sin siblings; sin `default`."""
+    if not isinstance(node, dict):
+        return
+    if "$ref" in node:
+        ref = node["$ref"]
+        node.clear()
+        node["$ref"] = ref
+        return
+    node.pop("default", None)
+    for value in node.values():
+        if isinstance(value, dict):
+            _strip_openai_strict_incompatible(value)
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    _strip_openai_strict_incompatible(item)
+
+
 def _force_additional_properties_false(node: dict) -> None:
     if not isinstance(node, dict):
         return
@@ -46,10 +65,12 @@ def _force_additional_properties_false(node: dict) -> None:
 def pydantic_json_schema(schema: type) -> dict:
     raw = schema.model_json_schema()
     defs = raw.pop("$defs", None) or raw.pop("definitions", None)
+    _strip_openai_strict_incompatible(raw)
     _force_additional_properties_false(raw)
     if defs:
         for item in defs.values():
             if isinstance(item, dict):
+                _strip_openai_strict_incompatible(item)
                 _force_additional_properties_false(item)
         raw["$defs"] = defs
     raw.pop("$schema", None)

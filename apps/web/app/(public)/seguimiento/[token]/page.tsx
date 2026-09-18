@@ -39,7 +39,7 @@ export default async function SeguimientoPage({ params }: { params: Promise<Para
   try {
     payload = await fetchFollowUp(token);
   } catch (error) {
-    if (error instanceof PublicApiError && error.status === 404) notFound();
+    if (error instanceof PublicApiError && (error.status === 404 || error.status === 503)) notFound();
     throw error;
   }
 

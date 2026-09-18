@@ -297,3 +297,68 @@ def test_priced_mini_gets_snapshot(db_session: Session) -> None:
         assert row.price_book_id is not None
     finally:
         check.close()
+
+
+def test_seal_created_event_usages_before_outer_commit(db_session: Session) -> None:
+    source = SourceService(db_session).create(
+        SourceCreate(
+            name="Seal",
+            preferred_ingestion_method=IngestionMethod.RSS,
+            feed_url="https://seal.test/rss",
+            is_monitored=True,
+            is_enabled=True,
+        )
+    )
+    item = SourceItemService(db_session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url="https://seal.test/a",
+            canonical_url="https://seal.test/a",
+            content_hash="seal1",
+            title="Nota",
+            clean_text="cuerpo",
+        )
+    ).item
+    db_session.commit()
+    event = EventService(db_session).create(
+        EventCreate(
+            title_internal="Suceso sellado",
+            event_type="otro",
+            source_item_id=item.id,
+            short_summary="s",
+        )
+    )
+    started = datetime.now(timezone.utc) - timedelta(seconds=5)
+    run = PipelineRun(
+        source_item_id=item.id,
+        event_id=event.id,
+        stage="event_detection",
+        status=PipelineStatus.SUCCESS,
+        started_at=started,
+    )
+    db_session.add(run)
+    db_session.flush()
+    record_llm_usage(
+        provider="openai",
+        model="gpt-5-nano",
+        prompt_tokens=8,
+        completion_tokens=2,
+        total_tokens=10,
+        duration_ms=5,
+        source_item_id=item.id,
+        stage="event_detection",
+        attribution_kind=ATTRIBUTION_ITEM,
+    )
+    seal_created_event_usages(
+        run.id,
+        event.id,
+        source_item_id=item.id,
+        not_before=started,
+        session=db_session,
+    )
+    row = db_session.scalars(
+        select(LlmUsage).where(LlmUsage.source_item_id == item.id, LlmUsage.stage == "event_detection")
+    ).first()
+    assert row is not None
+    assert row.event_id == event.id
+    assert row.attribution_kind == "direct"

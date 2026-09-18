@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+import json
 from math import sqrt
 from uuid import UUID
 
@@ -12,9 +13,9 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
-from app.core.text import normalize_name, usable_text
+from app.core.text import is_person_name_suffix, normalize_name, usable_text
 from app.core.usage_context import attribution_scope, update_usage_context, usage_scope
-from app.domain.enums import EventSourceRelation, PipelineStatus, SourceItemStatus
+from app.domain.enums import EntityType, EventSourceRelation, PipelineStatus, SourceItemStatus
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
 from app.models.event import EMBEDDING_DIMENSIONS
 from app.providers.base import EmbeddingProvider, ProviderNotConfiguredError, StructuredLLMProvider
@@ -26,11 +27,20 @@ from app.providers.registry import (
 )
 from app.repositories import EntityRepository, EventRepository, PipelineRunRepository, SourceItemRepository
 from app.schemas import EventCreate
-from app.schemas.detection import DedupDecision, EditorialScope, EventCandidate
+from app.schemas.detection import AmbiguousDedupDecision, EditorialScope, EventCandidate, ExtractedEntity
+from app.services.dedup_identity import (
+    DEDUP_FIELDS,
+    coincidence_signals,
+    compare_identity,
+    event_types_compatible,
+    process_overlap_tokens,
+    process_years_conflict,
+    should_ask_ambiguous_dedup,
+)
 from app.services.editorial_gate import (
     EditorialFilterReason,
+    apply_canonical_location,
     evaluate_editorial_gate,
-    fold_place,
     item_editorial_text,
     needs_location_fallback,
     should_filter_sports,
@@ -87,6 +97,7 @@ class DetectionService:
         self.light_llm = light_llm
         self.dedup_llm = dedup_llm
         self.embeddings = embeddings
+        self._match_trace: dict = {}
 
     def detect(self, source_item_id: UUID, *, attempt: int = 1) -> dict:
         item = self.items.get(source_item_id)
@@ -94,7 +105,7 @@ class DetectionService:
             raise ValueError("source_item_not_found")
 
         existing_link = self.events.get_link_for_item(item.id)
-        if existing_link is not None and item.processing_status != SourceItemStatus.PENDING:
+        if existing_link is not None:
             item.processing_status = SourceItemStatus.PROCESSED
             return {"event_id": str(existing_link.event_id), "created": False, "reason": "already_linked"}
 
@@ -160,7 +171,8 @@ class DetectionService:
                 run.status = PipelineStatus.SUCCESS
                 run.event_id = event.id
                 run.finished_at = utc_now()
-                run.metadata_json = {**extract_meta, "reason": reason, "created": created}
+                trace = dict(self._match_trace)
+                run.metadata_json = {**extract_meta, "reason": reason, "created": created, **trace}
                 self.session.flush()
                 if created:
                     seal_created_event_usages(
@@ -168,8 +180,9 @@ class DetectionService:
                         event.id,
                         source_item_id=item.id,
                         not_before=run.started_at,
+                        session=self.session,
                     )
-                return {"event_id": str(event.id), "created": created, "reason": reason}
+                return {"event_id": str(event.id), "created": created, "reason": reason, **trace}
         except ProviderNotConfiguredError as exc:
             return self._fail(item.id, attempt, str(exc))
         except Exception as exc:
@@ -252,11 +265,12 @@ class DetectionService:
             return light
 
         def _call(llm: StructuredLLMProvider) -> EventCandidate:
-            return llm.generate_structured(
+            candidate = llm.generate_structured(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 schema=EventCandidate,
             )
+            return apply_canonical_location(candidate)
 
         if ultra is None:
             return _call(_light()), {}
@@ -293,6 +307,7 @@ class DetectionService:
         item: SourceItem,
         candidate: EventCandidate,
     ) -> tuple[Event, bool, str]:
+        self._match_trace = {}
         url = item.canonical_url or item.url
         by_url = self.events.find_by_url(url)
         if by_url is not None:
@@ -328,71 +343,65 @@ class DetectionService:
         high = self.settings.event_match_high_threshold
         low = self.settings.event_match_low_threshold
         if scored:
-            best_event, best_score = scored[0]
-            if best_score >= high:
+            _, best_score = scored[0]
+            self._match_trace["best_score"] = round(float(best_score), 3)
+            if best_score < low:
+                signaled = [
+                    (event, score)
+                    for event, score in scored
+                    if should_ask_ambiguous_dedup(candidate, self._event_candidate(event))
+                ]
+                if signaled:
+                    self._match_trace["path"] = "ambiguous_below_low"
+                    self._match_trace["offered"] = [
+                        self._coincidence_offer(candidate, event, score)
+                        for event, score in signaled[:5]
+                    ]
+                    return self._resolve_with_ambiguous_dedup(item, candidate, signaled[:1])
+                event = self._create_event(item, candidate)
+                return event, True, f"embedding_low:{best_score:.3f}"
+
+            # Similarity is not factual identity. Contradictory Events are
+            # excluded from auto-merge and from the LLM pair.
+            compatible = [
+                (event, score)
+                for event, score in scored
+                if score >= low
+                and not compare_identity(candidate, self._event_candidate(event)).conflicts
+            ]
+            if not compatible:
+                event = self._create_event(item, candidate)
+                return event, True, "identity_conflict"
+            match_event, match_score = compatible[0]
+            if match_score >= high:
                 self.event_service.attach_source(
-                    best_event,
+                    match_event,
                     item.id,
                     relation_type=EventSourceRelation.CONFIRMING,
                     is_primary=False,
                 )
-                return best_event, False, f"embedding_high:{best_score:.3f}"
-            if low <= best_score < high:
-                decision = self._ask_terra(candidate, scored[:5])
-                if decision.decision == "EXISTING_EVENT" and decision.event_id:
-                    existing = self.events.get(decision.event_id)
-                    if existing is not None:
-                        self.event_service.attach_source(
-                            existing,
-                            item.id,
-                            relation_type=EventSourceRelation.CONFIRMING,
-                            is_primary=False,
-                        )
-                        return existing, False, "terra_existing"
-                event = self._create_event(item, candidate)
-                return event, True, "terra_new"
+                return match_event, False, f"embedding_high:{match_score:.3f}"
+            other = self._event_candidate(match_event)
+            if event_types_compatible(candidate, other) and not process_years_conflict(
+                candidate, other
+            ):
+                self._match_trace["path"] = "ambiguous_band"
+                self._match_trace["offered"] = [
+                    self._coincidence_offer(candidate, match_event, match_score)
+                ]
+                return self._resolve_with_ambiguous_dedup(
+                    item, candidate, [(match_event, match_score)]
+                )
             event = self._create_event(item, candidate)
-            return event, True, f"embedding_low:{best_score:.3f}"
+            return event, True, "identity_conflict"
 
         event = self._create_event(item, candidate)
         return event, True, "no_candidates"
 
     def _level1_match(self, candidate: EventCandidate, recent: list[Event]) -> Event | None:
-        if (
-            candidate.occurred_at is None
-            or not candidate.event_type
-            or candidate.event_type == "unknown"
-            or not candidate.locality
-        ):
-            return None
-
-        candidate_names = {normalize_name(entity.name) for entity in candidate.entities if entity.name}
-        if not candidate_names:
-            return None
-
-        candidate_day = candidate.occurred_at.date()
-
-        for event in recent:
-            if (
-                event.started_at is None
-                or not event.event_type
-                or event.event_type == "unknown"
-                or not event.locality
-            ):
-                continue
-            if candidate_day != event.started_at.date():
-                continue
-            if candidate.event_type != event.event_type:
-                continue
-            if fold_place(candidate.locality) != fold_place(event.locality):
-                continue
-
-            event_names = {entity.normalized_name for entity in self.entities.list_for_event(event.id)}
-            shared_entities = candidate_names & event_names
-            # Same day + type + locality is not enough; entity overlap is vs
-            # list_for_event, never against the event title.
-            if len(shared_entities) >= 2:
-                return event
+        # The current schema has no unique event identifier or precise temporal
+        # identity. Equal location/type/entities cannot prove the same event.
+        # The URL fast-path is handled above; distinct URLs need embeddings/Terra.
         return None
 
     def _score_embeddings(
@@ -428,34 +437,86 @@ class DetectionService:
         scored.sort(key=lambda pair: pair[1], reverse=True)
         return scored
 
-    def _ask_terra(self, candidate: EventCandidate, scored: list[tuple[Event, float]]) -> DedupDecision:
-        llm = self.dedup_llm or get_structured_provider(ModelRole.AMBIGUOUS_DEDUP)
-        slim = candidate.model_dump_json(
-            include={
-                "event_type",
-                "what_happened",
-                "occurred_at",
-                "province",
-                "locality",
-                "neighborhood",
-                "address_text",
-                "entities",
-                "short_summary",
-            }
-        )
-        lines = [
-            f"Candidato: {slim}",
-            "Eventos existentes:",
-        ]
-        for event, score in scored:
-            lines.append(
-                f"- id={event.id} type={event.event_type} score={score:.3f} "
-                f"title={event.title_internal} place={event.locality} summary={event.short_summary}"
+    def _resolve_with_ambiguous_dedup(
+        self,
+        item: SourceItem,
+        candidate: EventCandidate,
+        offered: list[tuple[Event, float]],
+    ) -> tuple[Event, bool, str]:
+        decision = self._ask_ambiguous_dedup(candidate, offered[:1])
+        self._match_trace["dedup_decision"] = decision.decision
+        self._match_trace["dedup_reason"] = decision.reason
+        self._match_trace["dedup_confidence"] = decision.confidence
+        self._match_trace["terra_decision"] = decision.decision
+        self._match_trace["terra_reason"] = decision.reason
+        self._match_trace["terra_confidence"] = decision.confidence
+        if decision.decision == "SAME_EVENT":
+            existing = offered[0][0]
+            self.event_service.attach_source(
+                existing,
+                item.id,
+                relation_type=EventSourceRelation.CONFIRMING,
+                is_primary=False,
             )
+            return existing, False, "terra_existing"
+        event = self._create_event(item, candidate)
+        return event, True, "terra_new"
+
+    def _ask_ambiguous_dedup(
+        self,
+        candidate: EventCandidate,
+        scored: list[tuple[Event, float]],
+    ) -> AmbiguousDedupDecision:
+        llm = self.dedup_llm or get_structured_provider(ModelRole.AMBIGUOUS_DEDUP)
+        event, score = scored[0]
+        other = self._event_candidate(event)
+        payload = {
+            "voyage_similarity": round(float(score), 3),
+            "signals": list(coincidence_signals(candidate, other)),
+            "process_tokens": list(process_overlap_tokens(candidate, other)),
+            "candidate": candidate.model_dump(mode="json", include=DEDUP_FIELDS),
+            "existing_event": {
+                "id": str(event.id),
+                **other.model_dump(mode="json", include=DEDUP_FIELDS),
+            },
+        }
+        self._match_trace["dedup_signals"] = payload["signals"]
+        self._match_trace["dedup_input"] = payload
         return llm.generate_structured(
             system_prompt=load_prompt("deduplication.md"),
-            user_prompt="\n".join(lines),
-            schema=DedupDecision,
+            user_prompt=json.dumps(payload, ensure_ascii=False),
+            schema=AmbiguousDedupDecision,
+        )
+
+    def _coincidence_offer(self, candidate: EventCandidate, event: Event, score: float) -> dict:
+        other = self._event_candidate(event)
+        return {
+            "event_id": str(event.id),
+            "score": round(float(score), 3),
+            "signals": list(coincidence_signals(candidate, other)),
+            "process_tokens": list(process_overlap_tokens(candidate, other)),
+        }
+
+    def _event_candidate(self, event: Event) -> EventCandidate:
+        """Expose stored identity facts in the same shape as the new candidate."""
+        entities = self.session.execute(
+            select(Entity, EventEntity.role)
+            .join(EventEntity, EventEntity.entity_id == Entity.id)
+            .where(EventEntity.event_id == event.id)
+            .order_by(Entity.normalized_name, EventEntity.role)
+        ).all()
+        return EventCandidate(
+            event_type=event.event_type,
+            what_happened=event.title_internal,
+            occurred_at=event.started_at,
+            country_code=event.country_code,
+            province=event.province,
+            locality=event.locality,
+            neighborhood=event.neighborhood,
+            address_text=event.address_text,
+            short_summary=event.short_summary or "",
+            entities=[ExtractedEntity(name=entity.name, entity_type=entity.entity_type, role=role)
+                      for entity, role in entities],
         )
 
     def _create_event(self, item: SourceItem, candidate: EventCandidate) -> Event:
@@ -494,6 +555,10 @@ class DetectionService:
                 continue
             key = (normalized, extracted.entity_type)
             entity = linked.get(key)
+            if entity is None and extracted.entity_type == EntityType.PERSON:
+                entity = _matching_person(linked, normalized)
+                if entity is not None:
+                    _prefer_longer_person_name(entity, extracted.name.strip(), linked)
             if entity is None:
                 entity = Entity(
                     name=extracted.name.strip(),
@@ -502,6 +567,8 @@ class DetectionService:
                 )
                 self.entities.add(entity)
                 self.session.flush()
+                linked[key] = entity
+            else:
                 linked[key] = entity
             role = (extracted.role or "mencionado")[:64]
             if (entity.id, role) in existing_roles:
@@ -527,6 +594,31 @@ class DetectionService:
             )
         self.events.upsert_embedding(event.id, vector, embedder.model)
         self.session.flush()
+
+
+def _matching_person(linked: dict, normalized: str):
+    for (name, entity_type), entity in linked.items():
+        if entity_type != EntityType.PERSON:
+            continue
+        if is_person_name_suffix(name, normalized):
+            return entity
+    return None
+
+
+def _prefer_longer_person_name(entity: Entity, incoming_name: str, linked: dict) -> None:
+    incoming = incoming_name.strip()
+    if not incoming:
+        return
+    current = entity.normalized_name or ""
+    incoming_norm = normalize_name(incoming)
+    if len(incoming_norm) <= len(current):
+        return
+    old_key = (entity.normalized_name, entity.entity_type)
+    entity.name = incoming
+    entity.normalized_name = incoming_norm
+    if old_key in linked:
+        linked.pop(old_key, None)
+    linked[(incoming_norm, entity.entity_type)] = entity
 
 
 def _is_transient(exc: BaseException) -> bool:

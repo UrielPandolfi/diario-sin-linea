@@ -1,8 +1,8 @@
 import type { ArticleClaim } from "@/lib/api/types";
 
 const STATUS_LABELS: Record<string, string> = {
-  SUPPORTED: "Confirmado",
-  SINGLE_SOURCE: "Una fuente",
+  SUPPORTED: "Sostenido",
+  SINGLE_SOURCE: "Independencia desconocida",
   CONFLICTING: "En conflicto",
   UNCERTAIN: "Incierto",
   DISPROVEN: "Desmentido",

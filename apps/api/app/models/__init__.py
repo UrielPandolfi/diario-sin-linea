@@ -1,4 +1,5 @@
-from app.models.article import Article, ArticleVersion, Correction
+from app.models.app_setting import AppSetting
+from app.models.article import Article, ArticleHeroImage, ArticleVersion, Correction
 from app.models.base import Base
 from app.models.claim import Claim, ClaimEvidence, Entity
 from app.models.event import Event, EventEmbedding, EventEntity, EventSource, EventUpdate
@@ -9,7 +10,9 @@ from app.models.reader_case import ReaderCase, ReaderCaseAction
 from app.models.source import Source, SourceItem
 
 __all__ = [
+    "AppSetting",
     "Article",
+    "ArticleHeroImage",
     "ArticleVersion",
     "Base",
     "Claim",

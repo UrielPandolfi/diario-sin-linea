@@ -6,6 +6,7 @@ from typing import Any
 import httpx
 
 from app.providers.base import SearchHit, SearchQuery
+from app.providers.rate_limit import with_transient_http_retry
 
 EXA_SEARCH_URL = "https://api.exa.ai/search"
 _DEFAULT_TIMEOUT = 20.0
@@ -60,6 +61,8 @@ def _build_payload(query: SearchQuery) -> dict[str, Any]:
         "contents": {"highlights": True},
     }
     start = _start_published_date(query)
+    if query.include_domains:
+        payload["includeDomains"] = query.include_domains
     if start:
         payload["startPublishedDate"] = start
     end = _end_published_date(query)
@@ -100,6 +103,9 @@ class ExaSearchProvider:
         self.timeout = timeout
 
     def search(self, query: SearchQuery) -> list[SearchHit]:
+        return with_transient_http_retry(lambda: self._search_once(query))
+
+    def _search_once(self, query: SearchQuery) -> list[SearchHit]:
         payload = _build_payload(query)
         with httpx.Client(timeout=self.timeout) as client:
             response = client.post(

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, aliased, selectinload
 from app.core.article_body import claim_ids_in_body_blocks
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.domain.enums import ArticleStatus, CorrectionKind, EventStatus, EventUpdateType
+from app.domain.enums import ArticleStatus, ClaimStatus, CorrectionKind, EventStatus, EventUpdateType
 from app.models import (
     Article,
     ArticleVersion,
@@ -21,13 +21,54 @@ from app.models import (
     EventUpdate,
     SourceItem,
 )
-from app.repositories import ArticleRepository, EventRepository
+from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
+from app.services.claim_card_presentation import (
+    presentation_for_claim,
+    public_presentation_payload,
+    public_verification_payload,
+)
+from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
+from app.services.evidence_snapshot import evidence_snapshot_for_version
+from app.services.hero_image_service import fill_missing_hero
 from app.services.verification_outcome import verification_view_for_event
 
 PUBLIC_CANDIDATE_CAP = 200
 DEFAULT_LIMIT = 20
 MAX_LIMIT = 50
+SITEMAP_CAP = 10_000
+
+
+class _StatusOverlay:
+    def __init__(self, claim: Claim, status: ClaimStatus) -> None:
+        self._claim = claim
+        self.status = status
+
+    def __getattr__(self, name: str):
+        return getattr(self._claim, name)
+
+
+def _live_claim_states(session: Session, event_id: UUID, version: int) -> dict[str, dict]:
+    runs = PipelineRunRepository(session).list_for_event(event_id, limit=50)
+    snapshot = evidence_snapshot_for_version(runs, version)
+    states: dict[str, dict] = {}
+    if not snapshot:
+        return states
+    context = snapshot.get("article_context")
+    if not isinstance(context, dict):
+        return states
+    for key in (
+        "confirmed_claims",
+        "single_source_claims",
+        "conflicting_claims",
+        "uncertain_claims",
+        "disproven_claims",
+        "outdated_claims",
+    ):
+        for row in context.get(key) or []:
+            if isinstance(row, dict) and row.get("id"):
+                states[str(row["id"])] = row
+    return states
 
 
 def clamp_limit(limit: int | None) -> int:
@@ -70,9 +111,12 @@ def live_content(session: Session, article: Article) -> ArticleVersion | None:
 def source_payloads(event: Event) -> list[dict]:
     rows: list[dict] = []
     seen: set[str] = set()
+    event_places = event_geo_keys(event)
     for link in event.event_sources:
         item = link.source_item
         if item is None:
+            continue
+        if geo_places_conflict(event_places, item_geo_keys(item)):
             continue
         source = item.source
         url = item.canonical_url or item.url
@@ -91,7 +135,16 @@ def source_payloads(event: Event) -> list[dict]:
     return rows
 
 
-def card_payload(event: Event, article: Article, live: ArticleVersion, *, score: float | None = None) -> dict:
+def card_payload(
+    event: Event,
+    article: Article,
+    live: ArticleVersion,
+    *,
+    score: float | None = None,
+    session: Session | None = None,
+) -> dict:
+    if session is not None:
+        fill_missing_hero(session, article)
     payload = {
         "slug": article.slug,
         "public_id": str(event.public_id),
@@ -102,6 +155,7 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
         "published_at": iso(article.published_at),
         "updated_at": iso(event.last_material_update_at),
         "sources": source_payloads(event),
+        "hero_image_url": article.hero_image_url,
     }
     if score is not None:
         payload["score"] = score
@@ -109,30 +163,42 @@ def card_payload(event: Event, article: Article, live: ArticleVersion, *, score:
 
 
 def compact_public_claims(
-    session: Session, event: Event, *, allowed_ids: set[str] | None = None
+    session: Session, event: Event, *, allowed_ids: set[str] | None = None, freeze_to_version: int | None = None
 ) -> list[dict]:
+    claims = list(event.claims)
+    if allowed_ids is not None:
+        claims = [claim for claim in claims if str(claim.id) in allowed_ids]
+    overlay = _live_claim_states(session, event.id, freeze_to_version) if freeze_to_version is not None else {}
+    if overlay:
+        frozen: list = []
+        for claim in claims:
+            state = overlay.get(str(claim.id))
+            status_raw = (state or {}).get("status")
+            if status_raw:
+                try:
+                    frozen.append(_StatusOverlay(claim, ClaimStatus(status_raw)))
+                    continue
+                except ValueError:
+                    pass
+            frozen.append(claim)
+        claims = frozen
     _run, view = verification_view_for_event(session, event.id)
-    editorials = labels_for_event_claims(list(event.claims), view)
-    sol_by_id: dict[str, dict] = {}
-    for cid, sol in view.sol_by_id.items():
-        sol_by_id[cid] = {
-            "status_after": sol.get("status_after"),
-            "unresolved": sol.get("unresolved"),
-            "reason": sol.get("reason"),
-        }
+    editorials = labels_for_event_claims(list(claims), view)
     rows: list[dict] = []
-    for claim in event.claims:
+    for claim in claims:
         if allowed_ids is not None and str(claim.id) not in allowed_ids:
             continue
         source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
+        card = presentation_for_claim(claim, view)
         payload = {
             "id": str(claim.id),
             "canonical_text": claim.canonical_text,
             "status": claim.status.value,
             "importance": claim.importance.value,
             "source_count": len(source_ids),
-            "evidence_count": len(claim.evidence),
-            "verification": sol_by_id.get(str(claim.id)),
+            "evidence_count": len(source_ids),
+            "presentation": public_presentation_payload(card),
+            "verification": public_verification_payload(view.sol_by_id.get(str(claim.id))),
         }
         payload.update(editorial_public_payload(editorials.get(str(claim.id))))
         rows.append(payload)
@@ -204,7 +270,7 @@ def article_payload(event: Event, article: Article, live: ArticleVersion, *, ses
         ).all()
     )
     return {
-        **card_payload(event, article, live),
+        **card_payload(event, article, live, session=session),
         "body": live.body,
         "body_blocks": live.body_blocks,
         "hero_image_url": article.hero_image_url,
@@ -212,7 +278,9 @@ def article_payload(event: Event, article: Article, live: ArticleVersion, *, ses
         "article_id": str(article.id),
         "notices": public_notices(corrections),
         "history": public_history(article, corrections, updates),
-        "claims": compact_public_claims(session, event, allowed_ids=allowed),
+        "claims": compact_public_claims(
+            session, event, allowed_ids=allowed, freeze_to_version=article.published_version
+        ),
     }
 
 
@@ -312,7 +380,10 @@ class FeedRankingService:
             if locality_matches(event.locality, wanted) and public_sort_at(event, article) >= cutoff
         ]
         rows.sort(key=lambda row: (public_sort_at(row[0], row[1]), str(row[1].id)), reverse=True)
-        items = [card_payload(event, article, live) for event, article, live in rows[: clamp_limit(limit)]]
+        items = [
+            card_payload(event, article, live, session=self.session)
+            for event, article, live in rows[: clamp_limit(limit)]
+        ]
         return {"items": items}
 
     def localities(self) -> dict:
@@ -327,6 +398,30 @@ class FeedRankingService:
             names.append(label)
         names.sort(key=lambda value: value.casefold())
         return {"items": names}
+
+    def sitemap_articles(self) -> dict:
+        live = aliased(ArticleVersion)
+        stmt = (
+            select(Article.slug, Article.published_at, Event.last_material_update_at)
+            .join(Event, Event.id == Article.event_id)
+            .join(
+                live,
+                and_(live.article_id == Article.id, live.version_number == Article.published_version),
+            )
+            .where(*public_filters())
+            .order_by(Article.published_at.desc())
+            .limit(SITEMAP_CAP)
+        )
+        items = []
+        for slug, published_at, updated_at in self.session.execute(stmt):
+            items.append(
+                {
+                    "slug": slug,
+                    "published_at": iso(published_at),
+                    "updated_at": iso(updated_at),
+                }
+            )
+        return {"items": items}
 
     def get_article(self, key: str) -> dict | None:
         article = None
@@ -429,7 +524,10 @@ class FeedRankingService:
             cursor_id = _decode_id_cursor(cursor)
             start = next((index + 1 for index, row in enumerate(ranked) if row[1].id == cursor_id), len(ranked))
         window = ranked[start : start + limit]
-        items = [card_payload(event, article, live, score=round(score, 6)) for score, article, event, live in window]
+        items = [
+            card_payload(event, article, live, score=round(score, 6), session=self.session)
+            for score, article, event, live in window
+        ]
         next_cursor = str(window[-1][1].id) if len(window) == limit and start + limit < len(ranked) else None
         return items, next_cursor
 
@@ -445,7 +543,7 @@ class FeedRankingService:
             cursor_id = _decode_id_cursor(cursor)
             start = next((index + 1 for index, row in enumerate(rows) if row[1].id == cursor_id), len(rows))
         window = rows[start : start + limit]
-        items = [card_payload(event, article, live) for event, article, live in window]
+        items = [card_payload(event, article, live, session=self.session) for event, article, live in window]
         next_cursor = str(window[-1][1].id) if len(window) == limit and start + limit < len(rows) else None
         return items, next_cursor
 

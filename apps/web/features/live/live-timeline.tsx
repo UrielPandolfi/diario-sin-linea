@@ -1,6 +1,7 @@
 "use client";
 
 import { FeedEmpty, FeedError, FeedSkeleton } from "@/features/feed/feed-states";
+import { PublicHero } from "@/features/article/public-hero";
 import { fetchLive } from "@/lib/api/public";
 import type { EventCard as EventCardType } from "@/lib/api/types";
 import { formatClock } from "@/lib/relative-time";
@@ -92,6 +93,13 @@ export function LiveTimeline() {
             {item.locality ? ` · ${item.locality}` : ""}
           </p>
           <p className="mt-1 font-heading text-base leading-snug">{item.headline}</p>
+          {item.hero_image_url ? (
+            <PublicHero
+              src={item.hero_image_url}
+              className="mt-3"
+              sizes="(min-width: 768px) 672px, 100vw"
+            />
+          ) : null}
         </Link>
       ))}
       {cursor ? <div ref={sentinel} className="h-8" /> : null}

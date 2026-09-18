@@ -166,7 +166,7 @@ def parse_verification_run(run: PipelineRun | None, *, paired: bool = False) -> 
     return view_from_mapping(meta, finished_at=run.finished_at, paired=paired or has_pair)
 
 
-def is_strong_verification(claim_id: UUID | str, view: VerificationView) -> bool:
+def is_strong_verification(claim_id: UUID | str, view: VerificationView, *, claim: Any = None) -> bool:
     cid = str(claim_id)
     if cid not in view.selected_ids:
         return False
@@ -182,15 +182,37 @@ def is_strong_verification(claim_id: UUID | str, view: VerificationView) -> bool
     role = decision.get("proposition_role")
     basis = decision.get("support_basis") or {}
     if role == "utterance":
-        return (
+        if (
             status_after == ClaimStatus.SUPPORTED.value
             and basis.get("statement_evidence_class") == StatementEvidenceClass.AUTHENTIC_PRIMARY.value
-        )
-    if status_after == ClaimStatus.SUPPORTED.value and not view.primary_source_supports.get(cid):
+        ):
+            return True
+        return _independent_reporting_is_checked(claim, basis, status_after)
+    if status_after == ClaimStatus.SUPPORTED.value and view.primary_source_supports.get(cid):
+        return True
+    if status_after == ClaimStatus.SUPPORTED.value:
         if basis.get("statement_evidence_class") == StatementEvidenceClass.AUTHENTIC_PRIMARY.value:
             return True
         if basis.get("primary_access") == "found_relevant":
             return True
+        if basis.get("kind") == "primary_source":
+            return True
+        return _independent_reporting_is_checked(claim, basis, status_after)
+    return True
+
+
+def _independent_reporting_is_checked(claim: Any, basis: dict[str, Any], status_after: str) -> bool:
+    if status_after != ClaimStatus.SUPPORTED.value:
+        return False
+    kind = basis.get("kind")
+    known = int(basis.get("known_independent_count") or 0)
+    if kind != "independent_reporting" and not (kind is None and known >= 2):
+        return False
+    if claim is None:
+        return False
+    from app.services.verification_policy import looks_sensitive_accusation, requires_authoritative_source
+
+    if requires_authoritative_source(claim) or looks_sensitive_accusation(claim):
         return False
     return True
 
@@ -218,7 +240,7 @@ def is_verification_locked(
 ) -> bool:
     if run is None or not view.paired:
         return False
-    if not is_strong_verification(claim.id, view):
+    if not is_strong_verification(claim.id, view, claim=claim):
         return False
     return not has_new_material_evidence(claim, siblings, run)
 
@@ -232,14 +254,26 @@ def writing_evidence_snapshot(
     claim_meta = (claim_run.metadata_json if claim_run is not None else None) or {}
     verify_meta = (verify_run.metadata_json if verify_run is not None else None) or {}
     fingerprint = verify_meta.get("claims_fingerprint") or claim_meta.get("claims_fingerprint")
+    coverage = verify_meta.get("coverage") or claim_meta.get("coverage")
+    budget = verify_meta.get("verification_budget") if isinstance(verify_meta.get("verification_budget"), dict) else {}
+    central_unverified = list(budget.get("central_unverified") or []) if budget else []
+    incomplete = bool(
+        verify_meta.get("verification_incomplete")
+        or (isinstance(coverage, dict) and coverage.get("verification_incomplete"))
+        or central_unverified
+    )
     return {
         "contract_version": CONTRACT_VERSION,
         "coverage_run_id": str(claim_run.id) if claim_run is not None else None,
         "verification_run_id": str(verify_run.id) if verify_run is not None else None,
+        "based_on_claim_run_id": verify_meta.get("based_on_claim_run_id"),
         "claims_fingerprint": fingerprint,
         "evaluated_claims": verify_meta.get("evaluated_claims") or [],
         "decision_by_claim_id": verify_meta.get("decision_by_claim_id") or {},
-        "coverage": verify_meta.get("coverage") or claim_meta.get("coverage"),
+        "coverage": coverage,
+        "verification_budget": budget or None,
+        "verification_incomplete": incomplete,
+        "central_unverified": central_unverified,
         "stale_verification": verify_run is None and bool(claim_meta.get("claims_fingerprint")),
         "version": version,
     }

@@ -334,8 +334,8 @@ export default function AdminEventDetailPage() {
                       {link.source_item?.title || link.source_item?.url || "SourceItem"}
                     </p>
                     <p className="mt-1 font-sans text-xs text-secondary">
-                      {link.relation_type}
-                      {link.is_primary ? " · primaria" : ""}
+                      {link.relation_type === "INITIAL" ? "inicial (ingesta)" : link.relation_type}
+                      {link.is_primary && link.relation_type !== "INITIAL" ? " · inicial (ingesta)" : ""}
                       {link.source_item ? ` · ${link.source_item.processing_status}` : ""}
                       {link.source_item
                         ? ` · ${labelLookup(BODY_SOURCE_LABELS, link.source_item.body_source)}`
@@ -386,6 +386,7 @@ export default function AdminEventDetailPage() {
                   <tr className="border-b border-border text-left text-secondary">
                     <th className="px-4 py-2 font-medium">Claim</th>
                     <th className="px-4 py-2 font-medium">Estado</th>
+                    <th className="px-4 py-2 font-medium">Resultado</th>
                     <th className="px-4 py-2 font-medium">Etiquetas</th>
                     <th className="px-4 py-2 font-medium">Importancia</th>
                     <th className="px-4 py-2 font-medium">Fuentes</th>
@@ -399,6 +400,12 @@ export default function AdminEventDetailPage() {
                     >
                       <td className="px-4 py-3 text-primary">{claim.canonical_text}</td>
                       <td className="px-4 py-3">{claim.status}</td>
+                      <td className="px-4 py-3 text-xs">
+                        {claim.presentation?.verification_label ?? "—"}
+                        {claim.presentation?.demotion && claim.presentation.demotion !== "none" ? (
+                          <span className="mt-1 block text-secondary">{claim.presentation.demotion}</span>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-3 text-[11px] uppercase tracking-[0.12em] text-accent-petrol">
                         {(claim.editorial_labels ?? []).map(editorialLabelCopy).join(" · ") || "—"}
                       </td>

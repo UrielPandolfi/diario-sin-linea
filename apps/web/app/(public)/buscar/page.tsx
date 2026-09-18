@@ -1,7 +1,12 @@
 import { SearchView } from "@/features/search/search-view";
+import { NO_INDEX_FOLLOW } from "@/lib/seo/metadata";
+import type { Metadata } from "next";
 
-export const metadata = {
+export const metadata: Metadata = {
   title: "Buscar",
+  description: "Buscá sucesos publicados en Sin Línea.",
+  robots: NO_INDEX_FOLLOW,
+  alternates: { canonical: "/buscar" },
 };
 
 export default function SearchPage() {

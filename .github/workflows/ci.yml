@@ -60,6 +60,8 @@ jobs:
           node-version: "22"
       - name: Install
         run: npm install
+      - name: Test
+        run: npm test
       - name: Lint
         run: npm run lint
       - name: Typecheck
@@ -68,3 +70,4 @@ jobs:
         run: npm run build
         env:
           API_URL: http://localhost:8000
+          SITE_URL: http://localhost:3000

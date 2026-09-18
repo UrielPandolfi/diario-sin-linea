@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
@@ -15,9 +16,11 @@ from app.services.article_service import ArticleService
 from app.services.audit_service import AuditService
 from app.services.event_service import EventService
 from app.services.publish_service import PublishService
+from app.services.hero_image_service import HeroImageService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.domain.enums import EntityType
+from tests.editorial_snapshot import persist_version_snapshot
 
 
 def _source(session: Session, **overrides):
@@ -89,6 +92,7 @@ def _seed(session: Session, *, locality: str, headline: str, hash_key: str, body
         ArticleCreate(event_id=event.id, headline=headline, summary=f"Resumen {locality}", body=text)
     )
     session.flush()
+    persist_version_snapshot(session, event, article)
     return event, article
 
 
@@ -184,6 +188,7 @@ def test_search_skips_unpublished_and_finds_live_text(db_session: Session) -> No
     assert article.status_code == 200
     assert article.json()["headline"] == "Colectivos en Pellegrini"
     assert article.json()["public_id"] == str(pub_event.public_id)
+    assert article.json()["hero_image_url"]
     assert by_id.status_code == 200
     assert by_id.json()["slug"] == published.slug
     assert published.slug in {item["slug"] for item in live.json()["items"]}
@@ -206,3 +211,16 @@ def test_nearby_respects_window(db_session: Session, monkeypatch) -> None:
         feed = client.get("/api/v1/feed", params={"scope": "local", "locality": "Rosario"})
     assert article.slug not in {item["slug"] for item in nearby.json()["items"]}
     assert article.slug in {item["slug"] for item in feed.json()["items"]}
+
+
+def test_public_article_tolerates_null_hero(db_session: Session, monkeypatch) -> None:
+    def boom(self, article_id):
+        raise IntegrityError("INSERT", {}, Exception("hero flush"))
+
+    monkeypatch.setattr(HeroImageService, "persist", boom)
+    event, article = _seed(db_session, locality="Rosario", headline="Sin portada", hash_key="nohero")
+    _publish_passed(db_session, event)
+    with TestClient(app) as client:
+        payload = client.get(f"/api/v1/articles/{article.slug}")
+    assert payload.status_code == 200
+    assert payload.json()["hero_image_url"] is None

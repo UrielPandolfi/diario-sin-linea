@@ -14,23 +14,31 @@ const SCOPE: Record<HomeVista, FeedScope> = {
   argentina: "argentina",
 };
 
+function feedKind(vista: HomeVista, locality: string | null): FeedScope {
+  if (!locality) return "argentina";
+  return SCOPE[vista];
+}
+
 export function HomeFeed() {
   const searchParams = useSearchParams();
   const vista = parseVista(searchParams.get("vista"));
   const [locality, setLocality] = useState<string | null>(null);
+  const [ready, setReady] = useState(false);
 
   useEffect(() => {
     setLocality(readLocalityCookie());
+    setReady(true);
   }, []);
 
-  if (!locality) {
+  if (!ready) {
     return <div className="h-40 animate-pulse bg-surface" />;
   }
 
+  const kind = feedKind(vista, locality);
   const emptyTitle =
-    vista === "local" ? `No hay sucesos recientes en ${locality}.` : "Todavía no hay sucesos publicados.";
+    vista === "local" && locality ? `No hay sucesos recientes en ${locality}.` : "Todavía no hay sucesos publicados.";
   const emptyDescription =
-    vista === "local"
+    vista === "local" && locality
       ? "Cuando ocurra algo relevante aparecerá acá."
       : "En cuanto se publique algo, lo vas a ver en este feed.";
 
@@ -45,8 +53,8 @@ export function HomeFeed() {
           <FeedTabs />
         </header>
         <FeedList
-          kind={SCOPE[vista]}
-          locality={locality}
+          kind={kind}
+          locality={locality ?? undefined}
           emptyTitle={emptyTitle}
           emptyDescription={emptyDescription}
         />

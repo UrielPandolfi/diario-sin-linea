@@ -9,15 +9,19 @@ from app.models import Claim, Entity, Event, EventEntity, PipelineRun
 from app.schemas.writing import (
     ArticleContext,
     ContextClaim,
+    ContextClaimDecision,
     ContextEntity,
     ContextEventStub,
     ContextEvidence,
+    ContextExpectedCentral,
     ContextSource,
     ContextSourceText,
+    ContextSupportBasis,
     ContextTimelineItem,
     ContextVerification,
     ContextVerificationSol,
 )
+from app.services.claim_service import comparison_key_for
 from app.services.verification_outcome import pair_from_runs
 
 _IMPORTANCE_RANK = {
@@ -58,18 +62,83 @@ def select_context_claims(claims: Sequence[Claim], *, limit: int) -> list[Claim]
     return ordered[:limit]
 
 
+def claims_snapshot_for_version(runs: Sequence[PipelineRun], version: int) -> list[dict] | None:
+    target = int(version)
+    for run in runs:
+        if run.stage != "writing" or run.status != PipelineStatus.SUCCESS:
+            continue
+        meta = run.metadata_json or {}
+        bound = meta.get("version")
+        if bound is None or int(bound) != target:
+            continue
+        snapshot = meta.get("claims_snapshot")
+        if isinstance(snapshot, list):
+            return list(snapshot)
+    return None
+
+
 def compact_verification(
     run: PipelineRun | None,
     *,
     coverage_gap: bool = False,
     stale: bool = False,
+    claim_run: PipelineRun | None = None,
 ) -> ContextVerification:
+    claim_meta = (claim_run.metadata_json if claim_run is not None else None) or {}
+    verify_meta = (run.metadata_json if run is not None and run.status == PipelineStatus.SUCCESS else None) or {}
+    coverage_raw = verify_meta.get("coverage") if isinstance(verify_meta.get("coverage"), dict) else None
+    if coverage_raw is None:
+        coverage_raw = claim_meta.get("coverage") if isinstance(claim_meta.get("coverage"), dict) else {}
+    gap = coverage_gap or bool(coverage_raw.get("coverage_gap"))
+    expected_rows: list[ContextExpectedCentral] = []
+    for row in coverage_raw.get("expected_central") or []:
+        if not isinstance(row, dict) or not row.get("proposition"):
+            continue
+        expected_rows.append(
+            ContextExpectedCentral(
+                proposition=str(row["proposition"]),
+                role=row.get("role"),
+                match=row.get("match"),
+                gap_reason=row.get("gap_reason"),
+                match_claim_id=str(row["match_claim_id"]) if row.get("match_claim_id") else None,
+            )
+        )
+    budget = verify_meta.get("verification_budget") if isinstance(verify_meta.get("verification_budget"), dict) else {}
+    central_unverified = [str(item) for item in (budget.get("central_unverified") or [])]
+    incomplete = bool(
+        verify_meta.get("verification_incomplete")
+        or coverage_raw.get("verification_incomplete")
+        or central_unverified
+    )
+    decisions: dict[str, ContextClaimDecision] = {}
+    for key, row in (verify_meta.get("decision_by_claim_id") or {}).items():
+        if not isinstance(row, dict):
+            continue
+        basis_raw = row.get("support_basis") if isinstance(row.get("support_basis"), dict) else None
+        basis = None
+        if basis_raw is not None:
+            basis = ContextSupportBasis.model_validate(basis_raw)
+        decisions[str(key)] = ContextClaimDecision(
+            claim_id=str(row.get("claim_id") or key),
+            status=row.get("status"),
+            unresolved=bool(row.get("unresolved")),
+            final_reason=row.get("final_reason"),
+            proposition_role=row.get("proposition_role"),
+            support_basis=basis,
+        )
     if run is None or run.status != PipelineStatus.SUCCESS:
-        return ContextVerification(coverage_gap=coverage_gap, stale_verification=stale)
-    raw = run.metadata_json or {}
-    selected = raw.get("selected") if isinstance(raw.get("selected"), list) else []
+        return ContextVerification(
+            coverage_gap=gap,
+            stale_verification=stale,
+            claims_fingerprint=claim_meta.get("claims_fingerprint"),
+            coverage_run_id=str(claim_run.id) if claim_run is not None else None,
+            expected_central=expected_rows,
+            verification_incomplete=incomplete,
+            central_unverified=central_unverified,
+        )
+    selected = raw_selected(verify_meta)
     sol_rows: list[ContextVerificationSol] = []
-    for row in raw.get("sol") or []:
+    for row in verify_meta.get("sol") or []:
         if not isinstance(row, dict) or not row.get("claim_id"):
             continue
         sol_rows.append(
@@ -81,17 +150,25 @@ def compact_verification(
                 reason=row.get("reason"),
             )
         )
-    gap = coverage_gap
-    coverage = raw.get("coverage") if isinstance(raw.get("coverage"), dict) else {}
-    if coverage.get("coverage_gap"):
-        gap = True
     return ContextVerification(
-        selected=list(selected),
+        selected=selected,
         sol=sol_rows,
         coverage_gap=gap,
         stale_verification=stale,
-        claims_fingerprint=raw.get("claims_fingerprint"),
+        claims_fingerprint=verify_meta.get("claims_fingerprint") or claim_meta.get("claims_fingerprint"),
+        based_on_claim_run_id=str(verify_meta["based_on_claim_run_id"]) if verify_meta.get("based_on_claim_run_id") else None,
+        coverage_run_id=str(claim_run.id) if claim_run is not None else None,
+        verification_run_id=str(run.id),
+        verification_incomplete=incomplete,
+        central_unverified=central_unverified,
+        expected_central=expected_rows,
+        decision_by_claim_id=decisions,
     )
+
+
+def raw_selected(meta: dict) -> list[dict]:
+    selected = meta.get("selected") if isinstance(meta.get("selected"), list) else []
+    return list(selected)
 
 
 def last_success_run(runs: Sequence[PipelineRun], stage: str) -> PipelineRun | None:
@@ -108,6 +185,8 @@ def _to_context_claim(
     excerpt_chars: int,
     item_id_to_ref: dict,
     url_to_ref: dict[str, int],
+    decision: ContextClaimDecision | None = None,
+    related_claim_ids: list[str] | None = None,
 ) -> ContextClaim:
     evidence = []
     for row in claim.evidence:
@@ -142,6 +221,10 @@ def _to_context_claim(
         unit=claim.unit,
         occurred_at=claim.occurred_at,
         evidence=evidence,
+        proposition_role=decision.proposition_role if decision is not None else None,
+        final_reason=decision.final_reason if decision is not None else None,
+        support_basis=decision.support_basis if decision is not None else None,
+        related_claim_ids=related_claim_ids or [],
     )
 
 
@@ -279,8 +362,40 @@ def build_article_context(
     excerpt_chars: int = 400,
     max_source_contexts: int = 6,
     source_context_chars: int = 5000,
+    claim_ids: set[str] | None = None,
+    include_source_contexts: bool = True,
 ) -> ArticleContext:
-    selected = select_context_claims(list(event.claims), limit=max_claims)
+    claim_run, verify_run = pair_from_runs(list(pipeline_runs))
+    coverage = ((claim_run.metadata_json if claim_run is not None else None) or {}).get("coverage") or {}
+    coverage_gap = bool(isinstance(coverage, dict) and coverage.get("coverage_gap"))
+    stale = verify_run is None and claim_run is not None and bool((claim_run.metadata_json or {}).get("claims_fingerprint"))
+    verification = compact_verification(
+        verify_run, coverage_gap=coverage_gap, stale=stale, claim_run=claim_run
+    )
+
+    pool = list(event.claims)
+    if claim_ids is not None:
+        wanted = {str(claim_id) for claim_id in claim_ids}
+        pool = [claim for claim in pool if str(claim.id) in wanted]
+    selected = select_context_claims(pool, limit=max_claims)
+    related: dict[str, list[str]] = {}
+    for pair in ((claim_run.metadata_json if claim_run is not None else None) or {}).get("attribution_pairs", []):
+        a, b = pair.get("attribution_claim_id"), pair.get("factual_claim_id")
+        if a and b:
+            related.setdefault(a, []).append(b)
+            related.setdefault(b, []).append(a)
+    groups: dict[str, list[str]] = {}
+    for claim in event.claims:
+        groups.setdefault(comparison_key_for(claim), []).append(str(claim.id))
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        for cid in members:
+            others = [other for other in members if other != cid]
+            bucket = related.setdefault(cid, [])
+            for other in others:
+                if other not in bucket:
+                    bucket.append(other)
     sources, item_id_to_ref, url_to_ref = _sources(event, limit=max_sources)
     claim_refs: dict[str, str] = {}
     buckets: dict[str, list[ContextClaim]] = {name: [] for name in _STATUS_BUCKET.values()}
@@ -297,14 +412,10 @@ def build_article_context(
                 excerpt_chars=excerpt_chars,
                 item_id_to_ref=item_id_to_ref,
                 url_to_ref=url_to_ref,
+                decision=verification.decision_by_claim_id.get(str(claim.id)),
+                related_claim_ids=related.get(str(claim.id)),
             )
         )
-
-    claim_run, verify_run = pair_from_runs(list(pipeline_runs))
-    coverage = ((claim_run.metadata_json if claim_run is not None else None) or {}).get("coverage") or {}
-    coverage_gap = bool(isinstance(coverage, dict) and coverage.get("coverage_gap"))
-    stale = verify_run is None and claim_run is not None and bool((claim_run.metadata_json or {}).get("claims_fingerprint"))
-    verification = compact_verification(verify_run, coverage_gap=coverage_gap, stale=stale)
     return ArticleContext(
         event=ContextEventStub(
             event_id=str(event.id),
@@ -327,7 +438,9 @@ def build_article_context(
         sources=sources,
         source_contexts=_source_contexts(
             event, limit=max_source_contexts, text_chars=source_context_chars
-        ),
+        )
+        if include_source_contexts
+        else [],
         claim_refs=claim_refs,
         verification=verification,
     )

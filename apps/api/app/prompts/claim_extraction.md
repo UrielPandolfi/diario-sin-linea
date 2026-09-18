@@ -13,7 +13,7 @@ Antes de emitir un Claim preguntate:
 
 Si la respuesta no es clara, no lo extraigas. Es preferible devolver `claims: []` a inventar Claims triviales. `[]` es un resultado válido.
 
-El suceso a cubrir está en el título interno y el resumen. Extraé afirmaciones sobre ESE hecho.
+El suceso a cubrir está en el título interno y el resumen. Extraé afirmaciones sobre ESE hecho. Las magnitudes se toman del snippet de las fuentes: si el snippet trae una cifra distinta a la del título interno, extraé la del snippet como Claim nuevo.
 
 No extraigas un segundo suceso que aparezca en las mismas páginas u otras fuentes (otra inauguración, otro acto oficial el mismo día, otra obra). Si una fuente habla de otro hecho, ignorá esas oraciones.
 
@@ -57,6 +57,18 @@ Preferí pocos claims HIGH o MEDIUM útiles a muchos LOW.
 
 Claims materiales y atómicos:
 
+Para cada declaración relevante distinguí la atribución de su contenido. No conviertas “X afirmó Y” en “Y es verdadero” como único Claim: conservá hablante, verbo de atribución, contenido declarado y, si hay cifra, `normalized_value`/`unit` en la declaración. Si el contenido es material y objetivamente comprobable, podés completar `factual_content` con una proposición propia (mismos campos que el claim, sin evidence ni factual_content) para contrastar Y después, sin borrar quién lo sostuvo. El servicio la convierte en otro Claim con las mismas publicaciones como reportes iniciales, sin asumir confirmación. Esto es obligatorio para contenido material sobre cantidades, porcentajes, dinero, estadísticas, fechas relevantes, resultados electorales, cargos, leyes/decretos/regulaciones, presupuestos, registros, acusaciones factuales y hechos históricos. Resolvé pronombres solo con el contexto disponible; conservá aproximaciones y períodos, sin inventarlos.
+
+Ejemplo: “Juan Pérez afirmó que el costo fiscal sería de 40.000 millones de pesos anuales” es `declaracion`, subject=Juan Pérez, predicate=afirmó que, canonical_text con la atribución, normalized_value="40000", unit según el texto. No lo reemplaces por “El costo fiscal es de 40.000 millones”. Si el monto es material, factual_content puede ser la hipótesis cuantitativa aparte. Ambas son hipótesis a resolver. No emitas además una copia plana de factual_content. Una fuente oficial posterior con otro monto crea otro Claim; no trates la declaración histórica como el mismo hecho.
+
+Usá factual_content=null para opiniones subjetivas, promesas y valoraciones políticas sin criterio objetivo de comparación (“las reformas más importantes/profundas”, “más reformas que todos los gobiernos de los últimos 100 años” sin definir qué cuenta como reforma). La presencia de un número como “100 años” no convierte una valoración en estadística. No confundas una acusación verificable con una culpabilidad confirmada.
+
+Deduplicá paráfrasis: para el mismo conocimiento usá un único claim y combiná evidence. Si dos redacciones equivalentes sobreviven, normalizá al mismo subject, predicate y object_text; esas dimensiones se usan para conservar identidad. “Implementará un paquete de reformas más profundo” y “abrirá una nueva etapa con reformas aún más profundas”, del mismo actor y sin diferencias materiales de fecha, condición o contenido, son una misma promesa. No fusionés atribución con hecho, valores/períodos distintos ni condiciones diferentes.
+
+Una atribución como “The Economist reconoció Y” es una declaración, no la confirmación de Y. Conservá al medio como sujeto y quién nos transmite esa atribución (por ejemplo, “Según La Derecha Diario, The Economist reconoció Y”). La evidencia debe seguir apuntando a la publicación intermediaria; no inventes acceso a The Economist. Si verificar Y también aporta valor, emití otra proposición estadística diferenciada, sin tratar la cita como confirmación del dato.
+
+En una trayectoria “desde valores cercanos a A antes de su llegada al poder hasta alrededor de B”, conservá ambos valores, sus aproximaciones, indicador, unidad, ámbito y las referencias temporales literales. No inventes fechas para esos extremos. No resumas la trayectoria en normalized_value=B: usá normalized_value=null y conservá la trayectoria completa en object_text y canonical_text. No omitas “antes de su llegada al poder”.
+
 Cada Claim representa exactamente una proposición material que pueda verificarse o contradecirse de forma independiente. Si una oración mezcla dicho + vigencia + alcance normativo, o denuncia presentada + culpabilidad, SEPARALAS. No dejes un Claim “ómnibus”.
 
 Incorrecto (un solo Claim compuesto): Myriam Bregman dijo que el régimen se aplica a menores de 14 años y que entra en vigencia el mes próximo.
@@ -83,7 +95,9 @@ Ejemplo: Natalia Laura Federman tuvo acceso total a información estratégica de
 
 Noticias judiciales:
 
-Priorizá proposiciones en este orden: 1) la decisión judicial; 2) el estado procesal (sobreseimiento, condena, procesamiento, rechazo de recurso); 3) la consecuencia jurídica (firmeza, vía de impugnación restante); 4) acusaciones o hechos materiales del caso si siguen siendo centrales.
+Priorizá proposiciones en este orden: 1) la decisión judicial; 2) el estado procesal (sobreseimiento, condena, procesamiento, rechazo de recurso); 3) la consecuencia jurídica (firmeza, vía de impugnación restante); 4) la declaración de quien dicta (jueza, tribunal, fiscal) si es central; 5) acusaciones o hechos materiales del caso si siguen siendo centrales.
+
+La declaración de la jueza (u otra autoridad que dicta) es un Claim distinto de la resolución. Extraé el dicho como `declaracion` HIGH si es central, con un `excerpt` literal del snippet. El excerpt de una condena, una suspensión o el fallo no respalda lo que la jueza habría dicho. No mezcles decisión + declaración en un solo Claim.
 
 Detalles probatorios secundarios (informes médicos, pericias, “lesiones inespecíficas”, testimonios de contexto, cronología accesoria) tienen menor prioridad. No los extraigas como Claim HIGH si ya hay decisión, estado procesal o consecuencia jurídica. Si los extraés, usá LOW.
 
@@ -125,6 +139,7 @@ Devolvé JSON con este esquema:
   - normalized_value, unit: para cifras u otras magnitudes comparables
   - occurred_at: ISO 8601 si la afirmación tiene fecha propia; si no, null
   - evidence: lista de {source_ref, evidence_type, excerpt, confidence}
+  - factual_content: proposición material comprobable dentro de una declaración, con canonical_text, claim_type, importance, subject, predicate, object_text, normalized_value, unit y occurred_at; null cuando no corresponde
     - evidence_type: SUPPORTS | CONTRADICTS | QUALIFIES | MENTIONS
     - source_ref: entero 1..N de las fuentes numeradas
     - confidence: 0 a 1

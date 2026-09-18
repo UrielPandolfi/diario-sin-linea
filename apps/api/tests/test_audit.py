@@ -1,8 +1,10 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
+from openai import RateLimitError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -23,6 +25,7 @@ from app.main import app
 from app.models import Article, ArticleVersion, Claim, ClaimEvidence, PipelineRun
 from app.providers.base import ProviderNotConfiguredError
 from app.providers.fakes import FakeStructuredLLM
+from app.providers.openai_provider import OpenAIStructuredProvider
 from app.providers.registry import ModelRole, get_structured_provider
 from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
 from app.schemas.auditing import ArticleAuditResult, AuditIssue, AuditIssueSeverity, AuditIssueType
@@ -34,6 +37,7 @@ from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.writing_service import WRITING_STAGE, WritingService
+from tests.editorial_snapshot import persist_version_snapshot
 
 
 def test_normalize_audit_result_low_issues_do_not_block() -> None:
@@ -218,6 +222,7 @@ def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str 
         )
     )
     session.flush()
+    persist_version_snapshot(session, event, article)
     return event, article
 
 
@@ -254,22 +259,36 @@ def test_audit_low_only_passes_without_rewrite(db_session: Session) -> None:
     assert llm.calls == ["ArticleAuditResult"]
 
 
-def test_audit_prompt_has_context_and_draft_not_html(db_session: Session) -> None:
+def test_audit_payload_keeps_raw_sources_out_and_receives_compact_posture(db_session: Session) -> None:
     html = "<html><body><article>SECRETO raw_text no debe ir al prompt</article></body></html>"
     event, article = _seed_draft(db_session, raw_text=html)
     llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
     result = _service(db_session, llm).audit(event.id, trigger="admin")
     prompt = llm.user_prompts[0]
+    dumped = prompt.casefold()
     assert result["passed"] is True
     assert article.headline in prompt
+    assert article.summary in prompt
     assert "Un colectivo chocó en Pellegrini" in prompt
-    assert "confirmed_claims" in prompt
     assert "body_blocks" in prompt
     assert html not in prompt
     assert "raw_text" not in prompt
     assert "SECRETO" not in prompt
     assert "ANTHROPIC_API_KEY" not in prompt
     assert "DETECTED" not in prompt
+    for forbidden in (
+        "confirmed_claims",
+        "evidence_snapshot",
+        "structural_findings",
+        "heuristic_signals",
+        "decision_by_claim_id",
+        "articlecontext",
+        "coverage_gap",
+        "central_unverified",
+    ):
+        assert forbidden not in dumped
+    assert "evidence_posture" in prompt
+    assert "headline_claim_candidates" in prompt
     assert llm.calls == ["ArticleAuditResult"]
 
 
@@ -287,10 +306,7 @@ def test_passed_audit_marks_ready_without_rewrite(db_session: Session) -> None:
     assert result["audit_count"] == 1
     assert result["cap_exhausted"] is False
     assert result["reason"] == "passed"
-    assert article.status == ArticleStatus.DRAFT
-    assert article.current_version == version
-    assert event.status == event_status == EventStatus.DETECTED
-    assert llm.calls == ["ArticleAuditResult"]
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
     versions = db_session.scalar(
         select(func.count()).select_from(ArticleVersion).where(ArticleVersion.article_id == article.id)
     )
@@ -333,6 +349,9 @@ def test_fail_rewrite_respects_cap(db_session: Session) -> None:
     assert llm.calls.count("ArticleAuditResult") == 3
     assert llm.calls.count("ArticleDraft") == 2
     assert result["issues"]
+    assert llm.calls[-1] == "ArticleAuditResult"
+    audit_prompts = [prompt for call, prompt in zip(llm.calls, llm.user_prompts) if call == "ArticleAuditResult"]
+    assert "Corrección dos" in audit_prompts[-1]
 
 
 def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_session: Session) -> None:
@@ -367,7 +386,7 @@ def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_s
     assert retry["passed"] is True
     assert retry["rewrite_count"] == 0
     assert article.id == article_id
-    assert article.status == ArticleStatus.DRAFT
+    assert article.status == ArticleStatus.READY_FOR_REVIEW
     assert count == 1
     assert retry_llm.calls == ["ArticleAuditResult"]
 
@@ -461,7 +480,7 @@ def test_admin_audit_accepted_and_get_compact(db_session: Session, monkeypatch) 
         response = client.post(f"/api/v1/admin/events/{event.id}/audit", headers=ADMIN_ORIGIN)
     assert detail.status_code == 200
     body = detail.json()
-    assert body["article"]["status"] == ArticleStatus.DRAFT.value
+    assert body["article"]["status"] == ArticleStatus.READY_FOR_REVIEW.value
     assert body["audit"]["passed"] is True
     assert body["audit"]["cap_exhausted"] is False
     assert body["status"] == EventStatus.DETECTED.value
@@ -563,6 +582,7 @@ def test_write_enqueues_audit_only_when_written(monkeypatch) -> None:
 
 def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
     queued: list[tuple] = []
+    monkeypatch.setattr(get_settings(), "auto_publish", True)
 
     class Sess:
         def commit(self) -> None:
@@ -630,6 +650,16 @@ def test_audit_enqueues_publish_only_when_passed(monkeypatch) -> None:
     audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
     assert queued == []
 
+    queued.clear()
+    monkeypatch.setattr(
+        "app.workers.tasks.ArticleRepository",
+        lambda session: SimpleNamespace(
+            get_by_event_id=lambda *_a, **_k: SimpleNamespace(editorial_hold=False, published_version=1)
+        ),
+    )
+    audit_event_article.run("00000000-0000-0000-0000-000000000001", "writing")
+    assert queued == [("00000000-0000-0000-0000-000000000001", "writing")]
+
 
 def test_auditing_rejects_anthropic(monkeypatch) -> None:
     settings = get_settings()
@@ -656,22 +686,23 @@ def test_published_second_audit_does_not_create_article(db_session: Session) -> 
     assert article.id
 
 
-def test_audit_prompt_covers_unattributed_characterization_and_causality() -> None:
+def test_audit_prompt_covers_language_bias_not_verification() -> None:
     prompt = load_prompt("article_audit.md")
+    folded = prompt.casefold()
     assert "UNATTRIBUTED_CHARACTERIZATION" in prompt
-    assert "SUPPORTED no significa que cualquier formulación" in prompt
-    assert "mayor crisis diplomática entre Argentina y Brasil" in prompt
-    assert "Algunas de las fuentes consultadas describieron el episodio" in prompt
-    assert "desataron la crisis diplomática" in prompt
-    assert "Tras los dichos de Milei, Brasil llamó a consultas a su embajador" in prompt
-    assert "Julio Bitelli" in prompt
+    assert "voz de Sin Línea" in prompt or "voz de sin línea" in folded
+    assert "citas y declaraciones claramente atribuidas" in folded
+    assert "no las neutralices" in folded
+    assert "no verifiques hechos" in folded
+    assert "no apliques una lista ciega" in folded
+    assert "una muerte" in folded and "condena" in folded
+    assert "supported no significa" not in folded
+    assert "coverage_gap" not in folded
+    assert "decision_by_claim_id" not in folded
+    assert "si el draft lo afirma como hecho de sin línea, reportá attribution" not in folded
+    assert "$98,08 millones" not in prompt
     assert "Nunca uses un type OTHER" in prompt
-    assert "Causalidad más fuerte que la evidencia → CAUSALITY" in prompt
-    assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
-    assert "el martes en Carolina del Norte" in prompt
-    assert "$98,08 millones" in prompt
-    assert "No exijas annotation de contexto ordinario" in prompt
-    assert "Si el draft lo afirma como hecho de Sin Línea, reportá ATTRIBUTION" in prompt
+    assert "NUMBER" in prompt and "No uses NUMBER" in prompt
 
 
 def test_writing_prompt_covers_characterization_and_causality() -> None:
@@ -683,10 +714,10 @@ def test_writing_prompt_covers_characterization_and_causality() -> None:
     assert "Los insultos de Milei desataron la crisis" in prompt
     assert "Tras los dichos de Milei, el gobierno brasileño llamó a consultas" in prompt
     assert "sin “según varias fuentes” delante de cada oración" in prompt or 'sin "según varias fuentes"' in prompt
-    assert "Son respaldo suficiente para hechos ordinarios" in prompt
     assert "no sustituyen un Claim para afirmaciones materialmente sensibles" in prompt
     assert "Párrafos o segmentos enteros con `claim_refs: []` son correctos" in prompt
     assert "NUNCA se convierte en hecho afirmado por Sin Línea" in prompt
+    assert "Atribuir" in prompt or "según X" in prompt
 
 
 def test_audit_schema_has_no_other_catchall() -> None:
@@ -750,6 +781,87 @@ def test_unattributed_characterization_low_does_not_block() -> None:
         ],
     )
     assert normalize_audit_result(result).passed is True
+
+
+def test_audit_flags_evaluative_voice_and_rewrites(db_session: Session) -> None:
+    event, article = _seed_draft(
+        db_session,
+        headline="La escandalosa decisión de la jueza kirchnerista",
+    )
+    article.summary = "Una polémica magistrada fulminó la ley."
+    article.body = (
+        "La escandalosa decisión de la jueza kirchnerista suspendió la norma. "
+        "Según la jueza, «esta norma es inconstitucional»."
+    )
+    db_session.flush()
+    blocking = ArticleAuditResult(
+        passed=False,
+        issues=[
+            AuditIssue(
+                type=AuditIssueType.ADJECTIVE,
+                severity=AuditIssueSeverity.MEDIUM,
+                text="escandalosa decisión de la jueza kirchnerista",
+                explanation="adjetivación valorativa y etiqueta partidaria en voz de Sin Línea",
+                suggested_fix="La jueza suspendió la norma.",
+            )
+        ],
+    )
+    llm = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": [blocking, _pass_audit()],
+            "ArticleDraft": [_draft(headline="Una jueza suspendió la norma")],
+        }
+    )
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    audit_prompt = llm.user_prompts[0]
+    assert "escandalosa decisión de la jueza kirchnerista" in audit_prompt
+    assert "decision_by_claim_id" not in audit_prompt.casefold()
+    assert result["rewrite_count"] == 1
+    assert result["passed"] is True
+    db_session.refresh(article)
+    assert article.headline == "Una jueza suspendió la norma"
+
+
+def test_audit_respects_attributed_quote_without_verification_objections(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    article.headline = "Una jueza suspendió la Ley 27.801"
+    article.summary = "La magistrada cuestionó la constitucionalidad de la norma."
+    article.body = (
+        "La jueza María Servini suspendió la Ley 27.801. "
+        "Según la jueza, «esta norma es inconstitucional porque anula garantías básicas»."
+    )
+    db_session.flush()
+    llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    prompt = load_prompt("article_audit.md").casefold()
+    user = llm.user_prompts[0]
+    assert "según la jueza" in user.casefold()
+    assert "no las neutralices" in prompt
+    assert result["passed"] is True
+    assert result["issues"] == []
+    assert result["rewrite_count"] == 0
+    assert "unsupported_claim" not in user.casefold()
+    assert "verific" not in user.casefold() or "no verifiques" in llm.user_prompts[0].casefold()
+
+
+def test_audit_approves_neutral_text_without_verification_objections(db_session: Session) -> None:
+    event, article = _seed_draft(db_session)
+    article.headline = "Una jueza suspendió la Ley 27.801"
+    article.summary = "La resolución no está firme."
+    article.body = (
+        "La jueza María Servini hizo lugar a un amparo y suspendió la Ley 27.801. "
+        "La decisión no está firme."
+    )
+    db_session.flush()
+    llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
+    result = _service(db_session, llm).audit(event.id, trigger="admin")
+    user = llm.user_prompts[0].casefold()
+    assert result["passed"] is True
+    assert result["issues"] == []
+    assert "coverage" not in user
+    assert "número" not in user
+    assert "single_source" not in user
+    assert "no verifiques hechos" in user
 
 
 def test_unattributed_characterization_medium_triggers_rewrite_loop(db_session: Session) -> None:
@@ -829,3 +941,120 @@ def test_audit_rewrite_remaps_claim_refs_to_uuid(db_session: Session) -> None:
     segment = article.body_blocks[0]["segments"][0]
     assert segment["claim_ids"] == [str(claim.id)]
     assert "claim_refs" not in segment
+
+
+def _openai_rate_limit(*, message: str, code: str = "rate_limit_exceeded", retry_after: str | None = "1") -> RateLimitError:
+    headers = {}
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
+    request = httpx.Request("POST", "https://api.openai.com/v1/chat/completions")
+    payload = {"error": {"message": message, "type": code, "code": code}}
+    response = httpx.Response(429, request=request, headers=headers, json=payload)
+    return RateLimitError(message, response=response, body=payload)
+
+
+def _openai_completion(content: str):
+    return SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+    )
+
+
+def _openai_audit_client(outcomes: list):
+    pending = list(outcomes)
+
+    class Completions:
+        def create(self, **kwargs):
+            item = pending.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return _openai_completion(item)
+
+    return SimpleNamespace(chat=SimpleNamespace(completions=Completions()))
+
+
+def test_rate_limit_after_rewrite_retries_call_without_new_version(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    monkeypatch.setattr("app.providers.rate_limit.get_settings", lambda: SimpleNamespace(job_max_retries=3))
+    monkeypatch.setattr("app.providers.rate_limit._jitter", lambda wait: 0.0)
+    delays: list[float] = []
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", delays.append)
+    event, article = _seed_draft(db_session)
+    version_before = article.current_version
+    client = _openai_audit_client(
+        [
+            _fail_audit().model_dump_json(),
+            _draft(headline="Draft corregido").model_dump_json(),
+            _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
+            _pass_audit().model_dump_json(),
+        ]
+    )
+    llm = OpenAIStructuredProvider(api_key="k", model="gpt-4o", client=client)
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert result["passed"] is True
+    assert result["rewrite_count"] == 1
+    assert article.current_version == version_before + 1
+    assert article.headline == "Draft corregido"
+    assert delays == [20.0]
+    published = PublishService(db_session).publish(event.id, trigger="test")
+    assert published["published"] is True
+
+
+def test_rate_limit_exhausted_after_rewrite_does_not_duplicate_or_publish(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    monkeypatch.setattr("app.providers.rate_limit.get_settings", lambda: SimpleNamespace(job_max_retries=1))
+    monkeypatch.setattr("app.providers.rate_limit._jitter", lambda wait: 0.0)
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", lambda _s: None)
+    event, article = _seed_draft(db_session)
+    client = _openai_audit_client(
+        [
+            _fail_audit().model_dump_json(),
+            _draft(headline="Draft corregido").model_dump_json(),
+            _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
+            _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
+        ]
+    )
+    llm = OpenAIStructuredProvider(api_key="k", model="gpt-4o", client=client)
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    runs = list(
+        db_session.scalars(
+            select(PipelineRun)
+            .where(PipelineRun.event_id == event.id, PipelineRun.stage == AUDITING_STAGE)
+            .order_by(PipelineRun.started_at)
+        )
+    )
+    assert result["audited"] is False
+    assert result.get("passed") is not True
+    assert result.get("reason") == "rate_limit_exceeded"
+    assert article.current_version == 2
+    assert article.headline == "Draft corregido"
+    assert runs[-1].status == PipelineStatus.FAILED
+    assert runs[-1].error_message
+    assert PublishService(db_session).publish(event.id, trigger="test")["reason"] == "audit_not_passed"
+
+
+def test_insufficient_quota_does_not_retry_or_count_as_editorial(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr("app.services.usage_recorder.record_llm_usage", lambda **_k: None)
+    delays: list[float] = []
+    monkeypatch.setattr("app.providers.rate_limit.time.sleep", delays.append)
+    event, article = _seed_draft(db_session)
+    version = article.current_version
+    client = _openai_audit_client(
+        [
+            _openai_rate_limit(
+                message="You exceeded your current quota",
+                code="insufficient_quota",
+                retry_after="1",
+            )
+        ]
+    )
+    llm = OpenAIStructuredProvider(api_key="k", model="gpt-4o", client=client)
+    result = AuditService(db_session, llm=llm, writer=llm).audit(event.id, trigger="admin")
+    db_session.refresh(article)
+    assert delays == []
+    assert result["audited"] is False
+    assert result.get("reason") == "insufficient_quota"
+    assert article.current_version == version
+    assert PublishService(db_session).publish(event.id, trigger="test")["reason"] == "audit_not_passed"

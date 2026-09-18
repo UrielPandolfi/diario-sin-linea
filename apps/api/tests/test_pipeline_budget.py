@@ -202,6 +202,7 @@ def test_detect_event_fill_quota_replaces_non_created(monkeypatch) -> None:
         ),
     )
     monkeypatch.setattr("app.workers.tasks.research_event.delay", lambda *args: queued.append(args))
+    monkeypatch.setattr("app.workers.tasks.resolve_event_claims.delay", lambda *_a, **_k: None)
     monkeypatch.setattr("app.workers.tasks.allow_new_event_pipeline", lambda poll_id: True)
     monkeypatch.setattr(
         "app.workers.tasks.release_new_event_pipeline",
@@ -238,6 +239,7 @@ def test_detect_event_does_not_fill_quota_on_poll(monkeypatch) -> None:
         lambda session: SimpleNamespace(detect=lambda *_a, **_k: {"created": False, "event_id": "eid"}),
     )
     monkeypatch.setattr("app.workers.tasks.research_event.delay", lambda *_a: None)
+    monkeypatch.setattr("app.workers.tasks.resolve_event_claims.delay", lambda *_a, **_k: None)
     monkeypatch.setattr("app.workers.tasks.allow_new_event_pipeline", lambda poll_id: True)
     monkeypatch.setattr(
         "app.workers.tasks._enqueue_next_for_quota",

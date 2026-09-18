@@ -1,6 +1,6 @@
 import type { NextConfig } from "next";
 
-const apiUrl = process.env.API_URL ?? "http://localhost:8000";
+const apiUrl = process.env.API_URL ?? (process.env.VERCEL ? "" : "http://localhost:8000");
 
 const nextConfig: NextConfig = {
   images: {
@@ -10,6 +10,7 @@ const nextConfig: NextConfig = {
     ],
   },
   async rewrites() {
+    if (!apiUrl) return [];
     return [
       {
         source: "/api/v1/:path*",
@@ -18,6 +19,7 @@ const nextConfig: NextConfig = {
     ];
   },
   async headers() {
+    const noIndex = [{ key: "X-Robots-Tag", value: "noindex, nofollow" }];
     return [
       {
         source: "/seguimiento/:path*",
@@ -27,6 +29,10 @@ const nextConfig: NextConfig = {
           { key: "X-Robots-Tag", value: "noindex, nofollow" },
         ],
       },
+      { source: "/admin", headers: noIndex },
+      { source: "/admin/:path*", headers: noIndex },
+      { source: "/entrar", headers: noIndex },
+      { source: "/onboarding", headers: noIndex },
     ];
   },
 };
