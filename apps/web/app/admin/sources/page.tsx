@@ -1,11 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
-import { adminJson, formatWhen, type AdminIngestionSettings, type AdminSource } from "@/lib/admin";
+import { adminJson, formatWhen, type AdminSource } from "@/lib/admin";
 
 export default function AdminSourcesPage() {
   const [sources, setSources] = useState<AdminSource[]>([]);
-  const [autoPollEnabled, setAutoPollEnabled] = useState(true);
   const [name, setName] = useState("");
   const [feedUrl, setFeedUrl] = useState("");
   const [homepageUrl, setHomepageUrl] = useState("");
@@ -14,16 +13,10 @@ export default function AdminSourcesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [togglingAutoPoll, setTogglingAutoPoll] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
-    const [nextSources, ingestion] = await Promise.all([
-      adminJson<AdminSource[]>("/api/v1/admin/sources"),
-      adminJson<AdminIngestionSettings>("/api/v1/admin/ingestion"),
-    ]);
-    setSources(nextSources);
-    setAutoPollEnabled(ingestion.auto_poll_enabled);
+    setSources(await adminJson<AdminSource[]>("/api/v1/admin/sources"));
   }, []);
 
   useEffect(() => {
@@ -92,54 +85,17 @@ export default function AdminSourcesPage() {
     }
   }
 
-  async function toggleAutoPoll() {
-    setTogglingAutoPoll(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const next = await adminJson<AdminIngestionSettings>("/api/v1/admin/ingestion", {
-        method: "PATCH",
-        body: JSON.stringify({ auto_poll_enabled: !autoPollEnabled }),
-      });
-      setAutoPollEnabled(next.auto_poll_enabled);
-      setNotice(
-        next.auto_poll_enabled
-          ? "Polling automático activado."
-          : "Polling automático pausado. El poll manual sigue disponible.",
-      );
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "No se pudo cambiar el polling automático.");
-    } finally {
-      setTogglingAutoPoll(false);
-    }
-  }
-
   return (
     <main className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="font-heading text-sm font-medium uppercase tracking-[0.18em] text-accent-ochre">
-            Fuentes
-          </p>
-          <h1 className="mt-2 font-heading text-3xl font-medium text-primary">RSS vigilado</h1>
-          <p className="mt-2 font-sans text-secondary">
-            Alta RSS, marcar vigilada y poll manual. El automático consulta las vigiladas en segundo
-            plano
-            {autoPollEnabled ? " y está activo." : " y está pausado."}
-          </p>
-        </div>
-        <button
-          type="button"
-          disabled={togglingAutoPoll}
-          onClick={() => void toggleAutoPoll()}
-          className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
-        >
-          {togglingAutoPoll
-            ? "Guardando…"
-            : autoPollEnabled
-              ? "Pausar polling automático"
-              : "Activar polling automático"}
-        </button>
+      <div>
+        <p className="font-heading text-sm font-medium uppercase tracking-[0.18em] text-accent-ochre">
+          Fuentes
+        </p>
+        <h1 className="mt-2 font-heading text-3xl font-medium text-primary">RSS vigilado</h1>
+        <p className="mt-2 font-sans text-secondary">
+          Alta RSS, marcar vigilada y poll manual. El procesamiento automático se corta con el
+          interruptor de la barra; el poll de cada fuente sigue andando aunque esté pausado.
+        </p>
       </div>
 
       {error ? <p className="font-sans text-sm text-accent-ochre">{error}</p> : null}

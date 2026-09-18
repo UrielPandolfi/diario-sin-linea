@@ -2,18 +2,17 @@
 
 **Fecha:** 2026-09-18
 
-**Tarea:** Mostrar las portadas deterministas en el front público.
+**Tarea:** Hacer visible el interruptor de procesamiento automático en Admin.
 
 ## Qué quedó
 
-Las imágenes sí se generan post-commit, pero el lector no las veía: `card_payload` no mandaba `hero_image_url` y `EventCard` era solo texto. El detalle las pintaba solo si el PNG ya existía. Ahora feed/live/search/nearby incluyen la URL; las cards y el artículo la renderizan. Un GET público rellena portadas faltantes en sesión propia.
+El flag `auto_poll_enabled` ya existía; el control era un botón más en Tablero/Fuentes y no se encontraba. Ahora hay un interruptor fijo en la barra de redacción (`AutoPollToggle` en `AdminShell`): **Procesamiento automático** Activo/Pausado. Pausar no apaga Beat ni el worker: `poll_monitored_sources` no encola. El poll manual sigue.
 
 ## Validación
 
-- `pytest tests/test_hero_image.py tests/test_public_api.py`: **19 passed**
-- `npm run typecheck` y `npm run lint` en `apps/web`: OK
-- Compose local `:3000` / `:8000` están up, pero el feed público está vacío (no hay sucesos publicados para smoke visual de cards)
+- `npx tsc --noEmit` en `apps/web`: OK
+- Compose: rebuild `web` y smoke del interruptor en `/admin`
 
 ## Pendiente
 
-Worker y beat en Railway. `API_URL` en Vercel para que `/api/v1/media/heroes/...` no 404. Redeploy API+web para que las notas ya publicadas tomen el backfill al abrir el feed.
+Worker y beat no están up en el Compose local de esta sesión (solo api/postgres/redis/web).

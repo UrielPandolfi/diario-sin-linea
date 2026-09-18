@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ReactNode } from "react";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { AutoPollToggle } from "@/features/admin/auto-poll-toggle";
 
 const NAV = [
   { href: "/admin", label: "Tablero" },
@@ -55,6 +56,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             </button>
           </nav>
         </div>
+        <AutoPollToggle />
       </header>
       <div className="mx-auto max-w-5xl px-6 py-8">{children}</div>
     </div>

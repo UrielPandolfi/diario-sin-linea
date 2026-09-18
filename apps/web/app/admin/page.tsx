@@ -8,7 +8,6 @@ import {
   formatTokens,
   formatUsd,
   formatWhen,
-  type AdminIngestionSettings,
   type AdminSource,
   type AdminSourceItem,
   type AdminStats,
@@ -21,7 +20,6 @@ export default function AdminDashboardPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
   const [requeuing, setRequeuing] = useState(false);
-  const [togglingAutoPoll, setTogglingAutoPoll] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -61,28 +59,6 @@ export default function AdminDashboardPage() {
       setError(err instanceof Error ? err.message : "No se pudo encolar el poll.");
     } finally {
       setPolling(false);
-    }
-  }
-
-  async function toggleAutoPoll() {
-    setTogglingAutoPoll(true);
-    setNotice(null);
-    setError(null);
-    try {
-      const next = await adminJson<AdminIngestionSettings>("/api/v1/admin/ingestion", {
-        method: "PATCH",
-        body: JSON.stringify({ auto_poll_enabled: !(stats?.auto_poll_enabled ?? true) }),
-      });
-      setNotice(
-        next.auto_poll_enabled
-          ? "Polling automático activado."
-          : "Polling automático pausado. El poll manual sigue disponible.",
-      );
-      await load();
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "No se pudo cambiar el polling automático.");
-    } finally {
-      setTogglingAutoPoll(false);
     }
   }
 
@@ -131,18 +107,6 @@ export default function AdminDashboardPage() {
             className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
           >
             {requeuing ? "Encolando…" : "Procesar 3 más"}
-          </button>
-          <button
-            type="button"
-            onClick={() => void toggleAutoPoll()}
-            disabled={togglingAutoPoll || stats == null}
-            className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
-          >
-            {togglingAutoPoll
-              ? "Guardando…"
-              : stats?.auto_poll_enabled === false
-                ? "Activar polling automático"
-                : "Pausar polling automático"}
           </button>
           <button
             type="button"
