@@ -720,6 +720,8 @@ def test_sol_optimistic_keeps_policy_reason_and_resolved_false(db_session: Sessi
         db_session, llm=sol, search=FakeSearchProvider([]), fetcher=RecordingFetcher()
     ).verify(event.id, trigger="admin")
     db_session.refresh(claim)
+    from app.schemas.editorial_evidence import ReasonCode
+
     assert claim.status == ClaimStatus.SINGLE_SOURCE
     cid = str(claim.id)
     sol_row = next(row for row in result["sol"] if row["claim_id"] == cid)
@@ -732,6 +734,13 @@ def test_sol_optimistic_keeps_policy_reason_and_resolved_false(db_session: Sessi
     assert decision["status"] == ClaimStatus.SINGLE_SOURCE.value
     assert decision["evaluation_state"] == "complete"
     assert "known_independent_count" in decision["support_basis"]
+    assert decision["reason_code"] in {
+        ReasonCode.INDEPENDENCE_NOT_ESTABLISHED.value,
+        ReasonCode.SINGLE_KNOWN_ORIGIN.value,
+    }
+    assert decision["final_reason"]
+    assert "independiente" in decision["final_reason"].lower() or "origen" in decision["final_reason"].lower()
+    assert decision["verified_scope"] or decision["unsupported_scope"]
     from app.services.claim_card_presentation import (
         contains_llm_reason,
         contradicts_single_source_independence,
@@ -966,6 +975,9 @@ def test_legacy_claim_decision_parses_without_evaluation_state() -> None:
         }
     )
     assert contract.decision_by_claim_id["legacy"].evaluation_state is None
+    assert contract.decision_by_claim_id["legacy"].reason_code is None
+    assert contract.decision_by_claim_id["legacy"].verified_scope is None
+    assert contract.decision_by_claim_id["legacy"].unsupported_scope is None
     junk = ClaimDecision.model_validate({**raw, "evaluation_state": "not-a-state"})
     assert junk.evaluation_state is None
     complete = ClaimDecision.model_validate({**raw, "evaluation_state": "complete"})
@@ -981,6 +993,8 @@ def test_writing_compact_omits_skipped_and_does_not_carry_evaluation_state() -> 
     from app.services.article_context import compact_verification
 
     assert "evaluation_state" not in ContextClaimDecision.model_fields
+    assert "reason_code" not in ContextClaimDecision.model_fields
+    assert "verified_scope" not in ContextClaimDecision.model_fields
     run = SimpleNamespace(
         id="verify",
         status=PipelineStatus.SUCCESS,
@@ -1011,6 +1025,9 @@ def test_writing_compact_omits_skipped_and_does_not_carry_evaluation_state() -> 
     assert set(compact.decision_by_claim_id) == {"complete", "legacy"}
     dumped = compact.decision_by_claim_id["complete"].model_dump()
     assert "evaluation_state" not in dumped
+    assert "reason_code" not in dumped
+    assert "verified_scope" not in dumped
+    assert "unsupported_scope" not in dumped
     assert "policy_skip" not in str(compact.model_dump())
 
 
@@ -1019,6 +1036,7 @@ def test_view_from_evidence_snapshot_ignores_live_and_preserves_c1() -> None:
         decision_was_evaluated,
         evaluation_is_complete,
         read_evaluation_state,
+        read_reason_code,
     )
     from app.services.verification_outcome import view_from_evidence_snapshot
 
@@ -1064,6 +1082,8 @@ def test_view_from_evidence_snapshot_ignores_live_and_preserves_c1() -> None:
     assert evaluation_is_complete(view.decision_by_claim_id["legacy"]) is False
     assert decision_was_evaluated(view.decision_by_claim_id["legacy"]) is True
     assert evaluation_is_complete(view.decision_by_claim_id["complete"]) is True
+    assert read_reason_code(view.decision_by_claim_id["complete"]) is None
+    assert read_reason_code(view.decision_by_claim_id["legacy"]) is None
     empty = view_from_evidence_snapshot(None)
     assert empty.decision_by_claim_id == {}
     assert empty.paired is False

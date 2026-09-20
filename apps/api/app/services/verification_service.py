@@ -84,11 +84,18 @@ from app.services.claim_service import CLAIM_STAGE, assertion_key_for, compariso
 from app.services.information_origin import (
     assess_origins,
     demotion_for,
-    final_reason_for,
     support_basis_from_assessment,
     usable_body_source,
 )
 from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
+from app.services.editorial_reason import (
+    ReasonContext,
+    editorial_scopes,
+    evidence_type_values,
+    qualify_fragments_from_checks,
+    reason_code_for,
+    render_reason,
+)
 from app.services.event_service import EventService
 from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
 from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
@@ -640,6 +647,7 @@ class VerificationService:
         primary_found: bool,
         primary_supports: bool,
         packet_size: int,
+        rejected_disproof: bool = False,
     ) -> ClaimDecision:
         assessment = assess_origins(claim, packet_size=packet_size)
         role = proposition_role_for(claim)
@@ -653,24 +661,64 @@ class VerificationService:
             mixed=mixed,
             role=role,
         )
+        primary_access = self._primary_access(primary_found=primary_found, primary_supports=primary_supports)
         basis = support_basis_from_assessment(
             claim,
             assessment,
             demotion=demotion,
             evaluated_text=claim.canonical_text,
-            primary_access=self._primary_access(primary_found=primary_found, primary_supports=primary_supports),
+            primary_access=primary_access,
             status=claim.status.value,
             role=role,
+        )
+        kind = basis.kind
+        code = reason_code_for(
+            status=claim.status.value,
+            demotion=demotion,
+            known_independent=assessment.known_independent,
+            unknown_groups=assessment.unknown_groups,
+            authoritative_independent=assessment.authoritative_independent,
+            documents_supporting=assessment.documents_supporting,
+            documents_qualifying=assessment.documents_qualifying,
+            statement_evidence_class=assessment.statement_evidence_class,
+            support_kind=kind,
+            role=role,
+            primary_access=primary_access,
+            rejected_disproof=rejected_disproof,
+        )
+        verified, unsupported = editorial_scopes(
+            evaluated_text=claim.canonical_text,
+            status=claim.status.value,
+            demotion=demotion,
+            evidence_types=evidence_type_values(claim),
+            qualify_fragments=qualify_fragments_from_checks(getattr(self, "_comparison_checks", [])),
         )
         return ClaimDecision(
             claim_id=str(claim.id),
             status=claim.status.value,
             unresolved=unresolved,
-            final_reason=final_reason_for(demotion, assessment, claim.status.value),
+            reason_code=code,
+            final_reason=render_reason(
+                code,
+                ReasonContext(
+                    status=claim.status.value,
+                    demotion=demotion,
+                    known_independent=assessment.known_independent,
+                    unknown_groups=assessment.unknown_groups,
+                    authoritative_independent=assessment.authoritative_independent,
+                    statement_evidence_class=assessment.statement_evidence_class,
+                    support_kind=kind,
+                    role=role,
+                    primary_access=primary_access,
+                    rejected_disproof=rejected_disproof,
+                ),
+            ),
             llm_reason=llm_reason,
             support_basis=basis,
             proposition_role=role.value,
             evaluation_state=EvaluationState.COMPLETE,
+            verified_scope=verified,
+            unsupported_scope=unsupported,
         )
 
     def _skipped_decision(self, claim: Claim, *, reason: str) -> ClaimDecision:
@@ -684,6 +732,9 @@ class VerificationService:
             support_basis=SupportBasis(),
             proposition_role=role.value,
             evaluation_state=EvaluationState.SKIPPED,
+            reason_code=None,
+            verified_scope=None,
+            unsupported_scope=None,
         )
 
     def _record_skipped_decisions(
@@ -1035,11 +1086,8 @@ class VerificationService:
             primary_found=any(is_preferred_domain(src.url, preferred) for src in packet),
             primary_supports=primary_supports,
             packet_size=len(packet),
+            rejected_disproof=rejected_disproof,
         )
-        if rejected_disproof:
-            decision.final_reason = "No se acreditó una contradicción pertinente y comparable de la proposición evaluada."
-        elif claim.status == ClaimStatus.DISPROVEN:
-            decision.final_reason = "Una contradicción con correspondencia comprobada de proposición y contexto refuta el claim."
         return attached, cited, primary_supports, decision
 
     def _primary_support_from_packet(self, claim, packet, preferred):
@@ -1087,8 +1135,18 @@ class VerificationService:
                     relation = EvidenceType.QUALIFIES
         if not hasattr(self, "_comparison_checks"):
             self._comparison_checks = []
-        self._comparison_checks.append({"source_ref": row.source_ref, "requested": original.value,
-                                        "admitted": relation.value, "valid_contradiction": valid, "reason": reason})
+        self._comparison_checks.append(
+            {
+                "source_ref": row.source_ref,
+                "requested": original.value,
+                "admitted": relation.value,
+                "valid_contradiction": valid,
+                "reason": reason,
+                "claim_fragment": getattr(getattr(row, "comparison", None), "claim_fragment", None),
+                "evidence_fragment": getattr(getattr(row, "comparison", None), "evidence_fragment", None),
+                "excerpt": getattr(row, "excerpt", None),
+            }
+        )
         return relation, valid
 
     def _attach_evidence(

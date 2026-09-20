@@ -600,39 +600,53 @@ def demotion_for(
     return Demotion.PARTIAL_SUPPORT
 
 
-def final_reason_for(demotion: Demotion, assessment: OriginAssessment, status: str) -> str:
-    if demotion == Demotion.MISSING_DOCUMENTARY_PRIMARY:
-        return (
-            "No hay fuente primaria documental que sostenga la proposición; "
-            "el estado refleja un techo de certeza, no varias corroboraciones."
-        )
-    if demotion == Demotion.MISSING_AUTHENTIC_PRIMARY:
-        return "No hay publicación original auténtica del dicho; un medio que atribuye no alcanza para promoverla."
-    if demotion == Demotion.UNPROVEN_INDEPENDENCE:
-        return (
-            f"Independencia no demostrada ({assessment.unknown_groups} grupo(s) desconocido(s), "
-            f"{assessment.known_independent} origen(es) conocido(s))."
-        )
-    if demotion == Demotion.INSUFFICIENT_INDEPENDENCE:
-        return f"Un origen informativo conocido no alcanza para corroboración independiente ({status})."
-    if demotion == Demotion.PARTIAL_SUPPORT:
-        return "La evidencia solo sostiene parte de la proposición."
-    if demotion == Demotion.MIXED_CLAIM_NO_EXCEPTION:
-        return "La proposición sigue mixta; no se aplicó la excepción de declaración."
-    if assessment.known_independent >= 2:
-        if assessment.authoritative_independent:
-            return f"{assessment.known_independent} orígenes informativos distintos sostienen la proposición."
-        return (
-            f"{assessment.known_independent} coberturas periodísticas independientes "
-            "sostienen la proposición."
-        )
-    if assessment.statement_evidence_class == StatementEvidenceClass.AUTHENTIC_PRIMARY:
-        return "Una fuente primaria auténtica documenta el dicho, no el contenido de lo afirmado."
-    if assessment.known_independent == 1:
-        return "Un origen informativo conocido sostiene la proposición."
-    if assessment.unknown_groups:
-        return "Hay respaldo, pero la procedencia informativa no está demostrada."
-    return "Evidencia insuficiente para corroborar de forma independiente."
+def final_reason_for(
+    demotion: Demotion,
+    assessment: OriginAssessment,
+    status: str,
+    *,
+    role: PropositionRole | None = None,
+    primary_access: str | None = None,
+    support_kind: SupportKind | None = None,
+    rejected_disproof: bool = False,
+) -> str:
+    from app.services.editorial_reason import ReasonContext, reason_code_for, render_reason
+
+    kind = support_kind or support_kind_for(
+        status=status,
+        assessment=assessment,
+        primary_access=primary_access,
+        role=role,
+    )
+    code = reason_code_for(
+        status=status,
+        demotion=demotion,
+        known_independent=assessment.known_independent,
+        unknown_groups=assessment.unknown_groups,
+        authoritative_independent=assessment.authoritative_independent,
+        documents_supporting=assessment.documents_supporting,
+        documents_qualifying=assessment.documents_qualifying,
+        statement_evidence_class=assessment.statement_evidence_class,
+        support_kind=kind,
+        role=role,
+        primary_access=primary_access,
+        rejected_disproof=rejected_disproof,
+    )
+    return render_reason(
+        code,
+        ReasonContext(
+            status=status,
+            demotion=demotion,
+            known_independent=assessment.known_independent,
+            unknown_groups=assessment.unknown_groups,
+            authoritative_independent=assessment.authoritative_independent,
+            statement_evidence_class=assessment.statement_evidence_class,
+            support_kind=kind,
+            role=role,
+            primary_access=primary_access,
+            rejected_disproof=rejected_disproof,
+        ),
+    ) or "Evidencia insuficiente para corroborar de forma independiente."
 
 
 def document_class_for(*, body_source: str, fetch_ok: bool, constitutive: bool, attributed: bool) -> DocumentClass:

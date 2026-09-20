@@ -1,12 +1,12 @@
 # Estado
 
-Revisión: 2026-09-20. C2 (presentation fiel al snapshot de la versión publicada) en código y tests. C3 no empezó.
+Revisión: 2026-09-20. C3 (`reason_code` + scopes deterministas) en código y tests. C4 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png`, inventario SEO `GET /api/v1/sitemap-articles` (`api/public.py`). Claims del GET de artículo (status, presentation, labels) salen del snapshot de `published_version`; el feed no serializa claims.
+Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png`, inventario SEO `GET /api/v1/sitemap-articles` (`api/public.py`). Claims del GET de artículo (status, presentation, labels, `reason_code`, scopes) salen del snapshot de `published_version`; el feed no serializa claims.
 
 Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open Graph/Twitter, JSON-LD `NewsArticle`, `sitemap.xml`, `robots.txt`. El middleware ya no exige cookie de localidad para rastrear `/`, `/en-vivo` o `/buscar`. `/admin`, `/entrar` y `/onboarding` van `noindex`. `/buscar` es `noindex, follow`. Preview con `VERCEL_ENV` no production envía `X-Robots-Tag: noindex, nofollow`.
 
@@ -79,7 +79,13 @@ En código: `GET /api/v1/articles/{key}` arma claims con `compact_public_claims(
 
 Limitaciones de datos no conservados: snapshot ausente → ids del body, status default `SINGLE_SOURCE`, copy «Aún no verificado», sin Verification live. `source_item_id` de evidencia congelada es `snapshot:{ref}`. `skipped_search` numérico no queda en el snapshot: CHECKED de un SUPPORTED numérico puede inferirse distinto. SPO/texto ausentes en el snapshot no se reconstruyen del Event actual (DISCREPANCY/FALSE_CLAIM de esa versión pueden faltar). Una decisión skip-shaped (`llm_reason` veto/policy_skip/budget/outside_recheck) sin `evaluation_state` no usa copy evaluado.
 
-C3 no empezó.
+## Track C3 — reason_code y scopes deterministas — 2026-09-20
+
+En código: `ClaimDecision` persiste `reason_code`, `verified_scope` y `unsupported_scope` (opcionales). `reason_code_for` mapea Demotion, status post-gate de contradicción, `SupportKind` y conteos de procedencia; `final_reason` es `render_reason(code, context)`. Un `claim_fragment` de QUALIFIES que es subconjunto propio del texto evaluado puede fijar `verified_scope`; no hay split del resto (`unsupported_scope=None`, alcance no determinado). QUALIFIES sin fragmento: ambos `None`. El GET solo serializa C3 si `evaluation_state=complete` (skipped/legacy/unknown no presuponen evaluación). Writing compacta sin esos campos. Independencia, `clamp_supported_status`, `authentic_primary` y umbrales de contradicción no cambiaron. Sin migración ni LLM extra.
+
+Limitación: no hay componente estructurado B, así que C3 no representa `unsupported_scope=B`. Eso queda para C8. `CONFLICTING`/`DISPROVEN` describen el status ya pasado por `valid_contradiction`; C3 no implementa C7. Primaria auténtica de un utterance no se mapea a `INDEPENDENT_CORROBORATION`.
+
+C4 no empezó.
 
 ## Independencia periodística — 2026-09-13
 

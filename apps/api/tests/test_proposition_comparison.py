@@ -239,3 +239,67 @@ def test_displayed_excerpt_must_contain_the_admitted_contradiction():
     service = object.__new__(VerificationService)
     assert service._admit_relation(claim, src, row, row.evidence_type) == (EvidenceType.MENTIONS, False)
     assert service._comparison_checks[-1]["reason"] == "comparison_not_in_cited_excerpt"
+
+
+def test_qualifies_partial_claim_does_not_promote_full_proposition(db_session):
+    from app.schemas.editorial_evidence import ReasonCode
+
+    established = "El decreto elimina el régimen"
+    missing = "entra en vigencia mañana"
+    text = f"{established} y {missing}"
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/decreto",
+        title="Decreto",
+        body=established,
+        content_hash="partial-c3",
+    )
+    item.metadata_json = {"body_source": "extracted_html", "fetch_ok": True}
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text=text,
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    comparison = EvidenceComparison(
+        proposition="other",
+        claim_fragment=established,
+        evidence_fragment=established,
+        basis="partial_support",
+        reason="solo el acto, no la vigencia",
+    )
+    result = VerificationResult(
+        status=ClaimStatus.SINGLE_SOURCE,
+        reason="parcial",
+        evidence=[
+            VerificationEvidence(
+                source_ref=1,
+                evidence_type=EvidenceType.QUALIFIES,
+                excerpt=established,
+                comparison=comparison,
+            )
+        ],
+    )
+    packet = [
+        _PacketSource(
+            ref=1,
+            url=item.url,
+            title=item.title,
+            snippet=item.clean_text,
+            item=item,
+            body_source="extracted_html",
+        )
+    ]
+    service = VerificationService(db_session)
+    *_, decision = service._apply_result(event, claim, packet, result, VerificationPlan(), [], False)
+    assert claim.status != ClaimStatus.SUPPORTED
+    assert decision.reason_code is ReasonCode.PARTIAL_SUPPORT
+    assert decision.verified_scope == established
+    assert decision.unsupported_scope is None
+    assert decision.verified_scope != text
+    assert decision.final_reason == "La evidencia solo sostiene parte de la proposición."

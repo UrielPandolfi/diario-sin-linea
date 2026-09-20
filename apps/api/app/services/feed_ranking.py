@@ -23,6 +23,7 @@ from app.models import (
     SourceItem,
 )
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
+from app.schemas.editorial_evidence import decision_was_evaluated
 from app.services.claim_card_presentation import (
     presentation_for_claim,
     public_presentation_payload,
@@ -30,6 +31,7 @@ from app.services.claim_card_presentation import (
 )
 from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
+from app.services.editorial_reason import public_resolution_fields
 from app.services.evidence_snapshot import (
     evidence_snapshot_for_version,
     snapshot_context_claims,
@@ -320,6 +322,7 @@ def compact_public_claims(
             continue
         source_ids = {str(item.source_item_id) for item in claim.evidence if getattr(item, "source_item_id", None)}
         card = presentation_for_claim(claim, view)
+        decision = view.decision_by_claim_id.get(cid)
         payload = {
             "id": cid,
             "canonical_text": claim.canonical_text,
@@ -331,6 +334,10 @@ def compact_public_claims(
             "verification": public_verification_payload(view.sol_by_id.get(cid)),
         }
         payload.update(editorial_public_payload(editorials.get(cid)))
+        if isinstance(decision, dict) and decision_was_evaluated(decision):
+            payload.update(public_resolution_fields(decision))
+        else:
+            payload.update(public_resolution_fields(None))
         rows.append(payload)
     return rows
 

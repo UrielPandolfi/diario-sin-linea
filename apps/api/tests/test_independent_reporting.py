@@ -2,11 +2,12 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from app.domain.enums import ClaimImportance, ClaimStatus, EvidenceType
-from app.schemas.editorial_evidence import SupportKind
+from app.schemas.editorial_evidence import ReasonCode, SupportKind
 from app.schemas.verification import VerificationPlan, VerificationSubject, VerificationTarget
 from app.services.claim_service import clamp_supported_status
 from app.services.editorial_label_policy import is_checked
-from app.services.information_origin import assess_origins, support_kind_for
+from app.services.editorial_reason import reason_code_for
+from app.services.information_origin import assess_origins, demotion_for, support_kind_for
 from app.services.verification_outcome import VerificationView, is_strong_verification
 from app.services.verification_plan import apply_primary_requirement, heuristic_plan
 from app.services.verification_policy import requires_authoritative_source
@@ -75,6 +76,30 @@ def _view(claim, *, kind: str, primary: bool = False, known: int = 2):
     )
 
 
+def _reason_code(claim, assessment, *, status: str, desired: str, primary_required: bool = False, primary_supports: bool = False):
+    demotion = demotion_for(
+        desired_status=desired,
+        final_status=status,
+        assessment=assessment,
+        primary_required=primary_required,
+        primary_supports=primary_supports,
+        mixed=False,
+        role=None,
+    )
+    kind = support_kind_for(status=status, assessment=assessment, primary_access=None)
+    return reason_code_for(
+        status=status,
+        demotion=demotion,
+        known_independent=assessment.known_independent,
+        unknown_groups=assessment.unknown_groups,
+        authoritative_independent=assessment.authoritative_independent,
+        statement_evidence_class=assessment.statement_evidence_class,
+        support_kind=kind,
+        documents_supporting=assessment.documents_supporting,
+        documents_qualifying=assessment.documents_qualifying,
+    )
+
+
 def test_observable_fact_two_independent_outlets_supported_without_primary() -> None:
     body_a = (
         "Se produjo un incendio en un depósito de Rosario durante la madrugada. "
@@ -102,6 +127,7 @@ def test_observable_fact_two_independent_outlets_supported_without_primary() -> 
     assert status == ClaimStatus.SUPPORTED
     kind = support_kind_for(status="SUPPORTED", assessment=assessment, primary_access="not_found")
     assert kind == SupportKind.INDEPENDENT_REPORTING
+    assert _reason_code(claim, assessment, status="SUPPORTED", desired="SUPPORTED") is ReasonCode.INDEPENDENT_CORROBORATION
     claim.status = ClaimStatus.SUPPORTED
     view = _view(claim, kind=kind.value, primary=False, known=assessment.known_independent)
     assert is_checked(claim, view) is True
@@ -116,6 +142,9 @@ def test_single_outlet_stays_single_source() -> None:
     assert clamp_supported_status(claim, ClaimStatus.SUPPORTED) == ClaimStatus.SINGLE_SOURCE
     assessment = assess_origins(claim)
     assert assessment.known_independent <= 1
+    assert _reason_code(
+        claim, assessment, status="SINGLE_SOURCE", desired="SUPPORTED"
+    ) in {ReasonCode.SINGLE_KNOWN_ORIGIN, ReasonCode.INDEPENDENCE_NOT_ESTABLISHED}
 
 
 def test_same_agency_wire_is_one_origin_despite_distinct_wording() -> None:
@@ -144,6 +173,7 @@ def test_same_agency_wire_is_one_origin_despite_distinct_wording() -> None:
     assert assessment.known_independent == 1
     assert all(item.startswith("wire:") for item in assessment.information_origins)
     assert clamp_supported_status(claim, ClaimStatus.SUPPORTED) == ClaimStatus.SINGLE_SOURCE
+    assert _reason_code(claim, assessment, status="SINGLE_SOURCE", desired="SUPPORTED") is ReasonCode.INDEPENDENCE_NOT_ESTABLISHED
 
 
 def test_five_reprints_of_one_agency_do_not_become_supported() -> None:
@@ -164,6 +194,9 @@ def test_five_reprints_of_one_agency_do_not_become_supported() -> None:
     assessment = assess_origins(claim)
     assert assessment.known_independent <= 1
     assert clamp_supported_status(claim, ClaimStatus.SUPPORTED) == ClaimStatus.SINGLE_SOURCE
+    assert _reason_code(
+        claim, assessment, status="SINGLE_SOURCE", desired="SUPPORTED"
+    ) in {ReasonCode.SINGLE_KNOWN_ORIGIN, ReasonCode.INDEPENDENCE_NOT_ESTABLISHED}
 
 
 def test_numeric_conflict_is_not_resolved_by_majority() -> None:
@@ -185,6 +218,7 @@ def test_numeric_conflict_is_not_resolved_by_majority() -> None:
     assert clamp_supported_status(claim, ClaimStatus.CONFLICTING) == ClaimStatus.CONFLICTING
     plan = heuristic_plan(claim)
     assert apply_primary_requirement(claim, ClaimStatus.CONFLICTING, plan, primary_supports=False) == ClaimStatus.CONFLICTING
+    assert reason_code_for(status=ClaimStatus.CONFLICTING.value) is ReasonCode.CONFLICTING_COMPARABLE_EVIDENCE
 
 
 def test_law_age_not_supported_by_newspapers() -> None:
@@ -199,6 +233,15 @@ def test_law_age_not_supported_by_newspapers() -> None:
     assert requires_authoritative_source(claim) is True
     assert clamp_supported_status(claim, ClaimStatus.SUPPORTED) == ClaimStatus.SINGLE_SOURCE
     assert apply_primary_requirement(claim, ClaimStatus.SUPPORTED, plan, primary_supports=False) == ClaimStatus.SINGLE_SOURCE
+    assessment = assess_origins(claim)
+    assert _reason_code(
+        claim,
+        assessment,
+        status="SINGLE_SOURCE",
+        desired="SUPPORTED",
+        primary_required=True,
+        primary_supports=False,
+    ) is ReasonCode.MISSING_DOCUMENTARY_PRIMARY
 
 
 def test_utterance_does_not_support_underlying_economic_fact() -> None:

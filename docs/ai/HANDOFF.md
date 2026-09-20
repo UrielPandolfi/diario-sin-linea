@@ -2,17 +2,18 @@
 
 **Fecha:** 2026-09-20
 
-**Tarea:** Track C — PR C2 (presentation fiel al snapshot de la versión publicada). C3 no empezó.
+**Tarea:** Track C — PR C3 (`reason_code` + scopes deterministas). C4 no empezó.
 
 ## Qué quedó
 
-El GET público de un artículo deriva status, DTO de presentación y etiquetas del `evidence_snapshot` de `published_version`. Verification live puede cambiar el Event; no cambia las tarjetas de V1 hasta publicar V2. Admin/analytics siguen en el par live. C1 se conserva: skipped no vira a complete; legacy sin `evaluation_state` no es complete; skip-shaped no usa copy evaluado.
+La resolución estructurada de un claim con `evaluation_state=complete` tiene `reason_code` determinista, `final_reason` renderizado desde ese código, y `verified_scope` solo cuando un `claim_fragment` de QUALIFIES identifica un subconjunto propio del texto evaluado. No hay split C8 del resto. Skipped/legacy no reciben esas razones. Independencia, umbrales de contradicción, Writing y C1/C2 se conservan.
 
 ## Validación
 
-- Dirigidos C2 (`test_editorial_label_policy.py`, `test_public_api.py`, `test_track_b.py`, `test_claim_card_presentation.py`, `test_editorial_evidence.py`): **60 passed**
-- Suite API completa: **662 passed**, 1 warning Alembic preexistente
+- Dirigidos C3: **103 passed**
+- Suite API completa: **671 passed**, 1 warning Alembic preexistente
+- `docker compose exec api pytest -q` no se ejecutó: `docker` no está en PATH; se usó `python -m pytest -q` en `apps/api`
 
 ## Pendiente
 
-C3 y el resto de Track C. No hay migración. No backfill de ArticleVersion.
+C4 y el resto de Track C. No hay migración. No backfill de ArticleVersion.

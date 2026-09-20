@@ -88,6 +88,28 @@ class SupportKind(StrEnum):
     INSUFFICIENT = "insufficient"
 
 
+class ReasonCode(StrEnum):
+    """Deterministic editorial cause. Missing on legacy snapshots.
+
+    Mapped from Demotion, SupportKind, admitted contradiction gates and
+    independence counts already computed in code. Never from LLM prose.
+    """
+
+    INDEPENDENCE_NOT_ESTABLISHED = "INDEPENDENCE_NOT_ESTABLISHED"
+    SINGLE_KNOWN_ORIGIN = "SINGLE_KNOWN_ORIGIN"
+    MISSING_DOCUMENTARY_PRIMARY = "MISSING_DOCUMENTARY_PRIMARY"
+    MISSING_AUTHENTIC_PRIMARY = "MISSING_AUTHENTIC_PRIMARY"
+    PRIMARY_AUTHENTIC_UTTERANCE = "PRIMARY_AUTHENTIC_UTTERANCE"
+    DOCUMENTARY_PRIMARY = "DOCUMENTARY_PRIMARY"
+    INDEPENDENT_CORROBORATION = "INDEPENDENT_CORROBORATION"
+    PARTIAL_SUPPORT = "PARTIAL_SUPPORT"
+    MIXED_CLAIM_NO_EXCEPTION = "MIXED_CLAIM_NO_EXCEPTION"
+    CONFLICTING_COMPARABLE_EVIDENCE = "CONFLICTING_COMPARABLE_EVIDENCE"
+    COMPARABLE_DISPROOF = "COMPARABLE_DISPROOF"
+    CONTRADICTION_NOT_COMPARABLE = "CONTRADICTION_NOT_COMPARABLE"
+    INSUFFICIENT_EVIDENCE = "INSUFFICIENT_EVIDENCE"
+
+
 class EvaluationState(StrEnum):
     """Persisted verification evaluation state. Missing on legacy snapshots.
 
@@ -116,6 +138,23 @@ def _coerce_evaluation_state(value: Any) -> EvaluationState | None:
 OptionalEvaluationState = Annotated[
     EvaluationState | None,
     BeforeValidator(_coerce_evaluation_state),
+]
+
+
+def _coerce_reason_code(value: Any) -> ReasonCode | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, ReasonCode):
+        return value
+    try:
+        return ReasonCode(str(value).strip())
+    except ValueError:
+        return None
+
+
+OptionalReasonCode = Annotated[
+    ReasonCode | None,
+    BeforeValidator(_coerce_reason_code),
 ]
 
 
@@ -196,6 +235,19 @@ class ClaimDecision(BaseModel):
     support_basis: SupportBasis = Field(default_factory=SupportBasis)
     proposition_role: str | None = None
     evaluation_state: OptionalEvaluationState = None
+    reason_code: OptionalReasonCode = None
+    verified_scope: str | None = None
+    unsupported_scope: str | None = None
+
+
+def read_reason_code(decision: ClaimDecision | dict[str, Any] | None) -> ReasonCode | None:
+    """None means unknown/legacy. Never infers a stronger cause."""
+    if decision is None:
+        return None
+    if isinstance(decision, ClaimDecision):
+        return decision.reason_code
+    raw = decision.get("reason_code") if isinstance(decision, dict) else None
+    return _coerce_reason_code(raw)
 
 
 def read_evaluation_state(decision: ClaimDecision | dict[str, Any] | None) -> EvaluationState | None:
