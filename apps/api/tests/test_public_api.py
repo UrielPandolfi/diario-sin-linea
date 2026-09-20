@@ -269,8 +269,14 @@ def test_public_article_claims_follow_published_snapshot_not_live_verify(db_sess
     assert str(extra.id) not in public_ids
     row = payload["claims"][0]
     assert row["status"] == ClaimStatus.SINGLE_SOURCE.value
-    assert row["presentation"]["verification_label"] == "Un solo origen"
+    assert row["presentation"]["verification_label"] == "Respaldo limitado"
     assert row["presentation"]["known_independent_count"] == 1
+    assert "demotion" not in row["presentation"]
+    assert "llm_reason" not in row
+    from app.services.claim_card_presentation import public_copy_has_technical_tokens
+    from app.services.claim_card_presentation import ClaimCardPresentation
+    card = ClaimCardPresentation.model_validate(row["presentation"])
+    assert not public_copy_has_technical_tokens(card)
     assert "CHECKED" not in row["editorial_labels"]
     feed_item = next(item for item in feed["items"] if item["slug"] == article.slug)
     assert "claims" not in feed_item

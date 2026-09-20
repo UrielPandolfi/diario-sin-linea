@@ -530,7 +530,7 @@ def test_compact_public_claims_includes_editorial_payload(db_session: Session) -
     assert "llm_reason" not in (rows[0].get("verification") or {})
     assert rows[0]["verification"] is None or "reason" not in (rows[0]["verification"] or {})
     assert not contains_llm_reason(rows)
-    assert rows[0]["presentation"]["verification_label"] == "Corroborado"
+    assert rows[0]["presentation"]["verification_label"] == "Confirmado"
     assert rows[0]["presentation"]["basis_known"] is True
 
 
@@ -692,7 +692,7 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     v1_public = compact_public_claims(db_session, event, freeze_to_version=1)
     assert len(v1_public) == 1
     assert v1_public[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
-    assert v1_public[0]["presentation"]["verification_label"] == "Un solo origen"
+    assert v1_public[0]["presentation"]["verification_label"] == "Respaldo limitado"
     assert v1_public[0]["presentation"]["known_independent_count"] == 1
     assert "CHECKED" not in v1_public[0]["editorial_labels"]
     assert v1_public[0]["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
@@ -766,7 +766,7 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     live_rows = compact_public_claims(db_session, event)
     live_main = next(row for row in live_rows if row["id"] == cid)
     assert live_main["status"] == ClaimStatus.SUPPORTED.value
-    assert live_main["presentation"]["verification_label"] == "Corroborado"
+    assert live_main["presentation"]["verification_label"] == "Confirmado"
     assert live_main["presentation"]["known_independent_count"] == 2
     assert "CHECKED" in live_main["editorial_labels"]
     assert live_main["reason_code"] == ReasonCode.INDEPENDENT_CORROBORATION.value
@@ -779,7 +779,7 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert {row["id"] for row in frozen} == {cid}
     assert str(extra.id) not in {row["id"] for row in frozen}
     assert frozen[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
-    assert frozen[0]["presentation"]["verification_label"] == "Un solo origen"
+    assert frozen[0]["presentation"]["verification_label"] == "Respaldo limitado"
     assert frozen[0]["presentation"]["known_independent_count"] == 1
     assert frozen[0]["presentation"]["explanation"] != live_main["presentation"]["explanation"]
     assert "CHECKED" not in frozen[0]["editorial_labels"]
@@ -797,7 +797,7 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert public_ids == {cid}
     public_row = payload["claims"][0]
     assert public_row["status"] == ClaimStatus.SINGLE_SOURCE.value
-    assert public_row["presentation"]["verification_label"] == "Un solo origen"
+    assert public_row["presentation"]["verification_label"] == "Respaldo limitado"
     assert public_row["presentation"]["known_independent_count"] == 1
     assert "CHECKED" not in public_row["editorial_labels"]
     assert public_row["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
@@ -889,11 +889,11 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     db_session.flush()
     still_v1 = compact_public_claims(db_session, event, freeze_to_version=1)
     assert still_v1[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
-    assert still_v1[0]["presentation"]["verification_label"] == "Un solo origen"
+    assert still_v1[0]["presentation"]["verification_label"] == "Respaldo limitado"
     with TestClient(app) as client:
         before_v2 = client.get(f"/api/v1/articles/{article.slug}").json()
     assert before_v2["published_version"] == 1
-    assert before_v2["claims"][0]["presentation"]["verification_label"] == "Un solo origen"
+    assert before_v2["claims"][0]["presentation"]["verification_label"] == "Respaldo limitado"
     assert before_v2["claims"][0]["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
     assert before_v2["claims"][0]["public_rendering"]["categorical_allowed"] is False
     assert still_v1[0]["public_rendering"]["categorical_allowed"] is False
@@ -907,7 +907,7 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     db_session.commit()
     v2_rows = compact_public_claims(db_session, event, freeze_to_version=2)
     assert v2_rows[0]["status"] == ClaimStatus.SUPPORTED.value
-    assert v2_rows[0]["presentation"]["verification_label"] == "Corroborado"
+    assert v2_rows[0]["presentation"]["verification_label"] == "Confirmado"
     assert v2_rows[0]["presentation"]["known_independent_count"] == 2
     assert "CHECKED" in v2_rows[0]["editorial_labels"]
     assert v2_rows[0]["reason_code"] == ReasonCode.INDEPENDENT_CORROBORATION.value
@@ -919,7 +919,7 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
         after_v2 = client.get(f"/api/v1/articles/{article.slug}").json()
     assert after_v2["published_version"] == 2
     assert after_v2["claims"][0]["status"] == ClaimStatus.SUPPORTED.value
-    assert after_v2["claims"][0]["presentation"]["verification_label"] == "Corroborado"
+    assert after_v2["claims"][0]["presentation"]["verification_label"] == "Confirmado"
     assert after_v2["claims"][0]["presentation"]["known_independent_count"] == 2
     assert "CHECKED" in after_v2["claims"][0]["editorial_labels"]
     assert after_v2["claims"][0]["reason_code"] == ReasonCode.INDEPENDENT_CORROBORATION.value
@@ -951,10 +951,12 @@ def test_frozen_v1_skipped_stays_unevaluated_after_later_complete(db_session: Se
     _later_live_supported(db_session, event, claim)
     live = compact_public_claims(db_session, event)
     live_row = next(row for row in live if row["id"] == cid)
-    assert live_row["presentation"]["verification_label"] == "Corroborado"
+    assert live_row["presentation"]["verification_label"] == "Confirmado"
     frozen = compact_public_claims(db_session, event, freeze_to_version=1)
     assert frozen[0]["presentation"]["verification_label"] == NOT_EVALUATED_LABEL
-    assert frozen[0]["presentation"]["explanation"] is None
+    assert frozen[0]["presentation"]["explanation"]
+    assert "no se evaluó" in frozen[0]["presentation"]["explanation"].casefold()
+    assert frozen[0]["presentation"]["verification_label"] != "No confirmado"
     assert "CHECKED" not in frozen[0]["editorial_labels"]
     assert frozen[0]["reason_code"] is None
     assert frozen[0]["verified_scope"] is None
@@ -999,13 +1001,13 @@ def test_frozen_legacy_decision_without_evaluation_state_keeps_evaluated_copy(db
     assert decision_was_evaluated(stored) is True
     v1 = compact_public_claims(db_session, event, freeze_to_version=1)
     assert v1[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
-    assert v1[0]["presentation"]["verification_label"] == "Sin corroboración independiente"
+    assert v1[0]["presentation"]["verification_label"] == "Respaldo limitado"
     _later_live_supported(db_session, event, claim)
     live = compact_public_claims(db_session, event)
     live_row = next(row for row in live if row["id"] == cid)
-    assert live_row["presentation"]["verification_label"] == "Corroborado"
+    assert live_row["presentation"]["verification_label"] == "Confirmado"
     frozen = compact_public_claims(db_session, event, freeze_to_version=1)
-    assert frozen[0]["presentation"]["verification_label"] == "Sin corroboración independiente"
+    assert frozen[0]["presentation"]["verification_label"] == "Respaldo limitado"
     assert frozen[0]["presentation"]["known_independent_count"] == 0
     assert frozen[0]["editorial_labels"] == v1[0]["editorial_labels"]
     assert frozen[0]["reason_code"] is None
@@ -1030,11 +1032,12 @@ def test_frozen_missing_decision_is_not_filled_from_live_verify(db_session: Sess
     _later_live_supported(db_session, event, claim)
     live = compact_public_claims(db_session, event)
     live_row = next(row for row in live if row["id"] == cid)
-    assert live_row["presentation"]["verification_label"] == "Corroborado"
+    assert live_row["presentation"]["verification_label"] == "Confirmado"
     frozen = compact_public_claims(db_session, event, freeze_to_version=1)
     assert frozen[0]["id"] == cid
     assert frozen[0]["presentation"]["verification_label"] == NOT_EVALUATED_LABEL
-    assert frozen[0]["presentation"]["explanation"] is None
+    assert frozen[0]["presentation"]["explanation"]
+    assert "información suficiente" in frozen[0]["presentation"]["explanation"].casefold()
     assert "CHECKED" not in frozen[0]["editorial_labels"]
     assert frozen[0]["reason_code"] is None
     assert frozen[0]["verified_scope"] is None

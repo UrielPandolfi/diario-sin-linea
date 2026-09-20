@@ -181,7 +181,7 @@ def _claims_out(event, db) -> list[dict]:
         _claim_out(
             claim,
             editorials.get(str(claim.id)),
-            public_presentation_payload(presentation_for_claim(claim, view)),
+            public_presentation_payload(presentation_for_claim(claim, view), include_internal=True),
         )
         for claim in event.claims
     ]

@@ -1003,6 +1003,8 @@ def test_writing_compact_omits_skipped_and_does_not_carry_evaluation_state() -> 
     assert "reason_code" not in ContextClaimDecision.model_fields
     assert "verified_scope" not in ContextClaimDecision.model_fields
     assert "public_rendering" not in ContextClaimDecision.model_fields
+    assert "verification_label" not in ContextClaimDecision.model_fields
+    assert "presentation_kind" not in ContextClaimDecision.model_fields
     run = SimpleNamespace(
         id="verify",
         status=PipelineStatus.SUCCESS,
@@ -1043,6 +1045,9 @@ def test_writing_compact_omits_skipped_and_does_not_carry_evaluation_state() -> 
     assert "verified_scope" not in dumped
     assert "unsupported_scope" not in dumped
     assert "public_rendering" not in dumped
+    assert "verification_label" not in dumped
+    assert "presentation_kind" not in dumped
+    assert "limitation" not in dumped
     assert "policy_skip" not in str(compact.model_dump())
 
 

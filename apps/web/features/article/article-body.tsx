@@ -200,12 +200,11 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
   return (
     <div className={divided ? "mt-3 border-t border-border pt-3" : ""}>
       <span className="block font-sans text-sm font-semibold leading-snug text-primary">{copy.heading}</span>
-      <span className="mt-2 block font-sans text-xs leading-relaxed text-primary">{copy.coverage}</span>
+      {copy.explanation ? (
+        <span className="mt-2 block font-sans text-xs leading-relaxed text-primary">{copy.explanation}</span>
+      ) : null}
       {copy.limitation ? (
         <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{copy.limitation}</span>
-      ) : null}
-      {copy.explanation ? (
-        <span className="mt-1 block font-sans text-xs leading-relaxed text-secondary">{copy.explanation}</span>
       ) : null}
       {editorialLabels.length > 0 ? (
         <span className="mt-1.5 flex flex-wrap gap-1">
@@ -230,6 +229,7 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
       <EvidenceDetails
         details={details}
         canonicalText={claim.canonical_text}
+        coverage={copy.coverage}
         documentaryLimitation={copy.documentaryLimitation}
       />
     </div>
@@ -239,10 +239,12 @@ function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: bo
 function EvidenceDetails({
   details,
   canonicalText,
+  coverage,
   documentaryLimitation,
 }: {
   details: NonNullable<ClaimCardPresentation["evidence_detail"]>;
   canonicalText: string;
+  coverage: string | null;
   documentaryLimitation: string | null;
 }) {
   const officialDocumentIndex = documentaryLimitation ? officialDocumentDetailIndex(details) : -1;
@@ -256,6 +258,9 @@ function EvidenceDetails({
         Ver documentos y detalles del respaldo
       </summary>
       <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{canonicalText}</span>
+      {coverage ? (
+        <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{coverage}</span>
+      ) : null}
       {details.length > 0 ? (
         <ul className="mt-2 list-disc space-y-2 pl-4">
           {details.map((row, index) => (

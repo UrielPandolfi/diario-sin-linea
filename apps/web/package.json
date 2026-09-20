@@ -7,7 +7,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test lib/seo/seo.test.ts"
+    "test": "tsx --test lib/seo/seo.test.ts features/article/claim-popover-copy.test.ts"
   },
   "dependencies": {
     "lucide-react": "^1.37.0",

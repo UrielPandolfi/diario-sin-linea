@@ -44,15 +44,17 @@ export type ClaimEvidenceDetail = {
 };
 
 export type ClaimCardPresentation = {
+  presentation_kind?: string;
   verification_label: string;
   limitation: string | null;
   coverage: string;
   explanation: string | null;
   evidence_detail: ClaimEvidenceDetail[];
   basis_known: boolean;
-  demotion: string | null;
+  demotion?: string | null;
   documents_consulted: number | null;
-  documents_reporting: number | null;
+  documents_supporting?: number | null;
+  documents_reporting?: number | null;
   known_independent_count: number | null;
   unknown_group_count: number | null;
   reprint_collapsed_count?: number | null;
