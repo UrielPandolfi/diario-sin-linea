@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 
 from app.core.clock import utc_now
@@ -520,8 +520,36 @@ def assessment_has_conflict(assessment: CheapClaimEvidenceAssessment) -> bool:
     return EvidenceJudgementType.CONTRADICTS in relations
 
 
-def assessment_has_support(assessment: CheapClaimEvidenceAssessment) -> bool:
-    return any(row.relation == EvidenceJudgementType.SUPPORTS for row in assessment.judgements)
+def _admitted_support_refs(admission_checks: Sequence[Mapping] | None) -> set[int]:
+    refs: set[int] = set()
+    for row in admission_checks or []:
+        if str(row.get("admitted") or "") != EvidenceJudgementType.SUPPORTS.value:
+            continue
+        raw = row.get("source_ref")
+        try:
+            refs.add(int(raw))
+        except (TypeError, ValueError):
+            continue
+    return refs
+
+
+def assessment_has_support(
+    assessment: CheapClaimEvidenceAssessment,
+    *,
+    admission_checks: Sequence[Mapping] | None = None,
+) -> bool:
+    """True only if a SUPPORTS judgement was admitted as SUPPORTS.
+
+    A raw model SUPPORTS that failed _admit_relation does not count. Without
+    admission checks the relation has not passed the gate, so there is no support.
+    """
+    admitted = _admitted_support_refs(admission_checks)
+    if not admitted:
+        return False
+    return any(
+        row.relation == EvidenceJudgementType.SUPPORTS and int(row.source_ref) in admitted
+        for row in assessment.judgements
+    )
 
 
 def needs_sol_after_assessment(
@@ -530,6 +558,7 @@ def needs_sol_after_assessment(
     assessment: CheapClaimEvidenceAssessment | None,
     *,
     primary_support: bool,
+    admission_checks: Sequence[Mapping] | None = None,
 ) -> bool:
     if assessment is None:
         return True
@@ -537,7 +566,7 @@ def needs_sol_after_assessment(
         return True
     if assessment_has_conflict(assessment):
         return True
-    supports = assessment_has_support(assessment)
+    supports = assessment_has_support(assessment, admission_checks=admission_checks)
     if plan.primary_source_required and not primary_support:
         if is_well_supported(claim):
             return False

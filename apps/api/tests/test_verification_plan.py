@@ -427,8 +427,157 @@ def test_cheap_support_without_ambiguity_skips_sol() -> None:
         ],
         ambiguous=False,
     )
-    assert needs_sol_after_assessment(claim, plan, assessment, primary_support=True) is False
+    assert needs_sol_after_assessment(
+        claim,
+        plan,
+        assessment,
+        primary_support=True,
+        admission_checks=[
+            {
+                "source_ref": 1,
+                "requested": "SUPPORTS",
+                "admitted": "SUPPORTS",
+                "reason": "semantic_assessment",
+            }
+        ],
+    ) is False
 
+
+def test_raw_supports_without_admission_is_not_support() -> None:
+    from app.services.verification_plan import assessment_has_support
+
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.SUPPORTS,
+                excerpt="el apellido aparece en otra nota",
+            )
+        ]
+    )
+    assert assessment_has_support(assessment) is False
+    assert assessment_has_support(assessment, admission_checks=[]) is False
+    rejected = [
+        {
+            "source_ref": 1,
+            "requested": "SUPPORTS",
+            "admitted": "MENTIONS",
+            "reason": "statement_not_established",
+        }
+    ]
+    assert assessment_has_support(assessment, admission_checks=rejected) is False
+    admitted = [
+        {
+            "source_ref": 1,
+            "requested": "SUPPORTS",
+            "admitted": "SUPPORTS",
+            "reason": "semantic_assessment",
+        }
+    ]
+    assert assessment_has_support(assessment, admission_checks=admitted) is True
+
+
+def test_mixed_judgements_count_only_admitted_supports() -> None:
+    from app.services.verification_plan import assessment_has_support
+
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(source_ref=1, relation=EvidenceJudgementType.SUPPORTS, excerpt="dijo que"),
+            CheapEvidenceJudgement(source_ref=2, relation=EvidenceJudgementType.SUPPORTS, excerpt="el costo será"),
+            CheapEvidenceJudgement(source_ref=3, relation=EvidenceJudgementType.DOES_NOT_ESTABLISH),
+        ]
+    )
+    checks = [
+        {"source_ref": 1, "requested": "SUPPORTS", "admitted": "SUPPORTS", "reason": "semantic_assessment"},
+        {"source_ref": 2, "requested": "SUPPORTS", "admitted": "MENTIONS", "reason": "statement_not_established"},
+        {"source_ref": 3, "requested": "DOES_NOT_ESTABLISH", "admitted": None, "reason": "does_not_establish"},
+    ]
+    assert assessment_has_support(assessment, admission_checks=checks) is True
+
+
+def test_qualifies_is_not_full_support() -> None:
+    from app.services.verification_plan import assessment_has_support
+
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(source_ref=1, relation=EvidenceJudgementType.QUALIFIES, excerpt="1,7 en julio")
+        ]
+    )
+    checks = [
+        {"source_ref": 1, "requested": "SUPPORTS", "admitted": "QUALIFIES", "reason": "trajectory_only_partially_established"}
+    ]
+    assert assessment_has_support(assessment, admission_checks=checks) is False
+    as_raw_supports = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(source_ref=1, relation=EvidenceJudgementType.SUPPORTS, excerpt="1,7 en julio")
+        ]
+    )
+    assert assessment_has_support(as_raw_supports, admission_checks=checks) is False
+
+
+def test_rejected_supports_on_uncertain_uses_existing_sol_path() -> None:
+    claim = _claim(claim_type="declaracion", status=ClaimStatus.UNCERTAIN)
+    plan = VerificationPlan(
+        verification_target=VerificationTarget.PRIMARY_STATEMENT,
+        subject=VerificationSubject.PUBLIC_STATEMENT,
+        primary_source_required=False,
+    )
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.SUPPORTS,
+                excerpt="el costo será de 40.000 millones",
+            )
+        ]
+    )
+    rejected = [
+        {
+            "source_ref": 1,
+            "requested": "SUPPORTS",
+            "admitted": "MENTIONS",
+            "reason": "statement_not_established",
+        }
+    ]
+    assert needs_sol_after_assessment(
+        claim, plan, assessment, primary_support=False, admission_checks=rejected
+    ) is True
+    assert needs_sol_after_assessment(claim, plan, None, primary_support=False) is True
+
+
+def test_valid_does_not_establish_is_not_skip_or_failure() -> None:
+    from app.services.verification_plan import assessment_has_support
+
+    claim = _claim(claim_type="documento", status=ClaimStatus.SINGLE_SOURCE)
+    plan = VerificationPlan(
+        verification_target=VerificationTarget.OFFICIAL_RECORD,
+        subject=VerificationSubject.GOVERNMENT_APPOINTMENT,
+        primary_source_required=False,
+    )
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.DOES_NOT_ESTABLISH,
+                reason="solo menciona el apellido",
+            )
+        ],
+        ambiguous=False,
+        reason="no establece la designación",
+    )
+    checks = [
+        {
+            "source_ref": 1,
+            "requested": "DOES_NOT_ESTABLISH",
+            "admitted": None,
+            "reason": "does_not_establish",
+        }
+    ]
+    assert assessment_has_support(assessment, admission_checks=checks) is False
+    assert needs_sol_after_assessment(
+        claim, plan, assessment, primary_support=False, admission_checks=checks
+    ) is False
+    assert needs_sol_after_assessment(claim, plan, None, primary_support=False) is True
 
 def test_refine_plan_does_not_copy_event_recency_onto_historical_claim() -> None:
     fallback = VerificationPlan(

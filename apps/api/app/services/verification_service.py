@@ -57,6 +57,7 @@ from app.schemas.verification import (
     CheapClaimEvidenceAssessment,
     CheapEvidenceJudgement,
     EVENT_SOURCE_EVIDENCE_TYPES,
+    EvidenceJudgementType,
     PERSISTABLE_JUDGEMENTS,
     VerificationPlan,
     VerificationResult,
@@ -470,7 +471,11 @@ class VerificationService:
             payload["primary_source_found"][claim_id] = bool(primary_found)
             payload["primary_source_supports_claim"][claim_id] = bool(primary_supports)
             escalate = needs_sol_after_assessment(
-                claim, plan, assessment, primary_support=bool(primary_supports)
+                claim,
+                plan,
+                assessment,
+                primary_support=bool(primary_supports),
+                admission_checks=self._comparison_checks,
             )
             if targeted:
                 escalate = True
@@ -504,14 +509,17 @@ class VerificationService:
                 payload["decision_by_claim_id"][claim_id] = decision.model_dump(mode="json")
                 payload["comparison_checks"][claim_id] = self._comparison_checks
                 continue
-            if assessment is not None and assessment_has_support(assessment):
+            has_admitted_support = assessment is not None and assessment_has_support(
+                assessment, admission_checks=self._comparison_checks
+            )
+            if has_admitted_support:
                 claim.status = apply_primary_requirement(
                     claim, ClaimStatus.SUPPORTED, plan, primary_supports=bool(primary_supports)
                 )
             decision = self._decision_after_policy(
                 claim,
                 plan,
-                desired=ClaimStatus.SUPPORTED if assessment is not None and assessment_has_support(assessment) else claim.status,
+                desired=ClaimStatus.SUPPORTED if has_admitted_support else claim.status,
                 llm_reason=(assessment.reason if assessment is not None else None) or "cheap_assessment",
                 unresolved=False,
                 primary_found=bool(primary_found),
@@ -1008,6 +1016,12 @@ class VerificationService:
         for row in assessment.judgements:
             selected_type = PERSISTABLE_JUDGEMENTS.get(row.relation)
             if selected_type is None:
+                reason = (
+                    "does_not_establish"
+                    if row.relation == EvidenceJudgementType.DOES_NOT_ESTABLISH
+                    else "not_persistable"
+                )
+                self._record_relation_check(row, requested=row.relation, admitted=None, reason=reason)
                 continue
             evidence_type, _ = self._admit_relation(claim, by_ref.get(row.source_ref), row, selected_type)
             added, counted = self._attach_evidence(
@@ -1117,6 +1131,32 @@ class VerificationService:
             return True
         return False
 
+    def _record_relation_check(
+        self,
+        row,
+        *,
+        requested,
+        admitted,
+        valid: bool = False,
+        reason: str = "semantic_assessment",
+    ) -> None:
+        if not hasattr(self, "_comparison_checks"):
+            self._comparison_checks = []
+        requested_value = requested.value if hasattr(requested, "value") else requested
+        admitted_value = admitted.value if hasattr(admitted, "value") else admitted
+        self._comparison_checks.append(
+            {
+                "source_ref": row.source_ref,
+                "requested": requested_value,
+                "admitted": admitted_value,
+                "valid_contradiction": valid,
+                "reason": reason,
+                "claim_fragment": getattr(getattr(row, "comparison", None), "claim_fragment", None),
+                "evidence_fragment": getattr(getattr(row, "comparison", None), "evidence_fragment", None),
+                "excerpt": getattr(row, "excerpt", None),
+            }
+        )
+
     def _admit_relation(self, claim, src, row, relation):
         valid = False
         reason = "semantic_assessment"
@@ -1144,20 +1184,7 @@ class VerificationService:
                     supported, reason = False, "comparison_not_in_cited_excerpt"
                 if not supported:
                     relation = EvidenceType.QUALIFIES
-        if not hasattr(self, "_comparison_checks"):
-            self._comparison_checks = []
-        self._comparison_checks.append(
-            {
-                "source_ref": row.source_ref,
-                "requested": original.value,
-                "admitted": relation.value,
-                "valid_contradiction": valid,
-                "reason": reason,
-                "claim_fragment": getattr(getattr(row, "comparison", None), "claim_fragment", None),
-                "evidence_fragment": getattr(getattr(row, "comparison", None), "evidence_fragment", None),
-                "excerpt": getattr(row, "excerpt", None),
-            }
-        )
+        self._record_relation_check(row, requested=original, admitted=relation, valid=valid, reason=reason)
         return relation, valid
 
     def _attach_evidence(

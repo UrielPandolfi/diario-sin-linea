@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. C5 (validador de superficie y coverage del titular) en código y tests. C6 no empezó.
+Revisión: 2026-09-20. C6 (admisión semántica del assessment y suficiencia del respaldo) en código y tests. C7 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -93,9 +93,15 @@ Limitación: QUALIFIES sin split C8 no autoriza categórico del compuesto; `unsu
 
 ## Track C5 — superficie y coverage del titular — 2026-09-20
 
-En código: `surface_validation_findings` (tras los invariantes previos de `structural_findings`) comprueba headline, summary y lead de la versión contra `public_rendering` del snapshot atado a **esa** versión (`evidence_snapshot_for_version`; no Verification live ni el snapshot de V1 al auditar V2). Lead = primer `body_block` (`block_plain_text`) o, si no hay bloques, el primer párrafo. Findings: `surface_attribution`, `surface_categorical`, `surface_independent_language`, `headline_uncovered`, `surface_contract_incomplete` (HIGH, `action=REVIEW`, en `_STRUCTURAL_REASONS` → `structural_block`, sin rewrite ni ciclo Writing) y `surface_indeterminate` (LOW/CLARITY, no bloquea). Matching: EQUIVALENT valida; PARTIAL/mención de tokens = indeterminado. Coverage: el núcleo del titular debe equivaler a un claim material (HIGH, o no-LOW si no hay HIGH). Skipped → contrato restringido; complete/legacy sin flags → incompleto, no PASS. Un hecho equivalente no se veta por un utterance hermano (p. ej. recovery de «reconoció»). `PublishService._audit_passed_for_current` vuelve a correr `structural_findings` sobre el texto actual; una edición del candidato exige re-auditoría (`version_after`). `revise` humano no entra a Audit. Sin migración, sin backfill, sin LLM extra. Tests: `test_surface_validation.py` y fixtures de writing/audit/publish/Track B. C6 no empezó.
+En código: `surface_validation_findings` (tras los invariantes previos de `structural_findings`) comprueba headline, summary y lead de la versión contra `public_rendering` del snapshot atado a **esa** versión (`evidence_snapshot_for_version`; no Verification live ni el snapshot de V1 al auditar V2). Lead = primer `body_block` (`block_plain_text`) o, si no hay bloques, el primer párrafo. Findings: `surface_attribution`, `surface_categorical`, `surface_independent_language`, `headline_uncovered`, `surface_contract_incomplete` (HIGH, `action=REVIEW`, en `_STRUCTURAL_REASONS` → `structural_block`, sin rewrite ni ciclo Writing) y `surface_indeterminate` (LOW/CLARITY, no bloquea). Matching: EQUIVALENT valida; PARTIAL/mención de tokens = indeterminado. Coverage: el núcleo del titular debe equivaler a un claim material (HIGH, o no-LOW si no hay HIGH). Skipped → contrato restringido; complete/legacy sin flags → incompleto, no PASS. Un hecho equivalente no se veta por un utterance hermano (p. ej. recovery de «reconoció»). `PublishService._audit_passed_for_current` vuelve a correr `structural_findings` sobre el texto actual; una edición del candidato exige re-auditoría (`version_after`). `revise` humano no entra a Audit. Sin migración, sin backfill, sin LLM extra. Tests: `test_surface_validation.py` y fixtures de writing/audit/publish/Track B.
 
 Limitación del matching: overlap ≥0.6 con bucket `other` puede marcar EQUIVALENT un utterance de recovery y un titular de hecho; C5 no repara Extraction ni hace split C8. «Según» debe ir en la misma oración y antes de la afirmación; un «según» posterior o en otra superficie no sana. No hay embeddings ni umbral semántico nuevo.
+
+## Track C6 — admisión del assessment barato — 2026-09-20
+
+En código: `assessment_has_support` deja de mirar el `SUPPORTS` crudo del modelo. Cuenta solo juicios cuya admisión en `comparison_checks` quedó `SUPPORTS` (el mismo `_admit_relation` de utterance/trayectoria/conteo regulatorio/contradicción). Ese flag alimenta el status barato (`apply_primary_requirement`) y `needs_sol_after_assessment`. Un `SUPPORTS` rechazado no borra otro admitido. La suficiencia (independencia, primaria, `authentic_primary`) no cambió. `assessments[]` sigue siendo el dump del modelo (incluye `DOES_NOT_ESTABLISH`); `_apply_judgements` registra DNE en `comparison_checks` con `admitted=None` y no crea `ClaimEvidence`/`EventSource`. Un assessment DNE válido escribe `evaluation_state=complete`; `assessment=None` (sin paquete o error) no se guarda como DNE y escala a Sol. QUALIFIES admitido no es soporte total. Sin prompts nuevos, sin rondas extra, sin migración. Un `UNCERTAIN` cuyo único SUPPORTS crudo es rechazado ahora toma el escalado a Sol que ya existía (antes se evitaba). Tests: `test_verification_plan.py`, `test_proposition_comparison.py`, `test_verification.py`. C7 no empezó.
+
+Limitación: si el modelo etiqueta mal la relación semántica, C6 no la corrige con heurística narrativa; eso quedaría para un PR de prompt. Comparabilidad C7 y split C8 no se tocaron.
 
 ## Independencia periodística — 2026-09-13
 

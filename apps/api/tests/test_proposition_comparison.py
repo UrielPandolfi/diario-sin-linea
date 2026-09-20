@@ -177,6 +177,76 @@ def test_monthly_point_cannot_support_entire_trajectory(value):
     assert service._admit_relation(claim, None, row, EvidenceType.SUPPORTS)[0] == EvidenceType.QUALIFIES
 
 
+def test_raw_supports_demoted_to_qualifies_is_not_assessment_support():
+    from app.schemas.verification import CheapClaimEvidenceAssessment, CheapEvidenceJudgement, EvidenceJudgementType
+    from app.services.verification_plan import assessment_has_support
+
+    service = object.__new__(VerificationService)
+    service._comparison_checks = []
+    claim = SimpleNamespace(canonical_text=ORIGINAL.split("reconoció que ")[1], claim_type="cifra")
+    excerpt = _observation("1,7")
+    row = VerificationEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt=excerpt)
+    admitted, _ = service._admit_relation(claim, None, row, EvidenceType.SUPPORTS)
+    assert admitted == EvidenceType.QUALIFIES
+    assessment = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.SUPPORTS,
+                excerpt=excerpt,
+            )
+        ]
+    )
+    assert assessment_has_support(assessment, admission_checks=service._comparison_checks) is False
+    assert service._comparison_checks[0]["requested"] == "SUPPORTS"
+    assert service._comparison_checks[0]["admitted"] == "QUALIFIES"
+
+
+def test_utterance_content_excerpt_is_not_admitted_support():
+    from app.schemas.verification import CheapClaimEvidenceAssessment, CheapEvidenceJudgement, EvidenceJudgementType
+    from app.services.verification_plan import assessment_has_support
+
+    service = object.__new__(VerificationService)
+    service._comparison_checks = []
+    claim = SimpleNamespace(
+        canonical_text="Pérez afirmó que el costo será de 40.000 millones.",
+        claim_type="declaracion",
+    )
+    rejected = VerificationEvidence(
+        source_ref=1,
+        evidence_type=EvidenceType.SUPPORTS,
+        excerpt="el costo será de 40.000 millones",
+    )
+    assert service._admit_relation(claim, None, rejected, EvidenceType.SUPPORTS)[0] == EvidenceType.MENTIONS
+    raw = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.SUPPORTS,
+                excerpt=rejected.excerpt,
+            )
+        ]
+    )
+    assert assessment_has_support(raw, admission_checks=service._comparison_checks) is False
+    service._comparison_checks = []
+    speech = VerificationEvidence(
+        source_ref=1,
+        evidence_type=EvidenceType.SUPPORTS,
+        excerpt="Pérez afirmó que el costo será de 40.000 millones.",
+    )
+    assert service._admit_relation(claim, None, speech, EvidenceType.SUPPORTS)[0] == EvidenceType.SUPPORTS
+    admitted = CheapClaimEvidenceAssessment(
+        judgements=[
+            CheapEvidenceJudgement(
+                source_ref=1,
+                relation=EvidenceJudgementType.SUPPORTS,
+                excerpt=speech.excerpt,
+            )
+        ]
+    )
+    assert assessment_has_support(admitted, admission_checks=service._comparison_checks) is True
+
+
 def test_targeted_reextraction_and_verification_preserve_id_and_history(db_session):
     source = _source(db_session, name="La Derecha Diario", domain="derechadiario.com.ar")
     item = _item(db_session, source.id, url="https://derechadiario.com.ar/politica/nota", title="La entrevista",

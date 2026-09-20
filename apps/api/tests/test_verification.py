@@ -419,6 +419,13 @@ def test_off_topic_search_hits_stay_candidates_not_event_sources(db_session: Ses
     assert len(extra) == 1
     assert extra[0].relation_type == EventSourceRelation.ADDITIONAL
     assert extra[0].source_item.url == useful
+    cid = str(claim.id)
+    relations = [row["relation"] for row in result["assessments"][cid]["judgements"]]
+    assert "DOES_NOT_ESTABLISH" in relations
+    assert "SUPPORTS" in relations
+    dne_check = next(row for row in result["comparison_checks"][cid] if row["requested"] == "DOES_NOT_ESTABLISH")
+    assert dne_check["admitted"] is None
+    assert dne_check["reason"] == "does_not_establish"
 
 
 def test_conflicting_unresolved_keeps_status_and_value(db_session: Session) -> None:
@@ -916,10 +923,21 @@ def test_official_hit_does_not_promote_without_semantic_support(db_session: Sess
     search = FakeSearchProvider(
         [SearchHit(title="Boletín", url=official, snippet="Otra norma distinta")]
     )
-    _service(db_session, sol, search, assessor=assessor).verify(event.id, trigger="admin")
+    result = _service(db_session, sol, search, assessor=assessor).verify(event.id, trigger="admin")
     db_session.refresh(claim)
+    cid = str(claim.id)
     assert claim.status == ClaimStatus.SINGLE_SOURCE
     assert "VerificationResult" not in sol.calls
+    assert result["assessments"][cid]["judgements"][0]["relation"] == "DOES_NOT_ESTABLISH"
+    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
+    assert result["comparison_checks"][cid][0]["requested"] == "DOES_NOT_ESTABLISH"
+    assert result["comparison_checks"][cid][0]["admitted"] is None
+    linked = {
+        link.source_item.url
+        for link in db_session.scalars(select(EventSource).where(EventSource.event_id == event.id))
+        if link.source_item is not None
+    }
+    assert official not in linked
 
 
 def test_primary_found_is_independent_of_semantic_support(db_session: Session) -> None:
@@ -1585,4 +1603,222 @@ def test_outside_recheck_records_explicit_skipped_decision(db_session: Session) 
     assert other_decision["evaluation_state"] == "skipped"
     assert other_decision["llm_reason"] == "outside_recheck"
     assert other.status == ClaimStatus.SINGLE_SOURCE
+
+
+def test_rejected_raw_supports_does_not_activate_cheap_support(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/base",
+        title="Base",
+        body="Pérez habló del presupuesto.",
+        content_hash="h-reject",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Pérez afirmó que el costo será de 40.000 millones",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    hit = "https://medio.test/cifra"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="el costo será de 40.000 millones",
+                        reason="el recorte menciona la cifra",
+                    )
+                ],
+                ambiguous=False,
+                reason="apoyo textual",
+            )
+        }
+    )
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SUPPORTED)})
+    search = FakeSearchProvider(
+        [SearchHit(title="Cifra", url=hit, snippet="el costo será de 40.000 millones")]
+    )
+    result = _service(
+        db_session,
+        sol,
+        search,
+        RecordingFetcher({hit: "<article><p>el costo será de 40.000 millones</p></article>"}),
+        assessor=assessor,
+    ).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    db_session.refresh(claim)
+    assert result["assessments"][cid]["judgements"][0]["relation"] == "SUPPORTS"
+    assert result["comparison_checks"][cid][0]["admitted"] == "MENTIONS"
+    assert result["comparison_checks"][cid][0]["reason"] == "statement_not_established"
+    assert result["escalated"][cid] is False
+    assert "VerificationResult" not in sol.calls
+    assert assessor.calls == ["CheapClaimEvidenceAssessment"]
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
+    assert result["decision_by_claim_id"][cid]["status"] == "SINGLE_SOURCE"
+
+
+def test_admitted_support_with_insufficient_origins_is_not_supported(db_session: Session) -> None:
+    source = _source(db_session)
+    body = "Hubo un incendio en el depósito de Rosario durante la madrugada."
+    item = _item(
+        db_session,
+        source.id,
+        url="https://medio.test/incendio",
+        title="Incendio",
+        body=body,
+        content_hash="h-fire",
+    )
+    event = _event(db_session, item, title_internal="Incendio en un depósito de Rosario")
+    claim = _claim(
+        db_session,
+        event,
+        text="Hubo un incendio en el depósito de Rosario.",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    _evidence(db_session, claim, item, excerpt=body)
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt=body,
+                        reason="el recorte relata el incendio",
+                    )
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SUPPORTED)})
+    result = _service(
+        db_session, sol, FakeSearchProvider([]), assessor=assessor
+    ).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    db_session.refresh(claim)
+    assert result["comparison_checks"][cid][0]["admitted"] == "SUPPORTS"
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    assert result["decision_by_claim_id"][cid]["status"] == "SINGLE_SOURCE"
+    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
+    assert "VerificationResult" not in sol.calls
+
+
+def test_uncertain_rejected_supports_escalates_on_existing_sol_path(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/base",
+        title="Base",
+        body="Se habló del presupuesto.",
+        content_hash="h-unc",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Pérez afirmó que el costo será de 40.000 millones",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.UNCERTAIN,
+    )
+    hit = "https://medio.test/cifra-u"
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="el costo será de 40.000 millones",
+                    )
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True)})
+    result = _service(
+        db_session,
+        sol,
+        FakeSearchProvider([SearchHit(title="Cifra", url=hit, snippet="el costo será de 40.000 millones")]),
+        RecordingFetcher({hit: "<article><p>el costo será de 40.000 millones</p></article>"}),
+        assessor=assessor,
+    ).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    assert result["escalated"][cid] is True
+    assert sol.calls == ["VerificationResult"]
+    assert assessor.calls == ["CheapClaimEvidenceAssessment"]
+    assert assessor.calls.count("CheapClaimEvidenceAssessment") == 1
+    db_session.refresh(claim)
+    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
+
+
+def test_missing_assessment_is_not_recorded_as_does_not_establish(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/base",
+        title="Base",
+        body="El ministro habló",
+        content_hash="h-none",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="El ministro anunció que el decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.MEDIUM,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SINGLE_SOURCE)})
+    result = _service(db_session, sol, FakeSearchProvider([])).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    assert cid not in result["assessments"]
+    assert result["escalated"][cid] is True
+    assert "VerificationResult" in sol.calls
+
+
+def test_new_cheap_evaluation_does_not_change_published_snapshot(db_session: Session) -> None:
+    from app.services.feed_ranking import compact_public_claims
+    from app.services.publish_service import PublishService
+    from tests.test_audit import _pass_audit
+    from tests.test_writing_certainty import _audit, _seed
+
+    event, article, rows, _refs = _seed(
+        db_session,
+        claims=[{"text": "Hubo un incendio en el depósito de Rosario.", "status": ClaimStatus.SUPPORTED}],
+        headline="Hubo un incendio en el depósito de Rosario",
+        summary="Hubo un incendio en el depósito de Rosario.",
+        paragraphs=[[("Hubo un incendio en el depósito de Rosario durante la madrugada.", ["C1"])]],
+    )
+    first, _llm = _audit(db_session, event, result=_pass_audit())
+    assert first["passed"] is True
+    published = PublishService(db_session).publish(event.id, trigger="test")
+    assert published["published"] is True
+    db_session.refresh(article)
+    frozen_before = compact_public_claims(db_session, event, freeze_to_version=article.published_version)
+    before_status = frozen_before[0]["status"]
+    claim = rows[0]
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.UNCERTAIN, unresolved=True)})
+    _service(db_session, sol, FakeSearchProvider([])).verify(event.id, trigger="admin", claim_id=claim.id)
+    db_session.refresh(claim)
+    db_session.refresh(article)
+    frozen_after = compact_public_claims(db_session, event, freeze_to_version=article.published_version)
+    assert frozen_after[0]["status"] == before_status
+    assert claim.status == ClaimStatus.UNCERTAIN
+    assert article.published_version == 1
 
