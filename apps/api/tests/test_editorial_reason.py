@@ -173,6 +173,30 @@ def test_qualifies_without_fragment_does_not_invent_verified_scope() -> None:
     assert unsupported is None
 
 
+def test_single_source_without_admitted_supports_does_not_verify_the_claim() -> None:
+    text = "Pérez afirmó que el costo será de 40.000 millones"
+    for types in ([EvidenceType.MENTIONS.value], []):
+        verified, unsupported = editorial_scopes(
+            evaluated_text=text,
+            status=ClaimStatus.SINGLE_SOURCE.value,
+            evidence_types=types,
+        )
+        assert verified is None
+        assert unsupported is None
+        assert verified != text
+
+
+def test_single_source_with_admitted_supports_verifies_the_claim() -> None:
+    text = "Hubo un incendio en el depósito de Rosario"
+    verified, unsupported = editorial_scopes(
+        evaluated_text=text,
+        status=ClaimStatus.SINGLE_SOURCE.value,
+        evidence_types=[EvidenceType.SUPPORTS.value],
+    )
+    assert verified == text
+    assert unsupported is None
+
+
 def test_legacy_decision_parses_without_reason_or_scopes() -> None:
     raw = {
         "claim_id": "legacy",

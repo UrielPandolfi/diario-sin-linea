@@ -15,6 +15,7 @@ from app.services.evidence_comparison import (
     valid_contradiction,
 )
 from app.services.verification_plan import heuristic_plan, refine_plan, build_verification_queries, try_resolve_numeric_comparison
+from app.schemas.editorial_evidence import ReasonCode
 from app.services.verification_service import VerificationService, _PacketSource
 from app.services.claim_service import ClaimService
 from app.models import PipelineRun
@@ -513,6 +514,7 @@ def test_rejected_c6_contradiction_is_not_conflict_basis(db_session):
     assert claim.status != ClaimStatus.CONFLICTING
     assert claim.status != ClaimStatus.SUPPORTED
     assert decision.evaluation_state.value == "complete"
+    assert decision.reason_code is not ReasonCode.CONFLICTING_COMPARABLE_EVIDENCE
     assert any(row["requested"] == "CONTRADICTS" and row["admitted"] != "CONTRADICTS" for row in service._comparison_checks)
 
 
@@ -576,6 +578,7 @@ def test_missing_period_does_not_promote_supported_after_discard(db_session):
     decision = payload["decision_by_claim_id"][str(four.id)]
     assert decision["evaluation_state"] == EvaluationState.COMPLETE.value
     assert decision["status"] != ClaimStatus.SUPPORTED.value
+    assert decision.get("reason_code") != ReasonCode.CONFLICTING_COMPARABLE_EVIDENCE.value
 
 
 def test_c7_reconcile_does_not_change_published_v1(db_session):

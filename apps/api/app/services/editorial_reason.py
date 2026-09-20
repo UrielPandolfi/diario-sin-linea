@@ -207,6 +207,8 @@ def editorial_scopes(
     QUALIFIES alone does not identify which component is A or B. A claim_fragment
     that is a proper subset of evaluated text may set verified_scope. The rest
     of the compound is unsupported_scope=None (undetermined), not a C8 split.
+    SINGLE_SOURCE or SUPPORTED without admitted SUPPORTS does not identify a
+    verified scope; the status token is not a substitute for that evidence.
     """
     text = (evaluated_text or "").strip()
     if not text:
@@ -229,9 +231,9 @@ def editorial_scopes(
         if established and established != text:
             return established, None
         return None, None
-    if has_supports or status_value in {ClaimStatus.SUPPORTED.value, ClaimStatus.SINGLE_SOURCE.value}:
+    if has_supports:
         return text, None
-    return None, text
+    return None, None
 
 
 def qualify_fragments_from_checks(checks: list[dict] | None) -> list[str]:

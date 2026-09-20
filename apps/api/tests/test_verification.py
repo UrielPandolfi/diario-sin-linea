@@ -940,7 +940,10 @@ def test_official_hit_does_not_promote_without_semantic_support(db_session: Sess
     assert claim.status == ClaimStatus.SINGLE_SOURCE
     assert "VerificationResult" not in sol.calls
     assert result["assessments"][cid]["judgements"][0]["relation"] == "DOES_NOT_ESTABLISH"
-    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
+    decision = result["decision_by_claim_id"][cid]
+    assert decision["evaluation_state"] == "complete"
+    assert decision["verified_scope"] is None
+    assert decision["unsupported_scope"] is None
     assert result["comparison_checks"][cid][0]["requested"] == "DOES_NOT_ESTABLISH"
     assert result["comparison_checks"][cid][0]["admitted"] is None
     linked = {
@@ -1672,8 +1675,91 @@ def test_rejected_raw_supports_does_not_activate_cheap_support(db_session: Sessi
     assert "VerificationResult" not in sol.calls
     assert assessor.calls == ["CheapClaimEvidenceAssessment"]
     assert claim.status == ClaimStatus.SINGLE_SOURCE
-    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
-    assert result["decision_by_claim_id"][cid]["status"] == "SINGLE_SOURCE"
+    decision = result["decision_by_claim_id"][cid]
+    assert decision["evaluation_state"] == "complete"
+    assert decision["status"] == "SINGLE_SOURCE"
+    assert decision["verified_scope"] is None
+    assert decision["unsupported_scope"] is None
+    assert decision["verified_scope"] != claim.canonical_text
+    rendering = decision.get("public_rendering") or {}
+    assert rendering.get("categorical_allowed") is False
+    assert rendering.get("headline_unattributed_allowed") is False
+
+
+def test_admitted_supports_survives_a_rejected_sibling(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/base",
+        title="Base",
+        body="Pérez habló del presupuesto.",
+        content_hash="h-mix",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="Pérez afirmó que el costo será de 40.000 millones",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    admitted_hit = "https://prensa.test/dicho"
+    rejected_hit = "https://medio.test/cifra-suelta"
+    sol = FakeStructuredLLM({"VerificationResult": _sol(status=ClaimStatus.SUPPORTED)})
+    assessor = FakeStructuredLLM(
+        {
+            "CheapClaimEvidenceAssessment": CheapClaimEvidenceAssessment(
+                judgements=[
+                    CheapEvidenceJudgement(
+                        source_ref=1,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="Pérez afirmó que el costo será de 40.000 millones",
+                        reason="repite el dicho",
+                    ),
+                    CheapEvidenceJudgement(
+                        source_ref=2,
+                        relation=EvidenceJudgementType.SUPPORTS,
+                        excerpt="el costo será de 40.000 millones",
+                        reason="solo la cifra",
+                    ),
+                ],
+                ambiguous=False,
+            )
+        }
+    )
+    result = _service(
+        db_session,
+        sol,
+        FakeSearchProvider(
+            [
+                SearchHit(title="Dicho", url=admitted_hit, snippet="Pérez afirmó que el costo será de 40.000 millones"),
+                SearchHit(title="Cifra", url=rejected_hit, snippet="el costo será de 40.000 millones"),
+            ]
+        ),
+        RecordingFetcher(
+            {
+                admitted_hit: "<article><p>Pérez afirmó que el costo será de 40.000 millones</p></article>",
+                rejected_hit: "<article><p>el costo será de 40.000 millones</p></article>",
+            }
+        ),
+        assessor=assessor,
+    ).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    db_session.refresh(claim)
+    checks = result["comparison_checks"][cid]
+    admitted = [row for row in checks if row["admitted"] == "SUPPORTS"]
+    rejected = [row for row in checks if row["requested"] == "SUPPORTS" and row["admitted"] == "MENTIONS"]
+    assert admitted
+    assert rejected
+    assert any(ev.evidence_type == EvidenceType.SUPPORTS for ev in claim.evidence)
+    decision = result["decision_by_claim_id"][cid]
+    assert decision["evaluation_state"] == "complete"
+    assert decision["verified_scope"] == claim.canonical_text
+    assert decision["unsupported_scope"] is None
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+    assert "VerificationResult" not in sol.calls
 
 
 def test_admitted_support_with_insufficient_origins_is_not_supported(db_session: Session) -> None:

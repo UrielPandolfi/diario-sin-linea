@@ -5,8 +5,11 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from fastapi.testclient import TestClient
+
 from app.core.config import get_settings
 from app.domain.enums import ClaimImportance, ClaimStatus, EventSourceRelation, EvidenceType
+from app.main import app
 from app.models import Claim, ClaimEvidence
 from app.providers.fakes import FakeSearchProvider, FakeStructuredLLM
 from app.schemas.claims import (
@@ -38,14 +41,17 @@ from app.services.event_service import EventService
 from app.services.feed_ranking import compact_public_claims
 from app.services.information_origin import assess_origins, classify_statement_row, demotion_for
 from app.services.material_change import detect_material_change, snapshot_claims
+from app.services.publish_service import PublishService
 from app.services.verification_plan import apply_primary_requirement, heuristic_plan
 from app.services.verification_policy import requires_authoritative_source, select_claims
 from app.services.verification_service import VerificationService
 from app.schemas import ArticleCreate
 from tests.editorial_snapshot import persist_version_snapshot
+from tests.test_audit import _pass_audit
 from tests.test_editorial_evidence import _event, _extracted, _item, _resolution, _source
 from tests.test_independent_reporting import _claim as _origin_claim, _row
 from tests.test_verification import _claim as _db_claim, _evidence as _db_evidence, _service as _verify_service, _sol
+from tests.test_writing_certainty import _audit
 
 
 ACT_REACTION = "Milei publicó un mensaje y generó polémica"
@@ -566,7 +572,7 @@ def test_c2_new_extraction_does_not_change_frozen_v1(db_session: Session) -> Non
     article, _created = ArticleService(db_session).create_draft(
         ArticleCreate(
             event_id=event.id,
-            headline="Milei publicó un mensaje",
+            headline="Según la cuenta, Milei publicó un mensaje",
             summary="Según la cuenta, Milei publicó un mensaje.",
             body="Según la cuenta, Milei publicó un mensaje.",
             body_blocks=[
@@ -578,7 +584,19 @@ def test_c2_new_extraction_does_not_change_frozen_v1(db_session: Session) -> Non
         )
     )
     persist_version_snapshot(db_session, event, article)
-    frozen = compact_public_claims(db_session, event, freeze_to_version=1)
+    first, _audit_llm = _audit(db_session, event, result=_pass_audit())
+    assert first["passed"] is True
+    published = PublishService(db_session).publish(event.id, trigger="test")
+    assert published["published"] is True
+    db_session.refresh(article)
+    db_session.commit()
+    v1 = article.published_version
+    frozen = compact_public_claims(db_session, event, freeze_to_version=v1)
+    with TestClient(app) as client:
+        before = client.get(f"/api/v1/articles/{article.slug}").json()
+    assert before["published_version"] == v1
+    assert [row["id"] for row in before["claims"]] == [row["id"] for row in frozen]
+    assert [row["canonical_text"] for row in before["claims"]] == [row["canonical_text"] for row in frozen]
     llm = FakeStructuredLLM(
         {
             "ClaimExtractionBatch": ClaimExtractionBatch(
@@ -596,10 +614,16 @@ def test_c2_new_extraction_does_not_change_frozen_v1(db_session: Session) -> Non
         }
     )
     ClaimService(db_session, extractor_llm=llm, resolver_llm=llm).resolve(event.id, trigger="admin")
-    still = compact_public_claims(db_session, event, freeze_to_version=1)
+    still = compact_public_claims(db_session, event, freeze_to_version=v1)
     assert still == frozen
     live = compact_public_claims(db_session, event)
     assert len(live) >= len(frozen)
+    db_session.commit()
+    with TestClient(app) as client:
+        after = client.get(f"/api/v1/articles/{article.slug}").json()
+    assert after["published_version"] == v1
+    assert after["headline"] == before["headline"]
+    assert after["claims"] == before["claims"]
 
 
 def test_selection_cap_materiality_and_no_new_llm_round(db_session: Session) -> None:

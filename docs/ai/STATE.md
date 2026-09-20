@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. C8 (claims compuestos: separar acto y caracterización) en código y tests. C9 no empezó.
+Revisión: 2026-09-20. Revisión integrada C1–C8: corrección de `verified_scope` sin SUPPORTS admitido. C9 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -81,7 +81,7 @@ Limitaciones de datos no conservados: snapshot ausente → ids del body, status 
 
 ## Track C3 — reason_code y scopes deterministas — 2026-09-20
 
-En código: `ClaimDecision` persiste `reason_code`, `verified_scope` y `unsupported_scope` (opcionales). `reason_code_for` mapea Demotion, status post-gate de contradicción, `SupportKind` y conteos de procedencia; `final_reason` es `render_reason(code, context)`. Un `claim_fragment` de QUALIFIES que es subconjunto propio del texto evaluado puede fijar `verified_scope`; no hay split del resto (`unsupported_scope=None`, alcance no determinado). QUALIFIES sin fragmento: ambos `None`. El GET solo serializa C3 si `evaluation_state=complete` (skipped/legacy/unknown no presuponen evaluación). Writing compacta sin esos campos. Independencia, `clamp_supported_status`, `authentic_primary` y umbrales de contradicción no cambiaron. Sin migración ni LLM extra.
+En código: `ClaimDecision` persiste `reason_code`, `verified_scope` y `unsupported_scope` (opcionales). `reason_code_for` mapea Demotion, status post-gate de contradicción, `SupportKind` y conteos de procedencia; `final_reason` es `render_reason(code, context)`. El texto entero como `verified_scope` exige `SUPPORTS` persistido; `SINGLE_SOURCE` sin ese respaldo deja ambos scopes `None`. Un `claim_fragment` de QUALIFIES que es subconjunto propio del texto evaluado puede fijar `verified_scope`; no hay split del resto (`unsupported_scope=None`, alcance no determinado). QUALIFIES sin fragmento: ambos `None`. El GET solo serializa C3 si `evaluation_state=complete` (skipped/legacy/unknown no presuponen evaluación). Writing compacta sin esos campos. Independencia, `clamp_supported_status`, `authentic_primary` y umbrales de contradicción no cambiaron. Sin migración ni LLM extra.
 
 Limitación: no hay componente estructurado B, así que C3 no representa `unsupported_scope=B` salvo que C8 haya separado proposiciones. QUALIFIES sigue sin restar strings. `CONFLICTING`/`DISPROVEN` describen el status ya pasado por los gates (C7 comparabilidad / `valid_contradiction`); C3 no reabre esa comparación. Primaria auténtica de un utterance no se mapea a `INDEPENDENT_CORROBORATION`.
 
@@ -114,6 +114,10 @@ Limitación: no hay campo estructurado de período/ámbito/base aparte de `occur
 En código: `is_mixed_proposition` reconoce, además de vigencia/alcance/fallo/denuncia, un acto de publicación o declaración más una consecuencia/reacción del narrador (fuera de comillas) y un atributo evaluativo coordinado con un acto. `split_compound_extracted` separa solo la coordinación inequívoca (`A publicó X y generó polémica`); el relativo «un mensaje que generó polémica» y el adjetivo suelto quedan mixtos. `calificó de polémica` y la caracterización dentro de una cita no se parten. Cada componente recibe evidencia filtrada: un excerpt que no alinea pasa a `MENTIONS`; `salvage_excerpt` puede restaurar `SUPPORTS` con un fragmento literal del cuerpo. `authentic_primary` solo si la proposición no es mixta y el rol es utterance; `classify_statement_row` no sella la excepción sobre el compuesto. `_FRAME_SKIP` se conserva; un acto de publicación en el titular no se descarta como marco. Coverage no inventa claims centrales de caracterizaciones vagas. Merge/fingerprint/incremental reutilizan `assertion_key`. C7: utterance y contenido separado no se vuelven `CONFLICTING`. C2: V1 congelada. Cap de Verification intacto. Sin prompts, sin rondas LLM nuevas, sin migración. Tests: `test_compound_act_characterization.py`, regresiones Bregman/jueza en `test_editorial_evidence.py`.
 
 Limitación: no hay motor lingüístico general; cláusulas relativas, gerundios («generando polémica») y atributos vagos no se atomizan. Un «hubo polémica» no se inventa desde un adjetivo. QUALIFIES sigue sin `unsupported_scope` por resta. Claims históricos mixtos no se migran. Ajustes de `claim_extraction.md` quedan para otro PR si el extractor no trae el compuesto separable. C9 (copy) no empezó.
+
+## Track C — revisión integrada C1–C8 — 2026-09-20
+
+Hallazgo confirmado: `editorial_scopes` sellaba `verified_scope` con el texto entero si el status era `SINGLE_SOURCE`/`SUPPORTED`, aunque no hubiera `SUPPORTS` persistido. Un assessment completo cuyo único SUPPORTS era rechazado conservaba SINGLE_SOURCE y aparentaba alcance verificado. Corrección: el texto entero como `verified_scope` exige `SUPPORTS` admitido; sin él ambos scopes quedan `None`. QUALIFIES con fragmento no cambia. Tests: `test_single_source_without_admitted_supports_does_not_verify_the_claim`, `test_rejected_raw_supports_does_not_activate_cheap_support`. C9 no empezó.
 
 ## Independencia periodística — 2026-09-13
 
