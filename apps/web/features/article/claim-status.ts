@@ -1,13 +1,4 @@
-import type { ArticleClaim } from "@/lib/api/types";
-
-const STATUS_LABELS: Record<string, string> = {
-  SUPPORTED: "Sostenido",
-  SINGLE_SOURCE: "Independencia desconocida",
-  CONFLICTING: "En conflicto",
-  UNCERTAIN: "Incierto",
-  DISPROVEN: "Desmentido",
-  OUTDATED: "Desactualizado",
-};
+import type { ArticleClaim } from "../../lib/api/types";
 
 const EDITORIAL_LABELS: Record<string, string> = {
   CHECKED: "Chequeado",
@@ -15,10 +6,6 @@ const EDITORIAL_LABELS: Record<string, string> = {
   DISPUTED: "En disputa",
   FALSE_CLAIM: "Afirmación falsa",
 };
-
-export function claimStatusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
-}
 
 export function editorialLabelCopy(label: string): string {
   return EDITORIAL_LABELS[label] ?? label;

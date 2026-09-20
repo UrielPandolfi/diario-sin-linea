@@ -1,9 +1,18 @@
 "use client";
 
-import { claimsForIds, editorialLabelCopy } from "@/features/article/claim-status";
-import { claimPopoverCopy, officialDocumentDetailIndex } from "@/features/article/claim-popover-copy";
-import type { ArticleBodyBlock, ArticleClaim, ClaimCardPresentation } from "@/lib/api/types";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { ClaimEvidenceList } from "./claim-evidence-panel";
+import { ClaimEvidenceOverlay } from "./claim-evidence-overlay";
+import { claimsForIds } from "./claim-status";
+import { focusableElements } from "./evidence-focus";
+import { useEvidenceSurface } from "./use-evidence-surface";
+import type { ArticleBodyBlock, ArticleClaim } from "../../lib/api/types";
+import { useEffect, useId, useRef, useState } from "react";
+
+function evidenceTriggerLabel(text: string): string {
+  const trimmed = text.trim();
+  const needsStop = !/[.!?…]$/.test(trimmed);
+  return `${trimmed}${needsStop ? "." : ""} Consultar respaldo`;
+}
 
 function splitPlainBody(body: string): string[] {
   return body
@@ -16,21 +25,27 @@ export function ArticleBody({
   body,
   bodyBlocks,
   claims,
+  sourceKey,
 }: {
   body: string;
   bodyBlocks?: ArticleBodyBlock[] | null;
   claims?: ArticleClaim[];
+  sourceKey?: string;
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
+  const surface = useEvidenceSurface();
+  const previousSurface = useRef<"popover" | "sheet" | null>(null);
 
   useEffect(() => {
-    if (!openKey) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpenKey(null);
+    setOpenKey(null);
+  }, [sourceKey]);
+
+  useEffect(() => {
+    if (previousSurface.current && surface && previousSurface.current !== surface) {
+      setOpenKey(null);
     }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [openKey]);
+    previousSurface.current = surface;
+  }, [surface]);
 
   if (!bodyBlocks?.length) {
     const paragraphs = splitPlainBody(body);
@@ -47,7 +62,7 @@ export function ArticleBody({
   }
 
   return (
-    <div className="mt-6 space-y-4">
+    <div className="mt-6 space-y-4" data-evidence-mode={surface ?? "pending"}>
       {bodyBlocks.map((block, blockIndex) => {
         const hasClaims = (block.segments ?? []).some((segment) => (segment.claim_ids ?? []).length > 0);
         const Tag = hasClaims ? "div" : "p";
@@ -56,6 +71,9 @@ export function ArticleBody({
             {(block.segments ?? []).map((segment, segmentIndex) => {
               const key = `${blockIndex}-${segmentIndex}`;
               const matched = claimsForIds(segment.claim_ids ?? [], claims);
+              if ((segment.claim_ids ?? []).length > 0 && matched.length === 0) {
+                return <span key={key}>{segment.text}</span>;
+              }
               if (matched.length === 0) {
                 return <span key={key}>{segment.text}</span>;
               }
@@ -65,10 +83,10 @@ export function ArticleBody({
                   segmentKey={key}
                   text={segment.text}
                   claims={matched}
+                  surface={surface ?? "sheet"}
                   open={openKey === key}
                   onOpen={() => setOpenKey(key)}
                   onClose={() => setOpenKey((current) => (current === key ? null : current))}
-                  onToggle={() => setOpenKey((current) => (current === key ? null : key))}
                 />
               );
             })}
@@ -83,23 +101,27 @@ function ClaimSegment({
   segmentKey,
   text,
   claims,
+  surface,
   open,
   onOpen,
   onClose,
-  onToggle,
 }: {
   segmentKey: string;
   text: string;
   claims: ArticleClaim[];
+  surface: "popover" | "sheet";
   open: boolean;
   onOpen: () => void;
   onClose: () => void;
-  onToggle: () => void;
 }) {
-  const popoverId = useId();
-  const rootRef = useRef<HTMLDivElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
+  const dialogId = useId();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | null>(null);
+  const restoreFocus = useRef(false);
+  const ignoreFocusOpen = useRef(false);
+  const [pinned, setPinned] = useState(false);
+  const [openedByKeyboard, setOpenedByKeyboard] = useState(false);
 
   function clearCloseTimer() {
     if (closeTimer.current !== null) {
@@ -109,182 +131,157 @@ function ClaimSegment({
   }
 
   function scheduleClose() {
+    if (pinned) return;
     clearCloseTimer();
-    closeTimer.current = window.setTimeout(() => onClose(), 160);
+    closeTimer.current = window.setTimeout(() => {
+      restoreFocus.current = false;
+      onClose();
+    }, 180);
+  }
+
+  function armIgnoreFocusOpen() {
+    ignoreFocusOpen.current = true;
+    window.setTimeout(() => {
+      ignoreFocusOpen.current = false;
+    }, 50);
+  }
+
+  function close(options?: { restore?: boolean }) {
+    clearCloseTimer();
+    restoreFocus.current = options?.restore ?? false;
+    if (restoreFocus.current) armIgnoreFocusOpen();
+    setPinned(false);
+    setOpenedByKeyboard(false);
+    onClose();
   }
 
   useEffect(() => () => clearCloseTimer(), []);
 
-  useLayoutEffect(() => {
-    if (!open) return;
-    function alignPopover() {
-      const popover = popoverRef.current;
-      if (!popover) return;
-      popover.style.transform = "";
-      const rect = popover.getBoundingClientRect();
-      const rightEdge = document.documentElement.clientWidth - 16;
-      const offset = Math.max(16 - rect.left, Math.min(0, rightEdge - rect.right));
-      popover.style.transform = `translateX(${offset}px)`;
+  useEffect(() => {
+    if (!open) {
+      setPinned(false);
+      setOpenedByKeyboard(false);
     }
-    alignPopover();
-    window.addEventListener("resize", alignPopover);
-    return () => window.removeEventListener("resize", alignPopover);
   }, [open]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || surface !== "popover") return;
     function onPointerDown(event: PointerEvent) {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
-        onClose();
-      }
+      const target = event.target as Node | null;
+      if (!target) return;
+      if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      restoreFocus.current = false;
+      setPinned(false);
+      setOpenedByKeyboard(false);
+      onClose();
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open, onClose]);
+  }, [open, surface, onClose]);
+
+  function openPreview() {
+    if (surface !== "popover") return;
+    clearCloseTimer();
+    onOpen();
+  }
+
+  function activate(source: "keyboard" | "pointer") {
+    clearCloseTimer();
+    if (surface === "sheet") {
+      if (open) {
+        close({ restore: source === "keyboard" });
+        return;
+      }
+      restoreFocus.current = true;
+      setPinned(true);
+      setOpenedByKeyboard(source === "keyboard");
+      onOpen();
+      return;
+    }
+    if (!open) {
+      restoreFocus.current = source === "keyboard";
+      setPinned(true);
+      setOpenedByKeyboard(source === "keyboard");
+      onOpen();
+      return;
+    }
+    if (!pinned) {
+      restoreFocus.current = source === "keyboard";
+      setPinned(true);
+      setOpenedByKeyboard(source === "keyboard");
+      return;
+    }
+    close({ restore: source === "keyboard" });
+  }
+
+  const title = claims.length > 1 ? "Respaldo de las afirmaciones" : "Respaldo de la afirmación";
 
   return (
-    <div ref={rootRef} className="relative inline">
-      <span
-        tabIndex={0}
-        role="button"
+    <span className="relative inline">
+      <button
+        ref={triggerRef}
+        type="button"
         aria-expanded={open}
-        aria-controls={popoverId}
+        aria-controls={open ? dialogId : undefined}
         aria-haspopup="dialog"
+        aria-label={evidenceTriggerLabel(text)}
         data-claim-segment={segmentKey}
-        className="cursor-help rounded-[2px] underline decoration-dotted decoration-border underline-offset-[0.28em] transition-colors duration-150 hover:bg-hover focus-visible:bg-hover"
-        onMouseEnter={() => {
-          clearCloseTimer();
-          onOpen();
+        className="inline cursor-pointer rounded-[2px] border-0 bg-transparent p-0 text-left font-sans text-[17px] leading-[1.65] text-primary underline decoration-dotted decoration-border underline-offset-[0.28em] hover:bg-hover focus-visible:bg-hover motion-reduce:transition-none"
+        onMouseEnter={openPreview}
+        onMouseLeave={() => {
+          if (surface === "popover") scheduleClose();
         }}
-        onMouseLeave={scheduleClose}
+        onFocus={() => {
+          if (ignoreFocusOpen.current) return;
+          openPreview();
+        }}
+        onBlur={(event) => {
+          if (surface !== "popover" || pinned) return;
+          const next = event.relatedTarget as Node | null;
+          if (next && (triggerRef.current?.contains(next) || panelRef.current?.contains(next))) return;
+          scheduleClose();
+        }}
         onClick={(event) => {
+          event.preventDefault();
           event.stopPropagation();
-          if (window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
-          onToggle();
+          activate("pointer");
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
-            onToggle();
+            event.stopPropagation();
+            activate("keyboard");
+            return;
+          }
+          if (event.key === "Tab" && !event.shiftKey && open && surface === "popover") {
+            const first = focusableElements(panelRef.current)[0] ?? panelRef.current;
+            if (first) {
+              event.preventDefault();
+              first.focus();
+            }
           }
         }}
       >
         {text}
-      </span>
-      {open ? (
-        <div
-          ref={popoverRef}
-          id={popoverId}
-          role="dialog"
-          aria-label="Información de la afirmación"
-          className="absolute left-0 top-full z-30 mt-1.5 w-80 max-w-[min(20.5rem,calc(100vw-2rem))] rounded-md border border-border bg-surface p-3 shadow-lg"
-          onMouseEnter={clearCloseTimer}
-          onMouseLeave={scheduleClose}
-        >
-          {claims.map((claim, index) => (
-            <ClaimPopoverItem key={claim.id} claim={claim} divided={index > 0} />
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ClaimPopoverItem({ claim, divided }: { claim: ArticleClaim; divided: boolean }) {
-  const card = claim.presentation;
-  const editorialLabels = claim.editorial_labels ?? [];
-  const falseAssertions = claim.false_assertions ?? [];
-  const copy = claimPopoverCopy(claim);
-  const details = card?.evidence_detail ?? [];
-
-  return (
-    <div className={divided ? "mt-3 border-t border-border pt-3" : ""}>
-      <span className="block font-sans text-sm font-semibold leading-snug text-primary">{copy.heading}</span>
-      {copy.explanation ? (
-        <span className="mt-2 block font-sans text-xs leading-relaxed text-primary">{copy.explanation}</span>
-      ) : null}
-      {copy.limitation ? (
-        <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{copy.limitation}</span>
-      ) : null}
-      {editorialLabels.length > 0 ? (
-        <span className="mt-1.5 flex flex-wrap gap-1">
-          {editorialLabels.map((label) => (
-            <span
-              key={label}
-              className="border border-border px-1.5 py-0.5 font-sans text-[10px] uppercase tracking-[0.12em] text-accent-petrol"
-            >
-              {editorialLabelCopy(label)}
-            </span>
-          ))}
-        </span>
-      ) : null}
-      {claim.verification?.unresolved ? (
-        <span className="mt-1 block font-sans text-xs text-secondary">Sin resolver</span>
-      ) : null}
-      {falseAssertions.map((row) => (
-        <span key={row.source_item_id} className="mt-1.5 block font-sans text-xs leading-snug text-secondary">
-          {row.source_name}: “{row.excerpt}”
-        </span>
-      ))}
-      <EvidenceDetails
-        details={details}
-        canonicalText={claim.canonical_text}
-        coverage={copy.coverage}
-        documentaryLimitation={copy.documentaryLimitation}
-      />
-    </div>
-  );
-}
-
-function EvidenceDetails({
-  details,
-  canonicalText,
-  coverage,
-  documentaryLimitation,
-}: {
-  details: NonNullable<ClaimCardPresentation["evidence_detail"]>;
-  canonicalText: string;
-  coverage: string | null;
-  documentaryLimitation: string | null;
-}) {
-  const officialDocumentIndex = documentaryLimitation ? officialDocumentDetailIndex(details) : -1;
-  return (
-    <details
-      className="mt-3 border-t border-border pt-2"
-      onClick={(event) => event.stopPropagation()}
-      onKeyDown={(event) => event.stopPropagation()}
-    >
-      <summary className="cursor-pointer font-sans text-xs font-medium text-secondary hover:text-primary">
-        Ver documentos y detalles del respaldo
-      </summary>
-      <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{canonicalText}</span>
-      {coverage ? (
-        <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{coverage}</span>
-      ) : null}
-      {details.length > 0 ? (
-        <ul className="mt-2 list-disc space-y-2 pl-4">
-          {details.map((row, index) => (
-            <li key={`${row.url ?? row.name ?? index}-${row.evidence_type}`} className="font-sans text-xs leading-snug text-secondary">
-              <span className="text-primary">{row.stance}</span>
-              {row.name ? ` · ${row.name}` : ""}
-              {row.url ? (
-                <>
-                  {" · "}
-                  <a href={row.url} className="text-accent-petrol underline" target="_blank" rel="noreferrer">
-                    ver
-                  </a>
-                </>
-              ) : null}
-              {index === officialDocumentIndex ? (
-                <span className="mt-1 block">{documentaryLimitation}</span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      {documentaryLimitation && officialDocumentIndex === -1 ? (
-        <span className="mt-2 block font-sans text-xs leading-relaxed text-secondary">{documentaryLimitation}</span>
-      ) : null}
-    </details>
+      </button>
+      <ClaimEvidenceOverlay
+        open={open}
+        surface={surface}
+        title={title}
+        dialogId={dialogId}
+        triggerRef={triggerRef}
+        panelRef={panelRef}
+        restoreFocusRef={restoreFocus}
+        moveFocus={open && (surface === "sheet" || openedByKeyboard)}
+        onClose={() => close({ restore: true })}
+        onDismiss={() => close({ restore: surface === "sheet" })}
+        onContentEnter={clearCloseTimer}
+        onContentLeave={() => {
+          if (surface === "popover") scheduleClose();
+        }}
+      >
+        <ClaimEvidenceList claims={claims} />
+      </ClaimEvidenceOverlay>
+    </span>
   );
 }

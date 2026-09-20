@@ -71,6 +71,9 @@ export type ArticleClaim = {
   editorial_labels?: string[];
   false_assertions?: FalseAssertion[];
   presentation?: ClaimCardPresentation;
+  verified_scope?: string | null;
+  unsupported_scope?: string | null;
+  reason_code?: string | null;
   verification: {
     unresolved?: boolean | null;
     status_after?: string | null;

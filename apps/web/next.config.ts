@@ -33,6 +33,7 @@ const nextConfig: NextConfig = {
       { source: "/admin/:path*", headers: noIndex },
       { source: "/entrar", headers: noIndex },
       { source: "/onboarding", headers: noIndex },
+      { source: "/dev/:path*", headers: noIndex },
     ];
   },
 };

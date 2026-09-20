@@ -91,7 +91,12 @@ export function ArticleView({ article }: { article: Article }) {
         />
       ) : null}
 
-      <ArticleBody body={article.body} bodyBlocks={article.body_blocks} claims={article.claims} />
+      <ArticleBody
+        body={article.body}
+        bodyBlocks={article.body_blocks}
+        claims={article.claims}
+        sourceKey={`${article.slug}:${article.published_version ?? ""}`}
+      />
 
       <div className="mt-8 border-t border-border pt-5">
         <h2 className="font-heading text-xs uppercase tracking-[0.16em] text-muted">Fuentes</h2>

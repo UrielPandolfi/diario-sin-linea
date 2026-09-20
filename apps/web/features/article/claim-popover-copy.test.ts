@@ -2,7 +2,17 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import type { ArticleClaim } from "../../lib/api/types";
-import { claimPopoverCopy } from "./claim-popover-copy";
+import {
+  EMPTY_DOCUMENTS,
+  MISSING_PRESENTATION_EXPLANATION,
+  MISSING_PRESENTATION_HEADING,
+  claimEvidenceCopy,
+  claimPopoverCopy,
+  documentsAvailability,
+  evidenceSurface,
+  placePopover,
+} from "./claim-popover-copy";
+import { FIXTURE_CLAIMS } from "./claim-evidence-fixtures";
 
 function claim(overrides: Partial<ArticleClaim> & { presentation?: ArticleClaim["presentation"] }): ArticleClaim {
   return {
@@ -40,7 +50,6 @@ test("consume backend copy without inferring certainty from status or document c
   );
   assert.equal(copy.heading, "Respaldo limitado");
   assert.match(copy.explanation ?? "", /restricción de procedencia/);
-  assert.equal(copy.heading, "Respaldo limitado");
   assert.notEqual(copy.heading, "Confirmado");
 });
 
@@ -86,4 +95,79 @@ test("does not fall back to status or demotion when presentation copy is present
   assert.equal(copy.heading, "No confirmado");
   assert.notEqual(copy.heading, "Contradicho");
   assert.doesNotMatch(copy.explanation ?? "", /unproven_independence|demotion|DISPROVEN/i);
+});
+
+test("missing presentation uses a neutral fallback, not a C9 evaluation family", () => {
+  const copy = claimEvidenceCopy(claim({ presentation: undefined, status: "SUPPORTED" }));
+  assert.equal(copy.heading, MISSING_PRESENTATION_HEADING);
+  assert.equal(copy.explanation, MISSING_PRESENTATION_EXPLANATION);
+  assert.notEqual(copy.heading, "Confirmado");
+  assert.notEqual(copy.heading, "Sin evaluación disponible");
+  assert.equal(copy.kind, null);
+});
+
+const FAMILY_CASES: Array<[string, string, string]> = [
+  ["confirmed", "Confirmado", "corroboración independiente"],
+  ["utterance", "Declaración confirmada", "no comprueba el contenido"],
+  ["limited", "Respaldo limitado", "restricción de procedencia"],
+  ["disputed", "En disputa", "versiones comparables"],
+  ["disproven", "Contradicho", "no atribuye mentira"],
+  ["unevaluated", "Sin evaluación disponible", "información suficiente"],
+];
+
+for (const [id, heading, snippet] of FAMILY_CASES) {
+  test(`C9 family ${id} keeps backend copy`, () => {
+    const copy = claimEvidenceCopy(FIXTURE_CLAIMS[id]);
+    assert.equal(copy.heading, heading);
+    assert.match(copy.explanation ?? "", new RegExp(snippet, "i"));
+    assert.equal(copy.kind, FIXTURE_CLAIMS[id].presentation?.presentation_kind ?? null);
+  });
+}
+
+test("unknown counts stay distinct from an empty document list", () => {
+  const unknown = claimEvidenceCopy(FIXTURE_CLAIMS.unevaluated);
+  assert.equal(documentsAvailability(unknown), "unknown");
+  assert.equal(unknown.documentsConsulted, null);
+  const empty = claimEvidenceCopy(
+    claim({
+      presentation: {
+        verification_label: "No confirmado",
+        limitation: null,
+        coverage: "No hay documentos contabilizados en esta verificación.",
+        explanation: "La evaluación no permite confirmar esta proposición. Eso no equivale a desmentirla.",
+        evidence_detail: [],
+        basis_known: true,
+        documents_consulted: 0,
+        documents_supporting: 0,
+        known_independent_count: 0,
+        unknown_group_count: 0,
+        presentation_kind: "not_confirmed",
+      },
+    }),
+  );
+  assert.equal(documentsAvailability(empty), "empty");
+  assert.equal(EMPTY_DOCUMENTS.includes("documentos listados"), true);
+});
+
+test("identified scopes are exposed without inventing the missing side", () => {
+  const copy = claimEvidenceCopy(FIXTURE_CLAIMS.partial);
+  assert.equal(copy.verifiedScope, "El decreto elimina el régimen");
+  assert.equal(copy.unsupportedScope, null);
+});
+
+test("evidence surface uses hover and width, not user-agent strings", () => {
+  assert.equal(evidenceSurface({ hoverFine: true, viewportWidth: 1280 }), "popover");
+  assert.equal(evidenceSurface({ hoverFine: true, viewportWidth: 390 }), "sheet");
+  assert.equal(evidenceSurface({ hoverFine: false, viewportWidth: 1280 }), "sheet");
+});
+
+test("popover placement stays inside the viewport", () => {
+  const placed = placePopover(
+    { top: 700, left: 1100, bottom: 720, right: 1200 },
+    { width: 320, height: 240 },
+    { width: 1280, height: 800 },
+  );
+  assert.ok(placed.left + 320 <= 1280 - 16);
+  assert.ok(placed.top >= 16);
+  assert.ok(placed.top + 240 <= 800 || placed.top < 700);
 });

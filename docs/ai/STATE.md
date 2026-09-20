@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. Track C9 (copy público determinista) en código. C10/C11 no empezaron.
+Revisión: 2026-09-20. Track C10 (popover/sheet de respaldo) en código. C11 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -22,7 +22,7 @@ Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `suppor
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`. Frontend: lint/typecheck/build en CI más `npm test` de helpers SEO (`lib/seo/seo.test.ts`). Cards públicas leen `hero_image_url`.
+Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`. Frontend: lint/typecheck/build en CI más `npm test` (`lib/seo/seo.test.ts`, `claim-popover-copy.test.ts`, `article-body.test.tsx`). Cards públicas leen `hero_image_url`.
 
 ## Hallazgos de cableado (no decisiones)
 
@@ -119,7 +119,13 @@ Limitación: no hay motor lingüístico general; cláusulas relativas, gerundios
 
 En código: `claim_card_presentation` es la fuente única del copy público. Precedencia: disponibilidad de evaluación → resultado gated (`DISPROVEN`/`CONFLICTING`) → rol/alcance (parcial, mixto, utterance) → suficiencia del respaldo admitido para la proposición completa. Familias: Confirmado, Declaración confirmada, Respaldo limitado, No confirmado, En disputa, Contradicho, Sin evaluación disponible (+ pending/failed/skipped). No deriva copy de `llm_reason` ni de prosa libre. El GET público proyecta ese renderer sobre el snapshot de `published_version`; no reescribe snapshots. `demotion` sale del DTO público y permanece en Admin (`include_internal`). Conteos (`documents_consulted`, `documents_supporting`, procedencias) van en el DTO ampliado; unknown es `None`, no 0. El consumidor web lee los textos del backend y no recalcula certeza. Writing compacta sin esos textos. Tests: `test_claim_card_presentation.py`, freeze en `test_editorial_label_policy.py`, GET en `test_public_api.py`, consumidor en `claim-popover-copy.test.ts`.
 
-Pendiente exclusivo de C10/C11: rediseño del popover/bottom sheet, disclosure de detalles, export y Admin de consulta.
+Pendiente exclusivo de C11: export y Admin de consulta.
+
+## Track C10 — popover y panel inferior de respaldo — 2026-09-20
+
+En código: el artículo público (`ArticleBody`) anota solo segmentos con `claim_ids` resolubles. Escritorio: popover si `(hover: hover) and (pointer: fine)` y ancho ≥768; si no, bottom sheet modal. Ambos renderizan `ClaimEvidenceList` desde `claimEvidenceCopy` (textos C9). Hover no roba foco; click/Enter fijan el popover; Escape y click exterior cierran; un solo overlay. El sheet traba scroll, atrapa foco y restaura al cerrar. `sourceKey` (`slug:published_version`) limpia el estado al cambiar de versión. Abrir no dispara fetch/Verification. `/dev/respaldo` sirve fixtures en desarrollo (`notFound` en production). Tests: `article-body.test.tsx`, `claim-popover-copy.test.ts`. Visual local: viewport 1280×800 (popover) y 390×844 (sheet) sobre `/dev/respaldo`.
+
+Limitación: no hay Radix; el overlay reutiliza el patrón de `context-sheets` (portal + foco + backdrop). jsdom se agregó al harness web porque no había DOM runner. C11 no está.
 
 ## Track C — revisión integrada C1–C8 — 2026-09-20
 
