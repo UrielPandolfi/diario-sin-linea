@@ -6,6 +6,7 @@ from app.core.source_content import has_extracted_body
 from app.core.urls import canonicalize_url, url_domain
 from app.domain.enums import ClaimImportance, ClaimStatus, PipelineStatus
 from app.models import Claim, Entity, Event, EventEntity, PipelineRun
+from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state
 from app.schemas.writing import (
     ArticleContext,
     ContextClaim,
@@ -113,6 +114,9 @@ def compact_verification(
     decisions: dict[str, ContextClaimDecision] = {}
     for key, row in (verify_meta.get("decision_by_claim_id") or {}).items():
         if not isinstance(row, dict):
+            continue
+        state = read_evaluation_state(row)
+        if state in {EvaluationState.SKIPPED, EvaluationState.PENDING, EvaluationState.FAILED}:
             continue
         basis_raw = row.get("support_basis") if isinstance(row.get("support_basis"), dict) else None
         basis = None

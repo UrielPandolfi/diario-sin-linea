@@ -354,6 +354,19 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
         local = client.get("/api/v1/local", params={"locality": "Rosario"}).json()
     assert payload["headline"] == "Según la primera fuente, hubo seis heridos en el choque"
     assert payload["published_version"] == v1
+    from app.core.article_body import claim_ids_in_body_blocks
+    from app.services.feed_ranking import compact_public_claims, live_content
+
+    live_version = live_content(db_session, article)
+    allowed = claim_ids_in_body_blocks(live_version.body_blocks)
+    frozen = compact_public_claims(db_session, event, allowed_ids=allowed, freeze_to_version=v1)
+    live_rows = compact_public_claims(db_session, event)
+    assert payload["claims"]
+    assert {row["id"] for row in payload["claims"]} == {row["id"] for row in frozen}
+    assert payload["claims"][0]["status"] == frozen[0]["status"]
+    assert payload["claims"][0]["presentation"] == frozen[0]["presentation"]
+    assert payload["claims"][0]["editorial_labels"] == frozen[0]["editorial_labels"]
+    assert {row["id"] for row in live_rows} != {row["id"] for row in payload["claims"]}
     slugs = lambda body: {item["slug"] for item in body["items"]}
     assert article.slug in slugs(feed)
     assert article.slug in slugs(live)
@@ -380,6 +393,15 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
         payload = client.get(f"/api/v1/articles/{article.slug}").json()
         assert payload["headline"] == "Según la segunda fuente, el tránsito sigue cortado tras el choque"
     assert payload["published_version"] == 2
+    from app.core.article_body import claim_ids_in_body_blocks
+    from app.services.feed_ranking import compact_public_claims, live_content
+
+    live_v2 = live_content(db_session, article)
+    allowed_v2 = claim_ids_in_body_blocks(live_v2.body_blocks)
+    frozen_v2 = compact_public_claims(db_session, event, allowed_ids=allowed_v2, freeze_to_version=2)
+    assert payload["claims"][0]["status"] == frozen_v2[0]["status"]
+    assert payload["claims"][0]["presentation"] == frozen_v2[0]["presentation"]
+    assert payload["claims"][0]["editorial_labels"] == frozen_v2[0]["editorial_labels"]
 
 
 def test_track_b_repetition_does_not_rewrite(db_session: Session) -> None:
@@ -554,6 +576,14 @@ def test_track_b_contradiction_is_material_and_freezes_public_claims(db_session:
     assert "DISCREPANCY" not in live_row["editorial_labels"]
     competing = [row for row in payload["claims"] if row["id"] != str(live_claim.id)]
     assert competing == []
+    from app.services.feed_ranking import compact_public_claims
+
+    live_rows = compact_public_claims(db_session, event)
+    live_now = next(row for row in live_rows if row["id"] == str(live_claim.id))
+    assert live_now["status"] == ClaimStatus.CONFLICTING.value
+    assert live_row["presentation"]["verification_label"] != live_now["presentation"]["verification_label"]
+    assert live_row["presentation"] != live_now["presentation"]
+    assert "DISCREPANCY" in live_now["editorial_labels"]
 
 
 def test_track_b_retry_continues_audit_without_v3(db_session: Session) -> None:

@@ -1,12 +1,12 @@
 # Estado
 
-Revisión: 2026-09-17. Punto 7 SEO/OG/compartir validado (638 pytest passed; smoke Compose `:3000`). Portada determinista Fase A (`hero_image_url` post-commit, PNG en Postgres). Admin estadísticas de redacción (solo lectura). Polling automático cerrado (límite 5 / intervalo 300s) con toggle `auto_poll_enabled`. Track B APTO (sin más cambios de dedup). Cierre editorial: `EventSource`/público exige jurisdicción compatible; claims incrementales `identity_only` + cifra 4+ dígitos en la fuente.
+Revisión: 2026-09-20. C2 (presentation fiel al snapshot de la versión publicada) en código y tests. C3 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
 ## En código y cableado
 
-Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png`, inventario SEO `GET /api/v1/sitemap-articles` (`api/public.py`). Claims públicos del artículo live congelan status/labels al snapshot de `published_version`.
+Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, PNG de portada `GET /api/v1/media/heroes/{id}.png`, inventario SEO `GET /api/v1/sitemap-articles` (`api/public.py`). Claims del GET de artículo (status, presentation, labels) salen del snapshot de `published_version`; el feed no serializa claims.
 
 Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open Graph/Twitter, JSON-LD `NewsArticle`, `sitemap.xml`, `robots.txt`. El middleware ya no exige cookie de localidad para rastrear `/`, `/en-vivo` o `/buscar`. `/admin`, `/entrar` y `/onboarding` van `noindex`. `/buscar` es `noindex, follow`. Preview con `VERCEL_ENV` no production envía `X-Robots-Tag: noindex, nofollow`.
 
@@ -68,6 +68,18 @@ Fixtures originales A/B/C/D, funciones de C, expectativas de persistencia y prue
 En código: contrato versionado en `metadata_json`, par claim↔verify, coverage/recovery, split de compuestos, packet claim-primero, independencia por `information_origin`, primaria auténtica de utterance. Tests de política con dobles (Alberto/Bregman extract-verify, y ahora write/audit/publish: gap, par desparejado, snapshot de versión, FAILED posterior). **No** demuestran que Luna/Sol reales dejen de confundir proposiciones; eval con modelos reales queda fuera (`scripts/run_editorial_eval.py`).
 
 Etapa 3 (tarjeta pública): DTO de `support_basis`/`demotion` en `compact_public_claims` y visor mínimo Admin del mismo DTO. Eval paga no corrida. RELATED_CONTEXT sigue sin adjuntarse en research. Corridas históricas sin fingerprint se tratan como `unknown`. Dashboard Admin de `expected_central`/presupuesto **no**.
+
+## Track C1 — evaluation_state — 2026-09-20
+
+En código: `ClaimDecision.evaluation_state` opcional en `editorial-evidence-1` (`complete` | `skipped` | `pending` | `failed`). Lectura: campo ausente o inválido → `None` (unknown/legacy), nunca `complete`. Verification SUCCESS escribe `complete` en Sol, cheap assessment, `skipped_search` dirigido y skip numérico; `skipped` en veto / `policy_skip` / `budget` / `outside_recheck` (y cualquier claim del evento sin decisión). No se escribe `pending` ni `failed` por claim: un fallo de verify sigue siendo `PipelineStatus.FAILED` sin `decision_by_claim_id` usable; assessment `None` escala a Sol. `Claim.status` no cambia por skip. Presentación pública: no evaluado → «Aún no verificado»; `SINGLE_SOURCE` completo conserva copy actual. `compact_verification` omite skipped/pending/failed para no cambiar el prompt de Writing. Sin migración; sin backfill.
+
+## Track C2 — presentation fiel al snapshot publicado — 2026-09-20
+
+En código: `GET /api/v1/articles/{key}` arma claims con `compact_public_claims(..., freeze_to_version=article.published_version)`. Esa versión es `PublishService` (`published_version = current_version` al publicar), no el Writing/Verification más reciente. El freeze lee `evidence_snapshot_for_version` → `view_from_evidence_snapshot` (decisiones, selected/sol del `article_context.verification`, primary desde `support_basis.primary_access`, skipped_search desde `llm_reason`). Membership = ids del snapshot ∩ `claim_ids` del body publicado; un claim nuevo del Event no entra en V1. `_VersionClaim` no rellena status/texto/SPO/evidencia con el Claim live. Labels (`CHECKED` incluido) usan esa view y esos proxies; la policy no cambió. `compact_public_claims` sin freeze y Admin `_claims_out` siguen live. Preview admin de versión no serializa claims. Sin migración, sin backfill, sin LLM extra.
+
+Limitaciones de datos no conservados: snapshot ausente → ids del body, status default `SINGLE_SOURCE`, copy «Aún no verificado», sin Verification live. `source_item_id` de evidencia congelada es `snapshot:{ref}`. `skipped_search` numérico no queda en el snapshot: CHECKED de un SUPPORTED numérico puede inferirse distinto. SPO/texto ausentes en el snapshot no se reconstruyen del Event actual (DISCREPANCY/FALSE_CLAIM de esa versión pueden faltar). Una decisión skip-shaped (`llm_reason` veto/policy_skip/budget/outside_recheck) sin `evaluation_state` no usa copy evaluado.
+
+C3 no empezó.
 
 ## Independencia periodística — 2026-09-13
 

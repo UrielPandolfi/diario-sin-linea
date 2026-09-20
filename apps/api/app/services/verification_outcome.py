@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 
 from app.domain.enums import ClaimStatus, PipelineStatus
 from app.models import Claim, PipelineRun
-from app.schemas.editorial_evidence import CONTRACT_VERSION, StatementEvidenceClass
+from app.schemas.editorial_evidence import (
+    CONTRACT_VERSION,
+    StatementEvidenceClass,
+    evaluation_is_complete,
+    read_evaluation_state,
+    decision_looks_like_skip,
+)
 
 CLAIM_STAGE = "claim_resolution"
 VERIFICATION_STAGE = "verification"
@@ -164,6 +170,69 @@ def parse_verification_run(run: PipelineRun | None, *, paired: bool = False) -> 
     meta = run.metadata_json or {}
     has_pair = bool(meta.get("claims_fingerprint") and meta.get("based_on_claim_run_id"))
     return view_from_mapping(meta, finished_at=run.finished_at, paired=paired or has_pair)
+
+
+def view_from_evidence_snapshot(snapshot: dict[str, Any] | None) -> VerificationView:
+    """VerificationView bound to a version snapshot. Never falls back to live verify."""
+    if not snapshot:
+        return VerificationView()
+    context = snapshot.get("article_context") if isinstance(snapshot.get("article_context"), dict) else {}
+    verification = context.get("verification") if isinstance(context.get("verification"), dict) else {}
+    decisions_raw = snapshot.get("decision_by_claim_id")
+    if not isinstance(decisions_raw, dict) or not decisions_raw:
+        decisions_raw = verification.get("decision_by_claim_id") if isinstance(verification.get("decision_by_claim_id"), dict) else {}
+    decisions = {str(key): value for key, value in decisions_raw.items() if isinstance(value, dict)}
+
+    selected: set[str] = set()
+    for row in verification.get("selected") or []:
+        if isinstance(row, dict) and row.get("claim_id"):
+            selected.add(str(row["claim_id"]))
+        elif isinstance(row, str):
+            selected.add(row)
+    if not selected:
+        for row in snapshot.get("evaluated_claims") or []:
+            if isinstance(row, dict) and row.get("claim_id"):
+                selected.add(str(row["claim_id"]))
+    if not selected:
+        for cid, decision in decisions.items():
+            if evaluation_is_complete(decision):
+                selected.add(cid)
+            elif read_evaluation_state(decision) is None and not decision_looks_like_skip(decision):
+                selected.add(cid)
+
+    skipped_search = {
+        cid
+        for cid, decision in decisions.items()
+        if str(decision.get("llm_reason") or "") == "skipped_search"
+    }
+    primary = {
+        cid: True
+        for cid, decision in decisions.items()
+        if isinstance(decision.get("support_basis"), dict)
+        and decision["support_basis"].get("primary_access") == "found_relevant"
+    }
+    sol_by_id: dict[str, dict[str, Any]] = {}
+    for row in verification.get("sol") or []:
+        if not isinstance(row, dict) or not row.get("claim_id"):
+            continue
+        sol_by_id[str(row["claim_id"])] = row
+    stale = bool(snapshot.get("stale_verification") or verification.get("stale_verification"))
+    fingerprint = snapshot.get("claims_fingerprint") or verification.get("claims_fingerprint")
+    based_on = snapshot.get("based_on_claim_run_id") or verification.get("based_on_claim_run_id")
+    # Pairing is snapshot-local (same rule as parse_verification_run). Do not
+    # require verification_run_id: legacy writing snapshots may omit it and
+    # still carry fingerprint + based_on for evaluated copy.
+    paired = bool(fingerprint and based_on) and not stale
+    return VerificationView(
+        selected_ids=selected,
+        skipped_search=skipped_search,
+        primary_source_supports=primary,
+        sol_by_id=sol_by_id,
+        decision_by_claim_id=decisions,
+        claims_fingerprint=str(fingerprint) if fingerprint else None,
+        based_on_claim_run_id=str(based_on) if based_on else None,
+        paired=paired,
+    )
 
 
 def is_strong_verification(claim_id: UUID | str, view: VerificationView, *, claim: Any = None) -> bool:

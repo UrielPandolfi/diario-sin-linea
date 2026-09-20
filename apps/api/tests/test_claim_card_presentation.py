@@ -5,6 +5,8 @@ from app.domain.enums import ClaimStatus, EvidenceType
 from app.schemas.editorial_evidence import Demotion, PrimaryAccess, StatementEvidenceClass
 from app.services.claim_card_presentation import (
     AUTHENTIC_PRIMARY_LABEL,
+    NOT_EVALUATED_COVERAGE,
+    NOT_EVALUATED_LABEL,
     UNKNOWN_COVERAGE,
     authentic_primary_sounds_weak,
     contains_llm_reason,
@@ -40,7 +42,14 @@ def _evidence(*, evidence_type: EvidenceType, name: str, url: str, source_type: 
     )
 
 
-def _view(claim, *, basis: dict, unresolved: bool = False, llm_reason: str | None = None) -> VerificationView:
+def _view(
+    claim,
+    *,
+    basis: dict,
+    unresolved: bool = False,
+    llm_reason: str | None = None,
+    evaluation_state: str | None = None,
+) -> VerificationView:
     cid = str(claim.id)
     decision = {
         "claim_id": cid,
@@ -49,6 +58,8 @@ def _view(claim, *, basis: dict, unresolved: bool = False, llm_reason: str | Non
         "llm_reason": llm_reason,
         "support_basis": basis,
     }
+    if evaluation_state is not None:
+        decision["evaluation_state"] = evaluation_state
     return VerificationView(
         selected_ids={cid},
         paired=True,
@@ -273,10 +284,11 @@ def test_historical_without_support_basis_is_unknown() -> None:
     )
     card = presentation_for_claim(claim, view)
     assert card.basis_known is False
-    assert card.coverage == UNKNOWN_COVERAGE
+    assert card.coverage == NOT_EVALUATED_COVERAGE
     assert card.documents_consulted is None
     assert card.documents_reporting is None
-    assert card.verification_label == "Independencia desconocida"
+    assert card.verification_label == NOT_EVALUATED_LABEL
+    assert "independencia desconocida" not in card.verification_label.casefold()
     payload = public_presentation_payload(card)
     assert not contains_llm_reason(payload)
     _assert_safe_single_source(claim, card)
@@ -304,3 +316,106 @@ def test_boletin_is_document_not_medio() -> None:
     card = presentation_for_claim(claim, view)
     assert card.document_noun == "documentos"
     assert "medio" not in card.coverage
+
+
+def test_skipped_claim_is_not_evaluated_unknown_independence() -> None:
+    docs = [_evidence(evidence_type=EvidenceType.SUPPORTS, name="A", url="https://a.test/1")]
+    claim = _claim(status=ClaimStatus.SINGLE_SOURCE, evidence=docs)
+    view = _view(
+        claim,
+        basis={},
+        evaluation_state="skipped",
+        llm_reason="policy_skip",
+    )
+    card = presentation_for_claim(claim, view)
+    payload = public_presentation_payload(card)
+    assert card.verification_label == NOT_EVALUATED_LABEL
+    assert card.coverage == NOT_EVALUATED_COVERAGE
+    assert card.basis_known is False
+    assert "independencia desconocida" not in card.verification_label.casefold()
+    assert "independencia desconocida" not in (card.coverage or "").casefold()
+    assert "policy_skip" not in str(payload)
+    assert "skipped" not in str(payload).casefold()
+    assert not contains_llm_reason(payload)
+
+
+def test_complete_single_source_keeps_current_copy() -> None:
+    docs = [
+        _evidence(evidence_type=EvidenceType.SUPPORTS, name="A", url="https://a.test/1"),
+        _evidence(evidence_type=EvidenceType.SUPPORTS, name="B", url="https://b.test/2"),
+        _evidence(evidence_type=EvidenceType.SUPPORTS, name="C", url="https://c.test/3"),
+    ]
+    claim = _claim(status=ClaimStatus.SINGLE_SOURCE, evidence=docs)
+    view = _view(
+        claim,
+        basis={
+            "known_independent_count": 1,
+            "unknown_group_count": 0,
+            "reprint_collapsed_count": 2,
+            "documents_consulted": 3,
+            "documents_supporting": 3,
+            "demotion": Demotion.INSUFFICIENT_INDEPENDENCE.value,
+        },
+        evaluation_state="complete",
+    )
+    card = presentation_for_claim(claim, view)
+    assert card.verification_label == "Un solo origen"
+    assert card.basis_known is True
+    assert "Se consultaron 3 documentos" in card.coverage
+    _assert_safe_single_source(claim, card)
+
+
+def test_legacy_decision_without_evaluation_state_keeps_evaluated_copy() -> None:
+    docs = [
+        _evidence(evidence_type=EvidenceType.SUPPORTS, name="A", url="https://a.test/1"),
+        _evidence(evidence_type=EvidenceType.SUPPORTS, name="B", url="https://b.test/2"),
+        _evidence(evidence_type=EvidenceType.SUPPORTS, name="C", url="https://c.test/3"),
+    ]
+    claim = _claim(status=ClaimStatus.SINGLE_SOURCE, evidence=docs)
+    view = _view(
+        claim,
+        basis={
+            "known_independent_count": 0,
+            "unknown_group_count": 2,
+            "documents_consulted": 3,
+            "documents_supporting": 3,
+            "demotion": Demotion.UNPROVEN_INDEPENDENCE.value,
+        },
+    )
+    card = presentation_for_claim(claim, view)
+    assert card.verification_label == "Sin corroboración independiente"
+    assert card.basis_known is True
+    _assert_safe_single_source(claim, card)
+
+
+def test_unpaired_legacy_decision_keeps_unknown_coverage() -> None:
+    docs = [_evidence(evidence_type=EvidenceType.SUPPORTS, name="A", url="https://a.test/1")]
+    claim = _claim(status=ClaimStatus.SINGLE_SOURCE, evidence=docs)
+    cid = str(claim.id)
+    view = VerificationView(
+        paired=False,
+        decision_by_claim_id={
+            cid: {
+                "claim_id": cid,
+                "status": claim.status.value,
+                "support_basis": {"known_independent_count": 1, "documents_consulted": 1},
+            }
+        },
+    )
+    card = presentation_for_claim(claim, view)
+    assert card.verification_label == "Independencia desconocida"
+    assert card.coverage == UNKNOWN_COVERAGE
+    assert card.basis_known is False
+
+
+def test_skip_shaped_legacy_decision_is_not_evaluated_copy() -> None:
+    docs = [_evidence(evidence_type=EvidenceType.SUPPORTS, name="A", url="https://a.test/1")]
+    claim = _claim(status=ClaimStatus.SINGLE_SOURCE, evidence=docs)
+    view = _view(
+        claim,
+        basis={},
+        llm_reason="policy_skip",
+    )
+    card = presentation_for_claim(claim, view)
+    assert card.verification_label == NOT_EVALUATED_LABEL
+    assert "independencia desconocida" not in card.verification_label.casefold()

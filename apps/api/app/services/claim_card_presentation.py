@@ -6,10 +6,19 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ClaimStatus, EvidenceType
-from app.schemas.editorial_evidence import Demotion, PrimaryAccess, StatementEvidenceClass, SupportBasis, SupportKind
+from app.schemas.editorial_evidence import (
+    Demotion,
+    PrimaryAccess,
+    StatementEvidenceClass,
+    SupportBasis,
+    SupportKind,
+    decision_was_evaluated,
+)
 from app.services.verification_outcome import VerificationView
 
 UNKNOWN_COVERAGE = "No hay desglose de independencia para esta verificación."
+NOT_EVALUATED_LABEL = "Aún no verificado"
+NOT_EVALUATED_COVERAGE = "Esta afirmación todavía no fue verificada."
 AUTHENTIC_PRIMARY_LABEL = "Declaración documentada en la publicación original"
 UNRELATED_PRIMARY_LIMITATION = "El documento oficial no sostiene esta proposición."
 
@@ -108,9 +117,19 @@ def presentation_for_claim(claim: Any, view: VerificationView) -> ClaimCardPrese
     status = _status_value(getattr(claim, "status", None))
     cid = str(getattr(claim, "id", "") or "")
     decision = _decision_for(view, cid)
-    basis, basis_known = _support_basis(view, decision)
     details = unique_evidence_details(claim)
     noun_sg, noun_pl = document_nouns(claim)
+    if not decision_was_evaluated(decision):
+        return ClaimCardPresentation(
+            verification_label=NOT_EVALUATED_LABEL,
+            limitation=None,
+            coverage=NOT_EVALUATED_COVERAGE,
+            explanation=None,
+            evidence_detail=details,
+            basis_known=False,
+            document_noun=noun_pl,
+        )
+    basis, basis_known = _support_basis(view, decision)
     label = _verification_label(status=status, basis_known=basis_known, basis=basis)
     limitation = _limitation(basis_known=basis_known, basis=basis)
     coverage = _coverage(

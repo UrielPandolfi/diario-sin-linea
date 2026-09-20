@@ -1,20 +1,18 @@
 # Handoff
 
-**Fecha:** 2026-09-18
+**Fecha:** 2026-09-20
 
-**Tarea:** Merge a `main` del interruptor de procesamiento automático y el resto de la rama.
+**Tarea:** Track C — PR C2 (presentation fiel al snapshot de la versión publicada). C3 no empezó.
 
 ## Qué quedó
 
-El flag `auto_poll_enabled` ya existía; el control era un botón más en Tablero/Fuentes y no se encontraba. Ahora hay un interruptor fijo en la barra de redacción (`AutoPollToggle` en `AdminShell`): **Procesamiento automático** Activo/Pausado. Pausar no apaga Beat ni el worker: `poll_monitored_sources` no encola. El poll manual sigue.
-
-`Settings` reescribe `postgres://` y `postgresql://` a `postgresql+psycopg://` (Railway).
+El GET público de un artículo deriva status, DTO de presentación y etiquetas del `evidence_snapshot` de `published_version`. Verification live puede cambiar el Event; no cambia las tarjetas de V1 hasta publicar V2. Admin/analytics siguen en el par live. C1 se conserva: skipped no vira a complete; legacy sin `evaluation_state` no es complete; skip-shaped no usa copy evaluado.
 
 ## Validación
 
-- `npx tsc --noEmit` en `apps/web`: OK
-- Compose: rebuild `web` y smoke del interruptor en `/admin`
+- Dirigidos C2 (`test_editorial_label_policy.py`, `test_public_api.py`, `test_track_b.py`, `test_claim_card_presentation.py`, `test_editorial_evidence.py`): **60 passed**
+- Suite API completa: **662 passed**, 1 warning Alembic preexistente
 
 ## Pendiente
 
-Redeploy de Vercel Production (`main`) y de API/worker/beat en Railway para que el interruptor y `PATCH /api/v1/admin/ingestion` existan en producción.
+C3 y el resto de Track C. No hay migración. No backfill de ArticleVersion.

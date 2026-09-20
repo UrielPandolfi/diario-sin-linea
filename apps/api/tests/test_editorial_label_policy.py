@@ -2,11 +2,196 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 
-from app.domain.enums import ClaimStatus, EditorialLabel, EvidenceType
+from app.domain.enums import ClaimImportance, ClaimStatus, EditorialLabel, EvidenceType, IngestionMethod, PipelineStatus
+from app.models import Claim, ClaimEvidence, PipelineRun
+from app.providers.fakes import FakeStructuredLLM
+from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
+from app.schemas.auditing import ArticleAuditResult
+from app.services.article_service import ArticleService
+from app.services.audit_service import AuditService
+from app.services.claim_service import CLAIM_STAGE
 from app.services.editorial_label_policy import labels_for_event_claims
+from app.services.event_service import EventService
+from app.services.publish_service import PublishService
+from app.services.source_item_service import SourceItemService
+from app.services.source_service import SourceService
 from app.services.verification_outcome import VerificationView
+from app.services.verification_service import VERIFICATION_STAGE
+from tests.editorial_snapshot import persist_version_snapshot
+
+
+def _publish_with_snapshot_decision(session: Session, *, hash_key: str, decision: dict | None) -> tuple:
+    source = SourceService(session).create(
+        SourceCreate(
+            name=f"Fuente {hash_key}",
+            preferred_ingestion_method=IngestionMethod.RSS,
+            feed_url=f"https://{hash_key}.test/rss.xml",
+            is_monitored=True,
+            is_enabled=True,
+            domain=f"{hash_key}.test",
+        )
+    )
+    item = SourceItemService(session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url=f"https://{hash_key}.test/n",
+            canonical_url=f"https://{hash_key}.test/n",
+            content_hash=hash_key,
+            title="Hecho",
+            clean_text="Ocurrió el hecho.",
+        )
+    ).item
+    event = EventService(session).create(
+        EventCreate(
+            title_internal="Hecho",
+            event_type="judicial",
+            source_item_id=item.id,
+            started_at=datetime.now(timezone.utc),
+            locality="CABA",
+            province="CABA",
+            short_summary="Hecho",
+        )
+    )
+    claim = Claim(
+        event_id=event.id,
+        canonical_text="Vital presentó una denuncia penal",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        subject="Vital",
+        predicate="presentó",
+        object_text="denuncia penal",
+    )
+    session.add(claim)
+    session.flush()
+    session.add(
+        ClaimEvidence(
+            claim_id=claim.id,
+            source_item_id=item.id,
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt="presentó una denuncia penal",
+            source_url=item.url,
+        )
+    )
+    cid = str(claim.id)
+    article, _created = ArticleService(session).create_draft(
+        ArticleCreate(
+            event_id=event.id,
+            headline="Según la fuente, Vital presentó una denuncia",
+            summary="Una denuncia, según la primera cobertura.",
+            body="Según la fuente, Vital presentó una denuncia penal.",
+            body_blocks=[
+                {
+                    "type": "paragraph",
+                    "segments": [
+                        {
+                            "text": "Según la fuente, Vital presentó una denuncia penal.",
+                            "claim_ids": [cid],
+                        }
+                    ],
+                }
+            ],
+        )
+    )
+    persist_version_snapshot(session, event, article)
+    writing = session.scalars(
+        select(PipelineRun)
+        .where(PipelineRun.event_id == event.id, PipelineRun.stage == "writing")
+        .order_by(PipelineRun.started_at.desc())
+    ).first()
+    assert writing is not None
+    snap = dict(writing.metadata_json["evidence_snapshot"])
+    if decision is None:
+        snap["decision_by_claim_id"] = {}
+        context = snap.get("article_context") if isinstance(snap.get("article_context"), dict) else {}
+        verification = context.get("verification") if isinstance(context.get("verification"), dict) else {}
+        verification["decision_by_claim_id"] = {}
+        context["verification"] = verification
+        snap["article_context"] = context
+    else:
+        row = {"claim_id": cid, **decision}
+        snap["decision_by_claim_id"] = {cid: row}
+        context = snap.get("article_context") or {}
+        for key in (
+            "confirmed_claims",
+            "single_source_claims",
+            "conflicting_claims",
+            "uncertain_claims",
+            "disproven_claims",
+            "outdated_claims",
+        ):
+            for item_row in context.get(key) or []:
+                if str(item_row.get("id")) == cid:
+                    if decision.get("status"):
+                        item_row["status"] = decision["status"]
+                    if "support_basis" in decision:
+                        item_row["support_basis"] = decision["support_basis"]
+                    item_row["canonical_text"] = claim.canonical_text
+    writing.metadata_json = {
+        **writing.metadata_json,
+        "evidence_snapshot": snap,
+        "decision_by_claim_id": snap.get("decision_by_claim_id") or {},
+    }
+    flag_modified(writing, "metadata_json")
+    session.flush()
+    AuditService(session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})).audit(
+        event.id, trigger="test"
+    )
+    published = PublishService(session).publish(event.id, trigger="test")
+    assert published.get("published") is True
+    session.refresh(article)
+    session.commit()
+    return event, article, claim, snap
+
+
+def _later_live_supported(session: Session, event, claim) -> None:
+    cid = str(claim.id)
+    claim.status = ClaimStatus.SUPPORTED
+    session.flush()
+    claim_run = session.scalars(
+        select(PipelineRun)
+        .where(PipelineRun.event_id == event.id, PipelineRun.stage == CLAIM_STAGE)
+        .order_by(PipelineRun.started_at.desc())
+    ).first()
+    fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint")
+    session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=VERIFICATION_STAGE,
+            status=PipelineStatus.SUCCESS,
+            finished_at=datetime.now(timezone.utc),
+            metadata_json={
+                "claims_fingerprint": fingerprint,
+                "based_on_claim_run_id": str(claim_run.id),
+                "selected": [{"claim_id": cid, "reasons": ["policy:hecho"]}],
+                "skipped_search": [],
+                "primary_source_supports_claim": {cid: True},
+                "sol": [{"claim_id": cid, "status_after": "SUPPORTED", "unresolved": False}],
+                "decision_by_claim_id": {
+                    cid: {
+                        "claim_id": cid,
+                        "status": ClaimStatus.SUPPORTED.value,
+                        "unresolved": False,
+                        "evaluation_state": "complete",
+                        "support_basis": {
+                            "known_independent_count": 2,
+                            "unknown_group_count": 0,
+                            "documents_consulted": 3,
+                            "documents_supporting": 2,
+                            "demotion": "none",
+                            "kind": "independent_reporting",
+                            "primary_access": "found_relevant",
+                        },
+                    }
+                },
+            },
+        )
+    )
+    session.flush()
 
 
 def _claim(**overrides):
@@ -319,3 +504,444 @@ def test_compact_public_claims_includes_editorial_payload(db_session: Session) -
     assert not contains_llm_reason(rows)
     assert rows[0]["presentation"]["verification_label"] == "Corroborado"
     assert rows[0]["presentation"]["basis_known"] is True
+
+
+def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_session: Session) -> None:
+    from datetime import datetime, timezone
+
+    from fastapi.testclient import TestClient
+
+    from app.domain.enums import ClaimImportance, IngestionMethod, PipelineStatus
+    from app.main import app
+    from app.models import Claim, ClaimEvidence, PipelineRun
+    from app.providers.fakes import FakeStructuredLLM
+    from app.schemas import ArticleCreate, EventCreate, SourceCreate, SourceItemCreate
+    from app.schemas.auditing import ArticleAuditResult
+    from app.schemas.editorial_evidence import Demotion, SupportKind
+    from app.services.article_service import ArticleService
+    from app.services.audit_service import AuditService
+    from app.services.claim_coverage import claims_fingerprint
+    from app.services.claim_service import CLAIM_STAGE
+    from app.services.event_service import EventService
+    from app.services.feed_ranking import compact_public_claims
+    from app.services.publish_service import PublishService
+    from app.services.source_item_service import SourceItemService
+    from app.services.source_service import SourceService
+    from app.services.verification_service import VERIFICATION_STAGE
+    from tests.editorial_snapshot import persist_version_snapshot
+
+    source = SourceService(db_session).create(
+        SourceCreate(
+            name="Oficial",
+            preferred_ingestion_method=IngestionMethod.RSS,
+            feed_url="https://v1.test/rss.xml",
+            is_monitored=True,
+            is_enabled=True,
+            domain="v1.test",
+        )
+    )
+    item = SourceItemService(db_session).ingest(
+        SourceItemCreate(
+            source_id=source.id,
+            url="https://v1.test/n",
+            canonical_url="https://v1.test/n",
+            content_hash="v1c2",
+            title="Denuncia",
+            clean_text="Presentó una denuncia penal.",
+        )
+    ).item
+    event = EventService(db_session).create(
+        EventCreate(
+            title_internal="Denuncia",
+            event_type="judicial",
+            source_item_id=item.id,
+            started_at=datetime.now(timezone.utc),
+            locality="CABA",
+            province="CABA",
+            short_summary="Denuncia",
+        )
+    )
+    claim = Claim(
+        event_id=event.id,
+        canonical_text="Vital presentó una denuncia penal",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+        subject="Vital",
+        predicate="presentó",
+        object_text="denuncia penal",
+    )
+    db_session.add(claim)
+    db_session.flush()
+    db_session.add(
+        ClaimEvidence(
+            claim_id=claim.id,
+            source_item_id=item.id,
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt="presentó una denuncia penal",
+            source_url=item.url,
+        )
+    )
+    cid = str(claim.id)
+    article, _created = ArticleService(db_session).create_draft(
+        ArticleCreate(
+            event_id=event.id,
+            headline="Según la fuente, Vital presentó una denuncia",
+            summary="Una denuncia, según la primera cobertura.",
+            body="Según la fuente, Vital presentó una denuncia penal.",
+            body_blocks=[
+                {
+                    "type": "paragraph",
+                    "segments": [
+                        {
+                            "text": "Según la fuente, Vital presentó una denuncia penal.",
+                            "claim_ids": [cid],
+                        }
+                    ],
+                }
+            ],
+        )
+    )
+    persist_version_snapshot(db_session, event, article)
+    writing = db_session.scalars(
+        select(PipelineRun)
+        .where(PipelineRun.event_id == event.id, PipelineRun.stage == "writing")
+        .order_by(PipelineRun.started_at.desc())
+    ).first()
+    assert writing is not None
+    snap = dict(writing.metadata_json["evidence_snapshot"])
+    v1_decision = {
+        "claim_id": cid,
+        "status": ClaimStatus.SINGLE_SOURCE.value,
+        "unresolved": False,
+        "evaluation_state": "complete",
+        "llm_reason": None,
+        "support_basis": {
+            "known_independent_count": 1,
+            "unknown_group_count": 0,
+            "documents_consulted": 1,
+            "documents_supporting": 1,
+            "demotion": Demotion.INSUFFICIENT_INDEPENDENCE.value,
+            "kind": SupportKind.SINGLE_REPORT.value,
+        },
+    }
+    snap["decision_by_claim_id"] = {cid: v1_decision}
+    context = snap.get("article_context") or {}
+    for key in (
+        "confirmed_claims",
+        "single_source_claims",
+        "conflicting_claims",
+        "uncertain_claims",
+        "disproven_claims",
+        "outdated_claims",
+    ):
+        for row in context.get(key) or []:
+            if str(row.get("id")) == cid:
+                row["status"] = ClaimStatus.SINGLE_SOURCE.value
+                row["canonical_text"] = claim.canonical_text
+                row["support_basis"] = v1_decision["support_basis"]
+    writing.metadata_json = {**writing.metadata_json, "evidence_snapshot": snap, "decision_by_claim_id": snap["decision_by_claim_id"]}
+    flag_modified(writing, "metadata_json")
+    db_session.flush()
+    AuditService(db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})).audit(
+        event.id, trigger="test"
+    )
+    published = PublishService(db_session).publish(event.id, trigger="test")
+    assert published.get("published") is True
+    db_session.refresh(article)
+    db_session.commit()
+
+    v1_public = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert len(v1_public) == 1
+    assert v1_public[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert v1_public[0]["presentation"]["verification_label"] == "Un solo origen"
+    assert v1_public[0]["presentation"]["known_independent_count"] == 1
+    assert "CHECKED" not in v1_public[0]["editorial_labels"]
+
+    claim.status = ClaimStatus.SUPPORTED
+    db_session.flush()
+    extra = Claim(
+        event_id=event.id,
+        canonical_text="El expediente ya tiene fecha de audiencia",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    db_session.add(extra)
+    db_session.flush()
+    claim_run = db_session.scalars(
+        select(PipelineRun)
+        .where(PipelineRun.event_id == event.id, PipelineRun.stage == CLAIM_STAGE)
+        .order_by(PipelineRun.started_at.desc())
+    ).first()
+    fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint") or claims_fingerprint([claim])
+    later_decision = {
+        "claim_id": cid,
+        "status": ClaimStatus.SUPPORTED.value,
+        "unresolved": False,
+        "evaluation_state": "complete",
+        "support_basis": {
+            "known_independent_count": 2,
+            "unknown_group_count": 0,
+            "documents_consulted": 3,
+            "documents_supporting": 2,
+            "demotion": Demotion.NONE.value,
+            "kind": SupportKind.INDEPENDENT_REPORTING.value,
+            "primary_access": "found_relevant",
+        },
+    }
+    db_session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=VERIFICATION_STAGE,
+            status=PipelineStatus.SUCCESS,
+            finished_at=datetime.now(timezone.utc),
+            metadata_json={
+                "claims_fingerprint": fingerprint,
+                "based_on_claim_run_id": str(claim_run.id),
+                "selected": [{"claim_id": cid, "reasons": ["policy:hecho"]}],
+                "skipped_search": [],
+                "primary_source_supports_claim": {cid: True},
+                "sol": [{"claim_id": cid, "status_after": "SUPPORTED", "unresolved": False}],
+                "decision_by_claim_id": {cid: later_decision},
+            },
+        )
+    )
+    db_session.flush()
+
+    live_rows = compact_public_claims(db_session, event)
+    live_main = next(row for row in live_rows if row["id"] == cid)
+    assert live_main["status"] == ClaimStatus.SUPPORTED.value
+    assert live_main["presentation"]["verification_label"] == "Corroborado"
+    assert live_main["presentation"]["known_independent_count"] == 2
+    assert "CHECKED" in live_main["editorial_labels"]
+
+    frozen = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert {row["id"] for row in frozen} == {cid}
+    assert str(extra.id) not in {row["id"] for row in frozen}
+    assert frozen[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert frozen[0]["presentation"]["verification_label"] == "Un solo origen"
+    assert frozen[0]["presentation"]["known_independent_count"] == 1
+    assert frozen[0]["presentation"]["explanation"] != live_main["presentation"]["explanation"]
+    assert "CHECKED" not in frozen[0]["editorial_labels"]
+    db_session.commit()
+
+    with TestClient(app) as client:
+        payload = client.get(f"/api/v1/articles/{article.slug}").json()
+    assert payload["published_version"] == 1
+    public_ids = {row["id"] for row in payload["claims"]}
+    assert public_ids == {cid}
+    public_row = payload["claims"][0]
+    assert public_row["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert public_row["presentation"]["verification_label"] == "Un solo origen"
+    assert public_row["presentation"]["known_independent_count"] == 1
+    assert "CHECKED" not in public_row["editorial_labels"]
+
+    from app.domain.enums import ArticleStatus
+    from app.models import ArticleVersion
+
+    v2_blocks = [
+        {
+            "type": "paragraph",
+            "segments": [{"text": "Vital presentó una denuncia penal.", "claim_ids": [cid]}],
+        }
+    ]
+    article.status = ArticleStatus.DRAFT
+    article.current_version = 2
+    article.headline = "Corroborado: Vital presentó una denuncia"
+    article.summary = "Dos coberturas independientes."
+    article.body = "Vital presentó una denuncia penal."
+    article.body_blocks = v2_blocks
+    db_session.add(
+        ArticleVersion(
+            article_id=article.id,
+            version_number=2,
+            headline=article.headline,
+            summary=article.summary,
+            body=article.body,
+            body_blocks=v2_blocks,
+            change_reason="test_v2",
+        )
+    )
+    db_session.flush()
+    coverage = snap.get("coverage") or {
+        "coverage_gap": False,
+        "expected_central": [
+            {
+                "proposition": claim.canonical_text,
+                "role": "other",
+                "match": "equivalent",
+                "match_claim_id": cid,
+            }
+        ],
+    }
+    v2_snap = {
+        "contract_version": "editorial-evidence-1",
+        "version": 2,
+        "claims_fingerprint": fingerprint,
+        "coverage_run_id": str(claim_run.id),
+        "based_on_claim_run_id": str(claim_run.id),
+        "verification_run_id": "v2-verify",
+        "coverage": coverage,
+        "verification_incomplete": False,
+        "central_unverified": [],
+        "stale_verification": False,
+        "decision_by_claim_id": {cid: later_decision},
+        "evaluated_claims": [{"claim_id": cid, "canonical_text": claim.canonical_text, "status": "SUPPORTED"}],
+        "article_context": {
+            "confirmed_claims": [
+                {
+                    "id": cid,
+                    "canonical_text": claim.canonical_text,
+                    "status": ClaimStatus.SUPPORTED.value,
+                    "importance": "HIGH",
+                    "support_basis": later_decision["support_basis"],
+                    "evidence": [],
+                }
+            ],
+            "verification": {
+                "selected": [{"claim_id": cid}],
+                "sol": [{"claim_id": cid, "status_after": "SUPPORTED", "unresolved": False}],
+                "claims_fingerprint": fingerprint,
+                "based_on_claim_run_id": str(claim_run.id),
+                "verification_run_id": "v2-verify",
+            },
+        },
+    }
+    db_session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage="writing",
+            status=PipelineStatus.SUCCESS,
+            finished_at=datetime.now(timezone.utc),
+            metadata_json={"written": True, "version": 2, "evidence_snapshot": v2_snap, **v2_snap},
+        )
+    )
+    db_session.flush()
+    still_v1 = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert still_v1[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert still_v1[0]["presentation"]["verification_label"] == "Un solo origen"
+    with TestClient(app) as client:
+        before_v2 = client.get(f"/api/v1/articles/{article.slug}").json()
+    assert before_v2["published_version"] == 1
+    assert before_v2["claims"][0]["presentation"]["verification_label"] == "Un solo origen"
+
+    AuditService(db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})).audit(
+        event.id, trigger="test"
+    )
+    published_v2 = PublishService(db_session).publish(event.id, trigger="test")
+    assert published_v2.get("published") is True
+    db_session.refresh(article)
+    db_session.commit()
+    v2_rows = compact_public_claims(db_session, event, freeze_to_version=2)
+    assert v2_rows[0]["status"] == ClaimStatus.SUPPORTED.value
+    assert v2_rows[0]["presentation"]["verification_label"] == "Corroborado"
+    assert v2_rows[0]["presentation"]["known_independent_count"] == 2
+    assert "CHECKED" in v2_rows[0]["editorial_labels"]
+    with TestClient(app) as client:
+        after_v2 = client.get(f"/api/v1/articles/{article.slug}").json()
+    assert after_v2["published_version"] == 2
+    assert after_v2["claims"][0]["status"] == ClaimStatus.SUPPORTED.value
+    assert after_v2["claims"][0]["presentation"]["verification_label"] == "Corroborado"
+    assert after_v2["claims"][0]["presentation"]["known_independent_count"] == 2
+    assert "CHECKED" in after_v2["claims"][0]["editorial_labels"]
+
+
+def test_frozen_v1_skipped_stays_unevaluated_after_later_complete(db_session: Session) -> None:
+    from app.services.claim_card_presentation import NOT_EVALUATED_LABEL
+    from app.services.feed_ranking import compact_public_claims
+    from app.schemas.editorial_evidence import evaluation_is_complete, read_evaluation_state
+
+    event, article, claim, snap = _publish_with_snapshot_decision(
+        db_session,
+        hash_key="c2skip",
+        decision={
+            "status": ClaimStatus.SINGLE_SOURCE.value,
+            "unresolved": False,
+            "evaluation_state": "skipped",
+            "llm_reason": "policy_skip",
+            "support_basis": {},
+        },
+    )
+    cid = str(claim.id)
+    v1 = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert v1[0]["presentation"]["verification_label"] == NOT_EVALUATED_LABEL
+    _later_live_supported(db_session, event, claim)
+    live = compact_public_claims(db_session, event)
+    live_row = next(row for row in live if row["id"] == cid)
+    assert live_row["presentation"]["verification_label"] == "Corroborado"
+    frozen = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert frozen[0]["presentation"]["verification_label"] == NOT_EVALUATED_LABEL
+    assert frozen[0]["presentation"]["explanation"] is None
+    assert "CHECKED" not in frozen[0]["editorial_labels"]
+    stored = snap["decision_by_claim_id"][cid]
+    assert read_evaluation_state(stored) is not None
+    assert evaluation_is_complete(stored) is False
+
+
+def test_frozen_legacy_decision_without_evaluation_state_keeps_evaluated_copy(db_session: Session) -> None:
+    from app.schemas.editorial_evidence import (
+        Demotion,
+        decision_was_evaluated,
+        evaluation_is_complete,
+        read_evaluation_state,
+    )
+    from app.services.feed_ranking import compact_public_claims
+
+    event, article, claim, snap = _publish_with_snapshot_decision(
+        db_session,
+        hash_key="c2legacy",
+        decision={
+            "status": ClaimStatus.SINGLE_SOURCE.value,
+            "unresolved": False,
+            "llm_reason": None,
+            "support_basis": {
+                "known_independent_count": 0,
+                "unknown_group_count": 2,
+                "documents_consulted": 3,
+                "documents_supporting": 3,
+                "demotion": Demotion.UNPROVEN_INDEPENDENCE.value,
+                "kind": "single_report",
+            },
+        },
+    )
+    cid = str(claim.id)
+    stored = snap["decision_by_claim_id"][cid]
+    assert "evaluation_state" not in stored
+    assert read_evaluation_state(stored) is None
+    assert evaluation_is_complete(stored) is False
+    assert decision_was_evaluated(stored) is True
+    v1 = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert v1[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert v1[0]["presentation"]["verification_label"] == "Sin corroboración independiente"
+    _later_live_supported(db_session, event, claim)
+    live = compact_public_claims(db_session, event)
+    live_row = next(row for row in live if row["id"] == cid)
+    assert live_row["presentation"]["verification_label"] == "Corroborado"
+    frozen = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert frozen[0]["presentation"]["verification_label"] == "Sin corroboración independiente"
+    assert frozen[0]["presentation"]["known_independent_count"] == 0
+    assert frozen[0]["editorial_labels"] == v1[0]["editorial_labels"]
+
+
+def test_frozen_missing_decision_is_not_filled_from_live_verify(db_session: Session) -> None:
+    from app.services.claim_card_presentation import NOT_EVALUATED_LABEL
+    from app.services.feed_ranking import compact_public_claims
+
+    event, article, claim, _snap = _publish_with_snapshot_decision(
+        db_session,
+        hash_key="c2nodec",
+        decision=None,
+    )
+    cid = str(claim.id)
+    v1 = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert v1[0]["presentation"]["verification_label"] == NOT_EVALUATED_LABEL
+    _later_live_supported(db_session, event, claim)
+    live = compact_public_claims(db_session, event)
+    live_row = next(row for row in live if row["id"] == cid)
+    assert live_row["presentation"]["verification_label"] == "Corroborado"
+    frozen = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert frozen[0]["id"] == cid
+    assert frozen[0]["presentation"]["verification_label"] == NOT_EVALUATED_LABEL
+    assert frozen[0]["presentation"]["explanation"] is None
+    assert "CHECKED" not in frozen[0]["editorial_labels"]

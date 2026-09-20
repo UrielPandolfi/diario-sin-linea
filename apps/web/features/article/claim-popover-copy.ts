@@ -12,8 +12,8 @@ function publicationName(row: ClaimEvidenceDetail | undefined): string | null {
 
 export function claimPopoverCopy(claim: ArticleClaim) {
   const card = claim.presentation;
-  let heading = card?.verification_label ?? "Independencia desconocida";
-  let coverage = card?.coverage ?? "No hay desglose de independencia para esta verificación.";
+  let heading = card?.verification_label ?? "Aún no verificado";
+  let coverage = card?.coverage ?? "Esta afirmación todavía no fue verificada.";
   let limitation = card?.limitation ?? null;
   let explanation = card?.explanation ?? null;
   const documentaryLimitation = limitation === OFFICIAL_LIMITATION ? DOCUMENT_DETAIL_LIMITATION : null;

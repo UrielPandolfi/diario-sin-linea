@@ -220,7 +220,7 @@ def test_mundane_claim_does_not_call_sol_or_brave(db_session: Session) -> None:
     source = _source(db_session)
     item = _item(db_session, source.id, url="https://ejemplo.test/fuego", title="Incendio", body="Hubo un incendio", content_hash="h1")
     event = _event(db_session, item)
-    _claim(
+    claim = _claim(
         db_session,
         event,
         text="Hubo un incendio en la esquina",
@@ -235,6 +235,11 @@ def test_mundane_claim_does_not_call_sol_or_brave(db_session: Session) -> None:
     assert result["verified"] == 0
     assert llm.calls == []
     assert search.queries == []
+    cid = str(claim.id)
+    decision = result["decision_by_claim_id"][cid]
+    assert decision["evaluation_state"] == "skipped"
+    assert decision["llm_reason"] == "veto"
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
 
 
 def test_declaration_runs_claim_queries_not_event_research(db_session: Session) -> None:
@@ -1383,4 +1388,201 @@ def test_other_jurisdiction_generic_overlap_is_evidence_not_public_source(db_ses
     assert item.url in public_urls
     assert related in public_urls
     assert other not in public_urls
+
+
+def test_selected_claim_records_complete_evaluation_state(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/anuncio",
+        title="Anuncio",
+        body="El ministro anunció que el decreto está vigente",
+        content_hash="h-eval",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="El ministro anunció que el decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    llm = FakeStructuredLLM({"VerificationResult": _sol()})
+    result = _service(db_session, llm, FakeSearchProvider()).verify(event.id, trigger="admin")
+    cid = str(claim.id)
+    decision = result["decision_by_claim_id"][cid]
+    assert decision["evaluation_state"] == "complete"
+    assert decision["status"] == claim.status.value
+    assert claim.status == ClaimStatus.SINGLE_SOURCE
+
+
+def test_policy_skip_records_explicit_skipped_decision(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/mix",
+        title="Mix",
+        body="El ministro habló. Pasó algo en la esquina.",
+        content_hash="h-skip",
+    )
+    event = _event(db_session, item)
+    selected = _claim(
+        db_session,
+        event,
+        text="El ministro anunció que el decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    skipped = _claim(
+        db_session,
+        event,
+        text="Pasó algo en la esquina",
+        claim_type="hecho",
+        importance=ClaimImportance.MEDIUM,
+        status=ClaimStatus.UNCERTAIN,
+    )
+    llm = FakeStructuredLLM({"VerificationResult": _sol()})
+    result = _service(db_session, llm, FakeSearchProvider()).verify(event.id, trigger="admin")
+    selected_decision = result["decision_by_claim_id"][str(selected.id)]
+    skipped_decision = result["decision_by_claim_id"][str(skipped.id)]
+    assert selected_decision["evaluation_state"] == "complete"
+    assert skipped_decision["evaluation_state"] == "skipped"
+    assert skipped_decision["llm_reason"] == "policy_skip"
+    assert skipped.status == ClaimStatus.UNCERTAIN
+    assert any(
+        row["claim_id"] == str(skipped.id) and row["reason"] == "policy_skip"
+        for row in result["skipped_policy"]
+    )
+
+
+def test_budget_limit_records_explicit_skipped_decision(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/budget",
+        title="Presupuesto de claims",
+        body="Dos declaraciones.",
+        content_hash="h-budget",
+    )
+    event = _event(db_session, item)
+    first = _claim(
+        db_session,
+        event,
+        text="La ministra anunció que el primer decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    second = _claim(
+        db_session,
+        event,
+        text="El secretario anunció que el segundo decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    llm = FakeStructuredLLM({"VerificationResult": _sol()})
+    service = _service(db_session, llm, FakeSearchProvider())
+    service.settings = service.settings.model_copy(update={"max_verification_claims_per_event": 1})
+    result = service.verify(event.id, trigger="admin")
+    assert get_settings().max_verification_claims_per_event == 5
+    decisions = result["decision_by_claim_id"]
+    assert {decisions[str(first.id)]["evaluation_state"], decisions[str(second.id)]["evaluation_state"]} == {
+        "complete",
+        "skipped",
+    }
+    skipped_id = str(first.id) if decisions[str(first.id)]["evaluation_state"] == "skipped" else str(second.id)
+    assert decisions[skipped_id]["llm_reason"] == "budget"
+    assert any(row["claim_id"] == skipped_id and row["reason"] == "budget" for row in result["skipped_policy"])
+    assert result["verification_budget"]["limit"] == 1
+    assert first.status == ClaimStatus.SINGLE_SOURCE
+    assert second.status == ClaimStatus.SINGLE_SOURCE
+
+
+def test_numeric_skip_records_complete_decision(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/tarifas",
+        title="Tarifas",
+        body="El incremento será por debajo del 2,1%. La electricidad aumentará 1,75%.",
+        content_hash="h-num",
+    )
+    event = _event(db_session, item)
+    comparison = _claim(
+        db_session,
+        event,
+        text="El incremento de electricidad y gas será por debajo del 2,1% que informó INDEC",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    sibling = _claim(
+        db_session,
+        event,
+        text="La electricidad aumentará 1,75%",
+        claim_type="cifra",
+        importance=ClaimImportance.LOW,
+        status=ClaimStatus.SUPPORTED,
+        normalized_value="1.75",
+    )
+    llm = FakeStructuredLLM()
+    search = FakeSearchProvider([SearchHit(title="x", url="https://otro.test/n", snippet="x")])
+    result = _service(db_session, llm, search).verify(event.id, trigger="admin")
+    cid = str(comparison.id)
+    assert cid in result["decision_by_claim_id"]
+    decision = result["decision_by_claim_id"][cid]
+    assert decision["evaluation_state"] == "complete"
+    assert cid in result["skipped_search"]
+    assert comparison.status == ClaimStatus.SUPPORTED
+    assert sibling.status == ClaimStatus.SUPPORTED
+    assert llm.calls == []
+    assert search.queries == []
+    sibling_decision = result["decision_by_claim_id"][str(sibling.id)]
+    assert sibling_decision["evaluation_state"] == "skipped"
+    assert sibling_decision["llm_reason"] == "policy_skip"
+
+
+def test_outside_recheck_records_explicit_skipped_decision(db_session: Session) -> None:
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/recheck",
+        title="Recheck",
+        body="Dos afirmaciones.",
+        content_hash="h-recheck",
+    )
+    event = _event(db_session, item)
+    target = _claim(
+        db_session,
+        event,
+        text="El ministro anunció que el decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    other = _claim(
+        db_session,
+        event,
+        text="El secretario anunció que la resolución está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE,
+    )
+    llm = FakeStructuredLLM({"VerificationResult": _sol()})
+    result = _service(db_session, llm, FakeSearchProvider()).verify(
+        event.id, trigger="admin", claim_id=target.id
+    )
+    assert result["decision_by_claim_id"][str(target.id)]["evaluation_state"] == "complete"
+    other_decision = result["decision_by_claim_id"][str(other.id)]
+    assert other_decision["evaluation_state"] == "skipped"
+    assert other_decision["llm_reason"] == "outside_recheck"
+    assert other.status == ClaimStatus.SINGLE_SOURCE
 

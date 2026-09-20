@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 CONTRACT_VERSION = "editorial-evidence-1"
 
@@ -88,6 +88,37 @@ class SupportKind(StrEnum):
     INSUFFICIENT = "insufficient"
 
 
+class EvaluationState(StrEnum):
+    """Persisted verification evaluation state. Missing on legacy snapshots.
+
+    PENDING and FAILED exist on the contract but current SUCCESS runs do not
+    write them: a RUNNING pipeline is not a snapshot, and a failed verify
+    leaves PipelineStatus.FAILED without decision_by_claim_id.
+    """
+
+    COMPLETE = "complete"
+    SKIPPED = "skipped"
+    PENDING = "pending"
+    FAILED = "failed"
+
+
+def _coerce_evaluation_state(value: Any) -> EvaluationState | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, EvaluationState):
+        return value
+    try:
+        return EvaluationState(str(value).strip().lower())
+    except ValueError:
+        return None
+
+
+OptionalEvaluationState = Annotated[
+    EvaluationState | None,
+    BeforeValidator(_coerce_evaluation_state),
+]
+
+
 class ExpectedCentral(BaseModel):
     proposition: str
     role: PropositionRole = PropositionRole.OTHER
@@ -164,6 +195,66 @@ class ClaimDecision(BaseModel):
     llm_reason: str | None = None
     support_basis: SupportBasis = Field(default_factory=SupportBasis)
     proposition_role: str | None = None
+    evaluation_state: OptionalEvaluationState = None
+
+
+def read_evaluation_state(decision: ClaimDecision | dict[str, Any] | None) -> EvaluationState | None:
+    """None means unknown/legacy. Never defaults to COMPLETE."""
+    if decision is None:
+        return None
+    if isinstance(decision, ClaimDecision):
+        return decision.evaluation_state
+    raw = decision.get("evaluation_state") if isinstance(decision, dict) else None
+    return _coerce_evaluation_state(raw)
+
+
+_SKIP_LLM_REASONS = frozenset({"veto", "policy_skip", "budget", "outside_recheck"})
+
+
+def _decision_llm_reason(decision: ClaimDecision | dict[str, Any] | None) -> str:
+    if decision is None:
+        return ""
+    if isinstance(decision, ClaimDecision):
+        return str(decision.llm_reason or "")
+    if isinstance(decision, dict):
+        return str(decision.get("llm_reason") or "")
+    return ""
+
+
+def decision_looks_like_skip(decision: ClaimDecision | dict[str, Any] | None) -> bool:
+    """Skip-shaped even without evaluation_state (C1 persistía reason en llm_reason)."""
+    state = read_evaluation_state(decision)
+    if state is EvaluationState.SKIPPED:
+        return True
+    if state is not None:
+        return False
+    return _decision_llm_reason(decision) in _SKIP_LLM_REASONS
+
+
+def evaluation_is_complete(decision: ClaimDecision | dict[str, Any] | None) -> bool:
+    return read_evaluation_state(decision) == EvaluationState.COMPLETE
+
+
+def decision_was_evaluated(decision: ClaimDecision | dict[str, Any] | None) -> bool:
+    """True only for an editorial evaluation, never for skip/pending/failed.
+
+    Legacy snapshots omitted skipped claims from decision_by_claim_id, so a stored
+    decision without evaluation_state is treated as evaluated copy if it is not
+    skip-shaped. Presence of a decision alone is not enough after C1, because
+    skipped rows also occupy that map. Justifying the legacy evaluated copy:
+    support_basis / status written by _decision_after_policy, and the absence of
+    a skip reason (veto, policy_skip, budget, outside_recheck).
+    """
+    state = read_evaluation_state(decision)
+    if state is EvaluationState.COMPLETE:
+        return True
+    if state in {EvaluationState.SKIPPED, EvaluationState.PENDING, EvaluationState.FAILED}:
+        return False
+    if decision is None:
+        return False
+    if decision_looks_like_skip(decision):
+        return False
+    return True
 
 
 class EvidenceContract(BaseModel):

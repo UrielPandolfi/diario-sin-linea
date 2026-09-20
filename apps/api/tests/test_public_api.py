@@ -224,3 +224,54 @@ def test_public_article_tolerates_null_hero(db_session: Session, monkeypatch) ->
         payload = client.get(f"/api/v1/articles/{article.slug}")
     assert payload.status_code == 200
     assert payload.json()["hero_image_url"] is None
+
+
+def test_public_article_claims_follow_published_snapshot_not_live_verify(db_session: Session) -> None:
+    from app.schemas.editorial_evidence import Demotion
+    from tests.test_editorial_label_policy import _later_live_supported, _publish_with_snapshot_decision
+
+    event, article, claim, _snap = _publish_with_snapshot_decision(
+        db_session,
+        hash_key="pubc2",
+        decision={
+            "status": ClaimStatus.SINGLE_SOURCE.value,
+            "unresolved": False,
+            "evaluation_state": "complete",
+            "llm_reason": None,
+            "support_basis": {
+                "known_independent_count": 1,
+                "unknown_group_count": 0,
+                "documents_consulted": 1,
+                "documents_supporting": 1,
+                "demotion": Demotion.INSUFFICIENT_INDEPENDENCE.value,
+                "kind": "single_report",
+            },
+        },
+    )
+    cid = str(claim.id)
+    extra = Claim(
+        event_id=event.id,
+        canonical_text="El expediente ya tiene fecha de audiencia",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    db_session.add(extra)
+    db_session.flush()
+    _later_live_supported(db_session, event, claim)
+    db_session.commit()
+    with TestClient(app) as client:
+        payload = client.get(f"/api/v1/articles/{article.slug}").json()
+        feed = client.get("/api/v1/feed").json()
+    assert payload["published_version"] == 1
+    public_ids = {row["id"] for row in payload["claims"]}
+    assert public_ids == {cid}
+    assert str(extra.id) not in public_ids
+    row = payload["claims"][0]
+    assert row["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert row["presentation"]["verification_label"] == "Un solo origen"
+    assert row["presentation"]["known_independent_count"] == 1
+    assert "CHECKED" not in row["editorial_labels"]
+    feed_item = next(item for item in feed["items"] if item["slug"] == article.slug)
+    assert "claims" not in feed_item
+    assert "presentation" not in feed_item

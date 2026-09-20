@@ -101,3 +101,54 @@ def persist_snapshot_fields(snapshot: dict[str, Any]) -> dict[str, Any]:
     payload = {key: snapshot.get(key) for key in _SNAPSHOT_KEYS}
     payload["evidence_snapshot"] = dict(snapshot)
     return payload
+
+
+def snapshot_context_claims(snapshot: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    states: dict[str, dict[str, Any]] = {}
+    if not snapshot:
+        return states
+    context = snapshot.get("article_context")
+    if not isinstance(context, dict):
+        return states
+    for key in (
+        "confirmed_claims",
+        "single_source_claims",
+        "conflicting_claims",
+        "uncertain_claims",
+        "disproven_claims",
+        "outdated_claims",
+    ):
+        for row in context.get(key) or []:
+            if isinstance(row, dict) and row.get("id"):
+                states[str(row["id"])] = row
+    return states
+
+
+def snapshot_sources_by_ref(snapshot: dict[str, Any] | None) -> dict[int, dict[str, Any]]:
+    sources: dict[int, dict[str, Any]] = {}
+    if not snapshot:
+        return sources
+    context = snapshot.get("article_context")
+    if not isinstance(context, dict):
+        return sources
+    for row in context.get("sources") or []:
+        if not isinstance(row, dict) or row.get("ref") is None:
+            continue
+        try:
+            sources[int(row["ref"])] = row
+        except (TypeError, ValueError):
+            continue
+    return sources
+
+
+def snapshot_evaluated_texts(snapshot: dict[str, Any] | None) -> dict[str, str]:
+    texts: dict[str, str] = {}
+    if not snapshot:
+        return texts
+    for row in snapshot.get("evaluated_claims") or []:
+        if not isinstance(row, dict) or not row.get("claim_id"):
+            continue
+        text = row.get("canonical_text")
+        if text:
+            texts[str(row["claim_id"])] = str(text)
+    return texts

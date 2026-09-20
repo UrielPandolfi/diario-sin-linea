@@ -81,6 +81,7 @@ def persist_version_snapshot(
                 "unresolved": False,
                 "final_reason": "evaluated",
                 "proposition_role": "other",
+                "evaluation_state": "complete",
                 "support_basis": {
                     "known_independent_count": 1,
                     "statement_evidence_class": "authentic_primary",

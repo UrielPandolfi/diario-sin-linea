@@ -66,9 +66,11 @@ from app.schemas.editorial_evidence import (
     ClaimDecision,
     CoverageContract,
     Demotion,
+    EvaluationState,
     PrimaryAccess,
     PropositionRole,
     StatementEvidenceClass,
+    SupportBasis,
     VerificationBudget,
 )
 from app.services.claim_coverage import (
@@ -347,6 +349,7 @@ class VerificationService:
             coverage.verification_incomplete = bool(budget.central_unverified)
             payload["coverage"] = coverage.model_dump(mode="json")
         if not selected:
+            self._record_skipped_decisions(event, payload, skipped_policy)
             payload["evaluated_claims"] = [
                 row.model_dump(mode="json") for row in evaluated_claims_payload(list(event.claims))
             ]
@@ -388,6 +391,18 @@ class VerificationService:
                 payload["primary_source_found"][claim_id] = False
                 payload["primary_source_supports_claim"][claim_id] = False
                 payload["verified"] += 1
+                self._record_decision(
+                    payload,
+                    claim,
+                    plan,
+                    status_before=status_before,
+                    llm_reason=None,
+                    unresolved=False,
+                    escalated=False,
+                    primary_found=False,
+                    primary_supports=False,
+                    packet_size=len(claim.evidence),
+                )
                 continue
             if skip_directed_search(claim, plan, preferred):
                 found = claim_has_preferred_evidence(claim, preferred)
@@ -510,6 +525,7 @@ class VerificationService:
             payload["comparison_checks"][claim_id] = self._comparison_checks
         if not targeted:
             self._reconcile_verified_competitors(list(event.claims), payload)
+        self._record_skipped_decisions(event, payload, skipped_policy)
         payload["evaluated_claims"] = [row.model_dump(mode="json") for row in evaluated_claims_payload(list(event.claims))]
         return payload
 
@@ -654,7 +670,40 @@ class VerificationService:
             llm_reason=llm_reason,
             support_basis=basis,
             proposition_role=role.value,
+            evaluation_state=EvaluationState.COMPLETE,
         )
+
+    def _skipped_decision(self, claim: Claim, *, reason: str) -> ClaimDecision:
+        role = proposition_role_for(claim)
+        return ClaimDecision(
+            claim_id=str(claim.id),
+            status=claim.status.value,
+            unresolved=False,
+            final_reason=None,
+            llm_reason=reason,
+            support_basis=SupportBasis(),
+            proposition_role=role.value,
+            evaluation_state=EvaluationState.SKIPPED,
+        )
+
+    def _record_skipped_decisions(
+        self,
+        event: Event,
+        payload: dict[str, Any],
+        skipped_policy: list[dict],
+    ) -> None:
+        reasons: dict[str, str] = {}
+        for row in skipped_policy:
+            cid = str(row.get("claim_id") or "")
+            if cid:
+                reasons[cid] = str(row.get("reason") or "policy_skip")
+        decisions = payload.setdefault("decision_by_claim_id", {})
+        for claim in event.claims:
+            cid = str(claim.id)
+            if cid in decisions:
+                continue
+            reason = reasons.get(cid, "policy_skip")
+            decisions[cid] = self._skipped_decision(claim, reason=reason).model_dump(mode="json")
 
     def _record_decision(
         self,

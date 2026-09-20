@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from uuid import UUID
 
 from sqlalchemy import Select, and_, select
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session, aliased, selectinload
 from app.core.article_body import claim_ids_in_body_blocks
 from app.core.clock import utc_now
 from app.core.config import get_settings
-from app.domain.enums import ArticleStatus, ClaimStatus, CorrectionKind, EventStatus, EventUpdateType
+from app.domain.enums import ArticleStatus, ClaimImportance, ClaimStatus, CorrectionKind, EventStatus, EventUpdateType, EvidenceType
 from app.models import (
     Article,
     ArticleVersion,
@@ -29,9 +30,14 @@ from app.services.claim_card_presentation import (
 )
 from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
-from app.services.evidence_snapshot import evidence_snapshot_for_version
+from app.services.evidence_snapshot import (
+    evidence_snapshot_for_version,
+    snapshot_context_claims,
+    snapshot_evaluated_texts,
+    snapshot_sources_by_ref,
+)
 from app.services.hero_image_service import fill_missing_hero
-from app.services.verification_outcome import verification_view_for_event
+from app.services.verification_outcome import verification_view_for_event, view_from_evidence_snapshot
 
 PUBLIC_CANDIDATE_CAP = 200
 DEFAULT_LIMIT = 20
@@ -39,36 +45,168 @@ MAX_LIMIT = 50
 SITEMAP_CAP = 10_000
 
 
-class _StatusOverlay:
-    def __init__(self, claim: Claim, status: ClaimStatus) -> None:
-        self._claim = claim
-        self.status = status
+class _VersionClaim:
+    """Claim proxy bound to a version snapshot. Does not read live evidence/status."""
+
+    def __init__(
+        self,
+        *,
+        claim_id: str,
+        live: Claim | None,
+        row: dict | None,
+        decision: dict | None,
+        sources_by_ref: dict[int, dict],
+        evaluated_text: str | None,
+    ) -> None:
+        self.id = live.id if live is not None else UUID(str(claim_id))
+        row = row or {}
+        decision = decision if isinstance(decision, dict) else {}
+        # Status and proposition come from the version snapshot only. Live Claim
+        # rows may already reflect a later Verification and must not fill gaps.
+        status_raw = decision.get("status") or row.get("status")
+        self.status = _parse_claim_status(status_raw, ClaimStatus.SINGLE_SOURCE)
+        text = row.get("canonical_text") or evaluated_text
+        self.canonical_text = str(text) if text else ""
+        self.claim_type = row.get("claim_type")
+        self.importance = _parse_importance(row.get("importance"), ClaimImportance.MEDIUM)
+        self.subject = row.get("subject")
+        self.predicate = row.get("predicate")
+        self.object_text = row.get("object_text")
+        self.normalized_value = row.get("normalized_value")
+        self.unit = row.get("unit")
+        self.occurred_at = _parse_dt(row.get("occurred_at")) if "occurred_at" in row else None
+        self.evidence = _evidence_from_snapshot(row.get("evidence") or [], sources_by_ref)
 
     def __getattr__(self, name: str):
-        return getattr(self._claim, name)
+        raise AttributeError(name)
 
 
-def _live_claim_states(session: Session, event_id: UUID, version: int) -> dict[str, dict]:
-    runs = PipelineRunRepository(session).list_for_event(event_id, limit=50)
+def _parse_claim_status(raw: object, fallback: ClaimStatus) -> ClaimStatus:
+    if isinstance(raw, ClaimStatus):
+        return raw
+    if raw is None:
+        return fallback
+    try:
+        return ClaimStatus(str(raw))
+    except ValueError:
+        return fallback
+
+
+def _parse_importance(raw: object, fallback: ClaimImportance) -> ClaimImportance:
+    if isinstance(raw, ClaimImportance):
+        return raw
+    if raw is None:
+        return fallback
+    try:
+        return ClaimImportance(str(raw))
+    except ValueError:
+        return fallback
+
+
+def _parse_dt(value: object) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_evidence_type(raw: object) -> EvidenceType:
+    if isinstance(raw, EvidenceType):
+        return raw
+    try:
+        return EvidenceType(str(raw))
+    except ValueError:
+        return EvidenceType.MENTIONS
+
+
+def _evidence_from_snapshot(rows: list, sources_by_ref: dict[int, dict]) -> list:
+    evidence: list = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            ref = int(row.get("source_ref"))
+        except (TypeError, ValueError):
+            continue
+        source = sources_by_ref.get(ref) or {}
+        url = source.get("url")
+        name = source.get("name") or source.get("title")
+        key = str(url or ref)
+        if key in seen:
+            continue
+        seen.add(key)
+        evidence.append(
+            SimpleNamespace(
+                evidence_type=_parse_evidence_type(row.get("evidence_type")),
+                excerpt=row.get("excerpt"),
+                source_item_id=f"snapshot:{ref}",
+                source_url=url,
+                source_item=SimpleNamespace(
+                    url=url,
+                    canonical_url=url,
+                    title=source.get("title") or name,
+                    source=SimpleNamespace(
+                        name=name,
+                        domain=source.get("domain"),
+                        source_type=None,
+                    ),
+                ),
+            )
+        )
+    return evidence
+
+
+def _frozen_public_claims(
+    session: Session,
+    event: Event,
+    *,
+    version: int,
+    allowed_ids: set[str] | None,
+) -> tuple[list, object]:
+    runs = PipelineRunRepository(session).list_for_event(event.id, limit=50)
     snapshot = evidence_snapshot_for_version(runs, version)
-    states: dict[str, dict] = {}
-    if not snapshot:
-        return states
-    context = snapshot.get("article_context")
-    if not isinstance(context, dict):
-        return states
-    for key in (
-        "confirmed_claims",
-        "single_source_claims",
-        "conflicting_claims",
-        "uncertain_claims",
-        "disproven_claims",
-        "outdated_claims",
-    ):
-        for row in context.get(key) or []:
-            if isinstance(row, dict) and row.get("id"):
-                states[str(row["id"])] = row
-    return states
+    view = view_from_evidence_snapshot(snapshot)
+    rows_meta = snapshot_context_claims(snapshot)
+    texts = snapshot_evaluated_texts(snapshot)
+    sources_by_ref = snapshot_sources_by_ref(snapshot)
+    decisions = view.decision_by_claim_id
+    snapshot_ids = set(rows_meta) | set(decisions) | set(texts)
+    if allowed_ids is not None:
+        membership = snapshot_ids & allowed_ids if snapshot_ids else set(allowed_ids)
+    else:
+        membership = snapshot_ids
+    live_by_id = {str(claim.id): claim for claim in event.claims}
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for claim in event.claims:
+        cid = str(claim.id)
+        if cid in membership and cid not in seen:
+            ordered.append(cid)
+            seen.add(cid)
+    for cid in membership:
+        if cid not in seen:
+            ordered.append(cid)
+            seen.add(cid)
+    frozen = []
+    for cid in ordered:
+        frozen.append(
+            _VersionClaim(
+                claim_id=cid,
+                live=live_by_id.get(cid),
+                row=rows_meta.get(cid),
+                decision=decisions.get(cid) if isinstance(decisions.get(cid), dict) else None,
+                sources_by_ref=sources_by_ref,
+                evaluated_text=texts.get(cid),
+            )
+        )
+    return frozen, view
 
 
 def clamp_limit(limit: int | None) -> int:
@@ -165,42 +303,34 @@ def card_payload(
 def compact_public_claims(
     session: Session, event: Event, *, allowed_ids: set[str] | None = None, freeze_to_version: int | None = None
 ) -> list[dict]:
-    claims = list(event.claims)
-    if allowed_ids is not None:
-        claims = [claim for claim in claims if str(claim.id) in allowed_ids]
-    overlay = _live_claim_states(session, event.id, freeze_to_version) if freeze_to_version is not None else {}
-    if overlay:
-        frozen: list = []
-        for claim in claims:
-            state = overlay.get(str(claim.id))
-            status_raw = (state or {}).get("status")
-            if status_raw:
-                try:
-                    frozen.append(_StatusOverlay(claim, ClaimStatus(status_raw)))
-                    continue
-                except ValueError:
-                    pass
-            frozen.append(claim)
-        claims = frozen
-    _run, view = verification_view_for_event(session, event.id)
+    if freeze_to_version is not None:
+        claims, view = _frozen_public_claims(
+            session, event, version=freeze_to_version, allowed_ids=allowed_ids
+        )
+    else:
+        claims = list(event.claims)
+        if allowed_ids is not None:
+            claims = [claim for claim in claims if str(claim.id) in allowed_ids]
+        _run, view = verification_view_for_event(session, event.id)
     editorials = labels_for_event_claims(list(claims), view)
     rows: list[dict] = []
     for claim in claims:
-        if allowed_ids is not None and str(claim.id) not in allowed_ids:
+        cid = str(claim.id)
+        if allowed_ids is not None and cid not in allowed_ids:
             continue
-        source_ids = {str(item.source_item_id) for item in claim.evidence if item.source_item_id}
+        source_ids = {str(item.source_item_id) for item in claim.evidence if getattr(item, "source_item_id", None)}
         card = presentation_for_claim(claim, view)
         payload = {
-            "id": str(claim.id),
+            "id": cid,
             "canonical_text": claim.canonical_text,
             "status": claim.status.value,
             "importance": claim.importance.value,
             "source_count": len(source_ids),
             "evidence_count": len(source_ids),
             "presentation": public_presentation_payload(card),
-            "verification": public_verification_payload(view.sol_by_id.get(str(claim.id))),
+            "verification": public_verification_payload(view.sol_by_id.get(cid)),
         }
-        payload.update(editorial_public_payload(editorials.get(str(claim.id))))
+        payload.update(editorial_public_payload(editorials.get(cid)))
         rows.append(payload)
     return rows
 

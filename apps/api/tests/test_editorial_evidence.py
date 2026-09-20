@@ -730,6 +730,8 @@ def test_sol_optimistic_keeps_policy_reason_and_resolved_false(db_session: Sessi
     assert decision["unresolved"] is False
     assert decision["llm_reason"] == sol_row["llm_reason"]
     assert decision["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert decision["evaluation_state"] == "complete"
+    assert "known_independent_count" in decision["support_basis"]
     from app.services.claim_card_presentation import (
         contains_llm_reason,
         contradicts_single_source_independence,
@@ -935,3 +937,145 @@ def test_judge_utterance_coverage_gap_without_body_excerpt(db_session: Session) 
         for claim in claims
     )
     assert {claim.status for claim in claims} <= {ClaimStatus.SINGLE_SOURCE}
+
+
+def test_legacy_claim_decision_parses_without_evaluation_state() -> None:
+    from app.schemas.editorial_evidence import (
+        ClaimDecision,
+        EvidenceContract,
+        EvaluationState,
+        evaluation_is_complete,
+        read_evaluation_state,
+    )
+
+    raw = {
+        "claim_id": "legacy",
+        "status": "SINGLE_SOURCE",
+        "unresolved": False,
+        "support_basis": {"known_independent_count": 1},
+    }
+    decision = ClaimDecision.model_validate(raw)
+    assert decision.evaluation_state is None
+    assert read_evaluation_state(raw) is None
+    assert evaluation_is_complete(raw) is False
+    assert evaluation_is_complete(decision) is False
+    contract = EvidenceContract.model_validate(
+        {
+            "contract_version": "editorial-evidence-1",
+            "decision_by_claim_id": {"legacy": raw},
+        }
+    )
+    assert contract.decision_by_claim_id["legacy"].evaluation_state is None
+    junk = ClaimDecision.model_validate({**raw, "evaluation_state": "not-a-state"})
+    assert junk.evaluation_state is None
+    complete = ClaimDecision.model_validate({**raw, "evaluation_state": "complete"})
+    assert complete.evaluation_state is EvaluationState.COMPLETE
+    assert evaluation_is_complete(complete) is True
+
+
+def test_writing_compact_omits_skipped_and_does_not_carry_evaluation_state() -> None:
+    from types import SimpleNamespace
+
+    from app.domain.enums import PipelineStatus
+    from app.schemas.writing import ContextClaimDecision
+    from app.services.article_context import compact_verification
+
+    assert "evaluation_state" not in ContextClaimDecision.model_fields
+    run = SimpleNamespace(
+        id="verify",
+        status=PipelineStatus.SUCCESS,
+        metadata_json={
+            "decision_by_claim_id": {
+                "complete": {
+                    "claim_id": "complete",
+                    "status": "SINGLE_SOURCE",
+                    "evaluation_state": "complete",
+                    "support_basis": {"known_independent_count": 1},
+                },
+                "skipped": {
+                    "claim_id": "skipped",
+                    "status": "SINGLE_SOURCE",
+                    "evaluation_state": "skipped",
+                    "llm_reason": "policy_skip",
+                    "support_basis": {},
+                },
+                "legacy": {
+                    "claim_id": "legacy",
+                    "status": "SINGLE_SOURCE",
+                    "support_basis": {"known_independent_count": 0},
+                },
+            }
+        },
+    )
+    compact = compact_verification(run)
+    assert set(compact.decision_by_claim_id) == {"complete", "legacy"}
+    dumped = compact.decision_by_claim_id["complete"].model_dump()
+    assert "evaluation_state" not in dumped
+    assert "policy_skip" not in str(compact.model_dump())
+
+
+def test_view_from_evidence_snapshot_ignores_live_and_preserves_c1() -> None:
+    from app.schemas.editorial_evidence import (
+        decision_was_evaluated,
+        evaluation_is_complete,
+        read_evaluation_state,
+    )
+    from app.services.verification_outcome import view_from_evidence_snapshot
+
+    skipped = {
+        "claim_id": "skipped",
+        "status": "SINGLE_SOURCE",
+        "evaluation_state": "skipped",
+        "llm_reason": "policy_skip",
+        "support_basis": {},
+    }
+    legacy = {
+        "claim_id": "legacy",
+        "status": "SINGLE_SOURCE",
+        "support_basis": {
+            "known_independent_count": 0,
+            "unknown_group_count": 1,
+            "demotion": "unproven_independence",
+        },
+    }
+    complete = {
+        "claim_id": "complete",
+        "status": "SINGLE_SOURCE",
+        "evaluation_state": "complete",
+        "support_basis": {"known_independent_count": 1, "kind": "single_report"},
+    }
+    snapshot = {
+        "contract_version": "editorial-evidence-1",
+        "claims_fingerprint": "fp",
+        "based_on_claim_run_id": "claim-run",
+        "verification_run_id": "verify-run",
+        "decision_by_claim_id": {
+            "skipped": skipped,
+            "legacy": legacy,
+            "complete": complete,
+        },
+        "article_context": {"verification": {"selected": [{"claim_id": "complete"}]}},
+    }
+    view = view_from_evidence_snapshot(snapshot)
+    assert read_evaluation_state(view.decision_by_claim_id["skipped"]).value == "skipped"
+    assert evaluation_is_complete(view.decision_by_claim_id["skipped"]) is False
+    assert decision_was_evaluated(view.decision_by_claim_id["skipped"]) is False
+    assert read_evaluation_state(view.decision_by_claim_id["legacy"]) is None
+    assert evaluation_is_complete(view.decision_by_claim_id["legacy"]) is False
+    assert decision_was_evaluated(view.decision_by_claim_id["legacy"]) is True
+    assert evaluation_is_complete(view.decision_by_claim_id["complete"]) is True
+    empty = view_from_evidence_snapshot(None)
+    assert empty.decision_by_claim_id == {}
+    assert empty.paired is False
+    missing = view_from_evidence_snapshot(
+        {
+            "claims_fingerprint": "fp",
+            "based_on_claim_run_id": "claim-run",
+            "article_context": {
+                "single_source_claims": [{"id": "ghost", "canonical_text": "x", "status": "SINGLE_SOURCE"}]
+            },
+            "decision_by_claim_id": {},
+        }
+    )
+    assert missing.decision_by_claim_id == {}
+    assert decision_was_evaluated(missing.decision_by_claim_id.get("ghost")) is False
