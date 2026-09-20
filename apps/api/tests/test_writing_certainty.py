@@ -62,7 +62,7 @@ def _seed(session: Session, *, claims: list[dict], headline: str, summary: str, 
             event,
             text=spec["text"],
             claim_type=spec.get("claim_type", "hecho"),
-            importance=ClaimImportance.HIGH,
+            importance=spec.get("importance", ClaimImportance.HIGH),
             status=spec["status"],
         )
         session.add(
@@ -171,8 +171,12 @@ def test_case_a_categorical_headline_fails(db_session: Session) -> None:
     assert "SINGLE_SOURCE" in statuses
     assert normalize_audit_result(fail).passed is False
     assert result["passed"] is False
-    assert result["issues"][0]["severity"] == "HIGH"
-    assert result["issues"][0]["reason"] == "single_as_corroborated"
+    assert result["reason"] == "structural_block"
+    assert result["rewrite_count"] == 0
+    assert "ArticleDraft" not in llm.calls
+    reasons = {issue["reason"] for issue in result["issues"]}
+    assert reasons & {"surface_categorical", "surface_attribution"}
+    assert any(issue["severity"] == "HIGH" for issue in result["issues"])
 
 
 def test_case_b_attributed_headline_does_not_fail_on_posture_alone(db_session: Session) -> None:
@@ -218,7 +222,10 @@ def test_case_c_synthesis_of_two_single_source_fails(db_session: Session) -> Non
     assert payload["headline"] == headline
     assert {row["canonical_text"] for row in payload["evidence_posture"]} >= {"Recalde posee 1° A.", "Calle adquirió 1° B."}
     assert result["passed"] is False
-    assert result["issues"][0]["severity"] == "HIGH"
+    assert result["reason"] == "structural_block"
+    assert result["rewrite_count"] == 0
+    assert "ArticleDraft" not in llm.calls
+    assert any(issue["severity"] == "HIGH" for issue in result["issues"])
 
 
 def test_case_d_supported_fact_in_headline_is_allowed(db_session: Session) -> None:
@@ -265,12 +272,14 @@ def test_case_f_attribution_loss_fails(db_session: Session) -> None:
         passed=False,
         issues=[_issue(issue_type=AuditIssueType.ATTRIBUTION, reason=AuditIssueReason.UTTERANCE_AS_TRUTH, text=text, claim_id=str(rows[0].id), claim_ref="C1")],
     )
-    result, _llm = _audit(db_session, event, result=fail)
+    result, llm = _audit(db_session, event, result=fail)
     assert normalize_audit_result(fail).passed is False
     assert result["passed"] is False
-    assert result["issues"][0]["type"] == "ATTRIBUTION"
-    assert result["issues"][0]["reason"] == "utterance_as_truth"
-    assert result["issues"][0]["severity"] == "HIGH"
+    assert result["reason"] == "structural_block"
+    assert result["rewrite_count"] == 0
+    assert "ArticleDraft" not in llm.calls
+    reasons = {issue["reason"] for issue in result["issues"]}
+    assert "surface_categorical" in reasons or "utterance_as_truth" in reasons
 
 
 def test_case_g_semantic_elevation_fails(db_session: Session) -> None:
@@ -289,6 +298,5 @@ def test_case_g_semantic_elevation_fails(db_session: Session) -> None:
     result, llm = _audit(db_session, event, result=fail)
     assert "un cuerpo bien atribuido no sana un titular categórico" in llm.user_prompts[0]
     assert result["passed"] is False
-    assert result["issues"][0]["type"] == "INFERENCE"
-    assert result["issues"][0]["reason"] == "semantic_shift"
-    assert result["issues"][0]["severity"] == "HIGH"
+    reasons = {issue["reason"] for issue in result["issues"]}
+    assert "semantic_shift" in reasons or reasons & {"surface_categorical", "surface_attribution", "headline_uncovered"}

@@ -23,6 +23,11 @@ _STRUCTURAL_REASONS = {
     AuditIssueReason.CONTRACT_UNPAIRED,
     AuditIssueReason.CENTRAL_UNCOVERED,
     AuditIssueReason.CENTRAL_UNVERIFIED,
+    AuditIssueReason.SURFACE_ATTRIBUTION,
+    AuditIssueReason.SURFACE_CATEGORICAL,
+    AuditIssueReason.SURFACE_INDEPENDENT_LANGUAGE,
+    AuditIssueReason.HEADLINE_UNCOVERED,
+    AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE,
 }
 
 _NEGATION_PREFIXES = (
@@ -264,6 +269,9 @@ def structural_findings(snapshot: dict[str, Any] | None, article: Article) -> li
                         claim_id=claim_id,
                     )
                 )
+    from app.services.surface_validation import surface_validation_findings
+
+    issues.extend(surface_validation_findings(snapshot, article))
     return issues
 
 
@@ -374,13 +382,15 @@ def _single_source_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
-def _article_surfaces(article: Article) -> list[str]:
-    """Titular, bajada y lead: el cuerpo posterior no sana ni condena esas piezas."""
-    surfaces: list[str] = []
-    for value in (article.headline, article.summary):
-        text = (value or "").strip()
-        if text:
-            surfaces.append(text)
+def article_surface_map(article: Article) -> dict[str, str]:
+    """Titular, bajada y lead (primer body_block o primer párrafo). El cuerpo posterior no cuenta."""
+    surfaces: dict[str, str] = {}
+    headline = (article.headline or "").strip()
+    if headline:
+        surfaces["headline"] = headline
+    summary = (article.summary or "").strip()
+    if summary:
+        surfaces["summary"] = summary
     lead = ""
     blocks = article.body_blocks
     if isinstance(blocks, list) and blocks:
@@ -389,8 +399,13 @@ def _article_surfaces(article: Article) -> list[str]:
         parts = split_body_paragraphs(article.body or "")
         lead = parts[0].strip() if parts else ""
     if lead:
-        surfaces.append(lead)
+        surfaces["lead"] = lead
     return surfaces
+
+
+def _article_surfaces(article: Article) -> list[str]:
+    """Titular, bajada y lead: el cuerpo posterior no sana ni condena esas piezas."""
+    return list(article_surface_map(article).values())
 
 
 def _digits(value: str | None) -> str:
@@ -472,7 +487,13 @@ def _dedupe_issues(issues: list[AuditIssue]) -> list[AuditIssue]:
     seen: set[tuple[Any, ...]] = set()
     out: list[AuditIssue] = []
     for issue in issues:
-        key = (issue.reason, issue.type, (issue.text or "").strip()[:240])
+        key = (
+            issue.reason,
+            issue.type,
+            (issue.text or "").strip()[:240],
+            issue.claim_id or "",
+            issue.claim_ref or "",
+        )
         if key in seen:
             continue
         seen.add(key)

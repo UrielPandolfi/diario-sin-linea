@@ -98,54 +98,82 @@ def _publish_with_snapshot_decision(session: Session, *, hash_key: str, decision
         )
     )
     persist_version_snapshot(session, event, article)
-    writing = session.scalars(
-        select(PipelineRun)
-        .where(PipelineRun.event_id == event.id, PipelineRun.stage == "writing")
-        .order_by(PipelineRun.started_at.desc())
-    ).first()
-    assert writing is not None
-    snap = dict(writing.metadata_json["evidence_snapshot"])
-    if decision is None:
-        snap["decision_by_claim_id"] = {}
-        context = snap.get("article_context") if isinstance(snap.get("article_context"), dict) else {}
-        verification = context.get("verification") if isinstance(context.get("verification"), dict) else {}
-        verification["decision_by_claim_id"] = {}
-        context["verification"] = verification
-        snap["article_context"] = context
-    else:
-        row = {"claim_id": cid, **decision}
-        snap["decision_by_claim_id"] = {cid: row}
-        context = snap.get("article_context") or {}
-        for key in (
-            "confirmed_claims",
-            "single_source_claims",
-            "conflicting_claims",
-            "uncertain_claims",
-            "disproven_claims",
-            "outdated_claims",
-        ):
-            for item_row in context.get(key) or []:
-                if str(item_row.get("id")) == cid:
-                    if decision.get("status"):
-                        item_row["status"] = decision["status"]
-                    if "support_basis" in decision:
-                        item_row["support_basis"] = decision["support_basis"]
-                    item_row["canonical_text"] = claim.canonical_text
-    writing.metadata_json = {
-        **writing.metadata_json,
-        "evidence_snapshot": snap,
-        "decision_by_claim_id": snap.get("decision_by_claim_id") or {},
-    }
-    flag_modified(writing, "metadata_json")
-    session.flush()
     AuditService(session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})).audit(
         event.id, trigger="test"
     )
     published = PublishService(session).publish(event.id, trigger="test")
     assert published.get("published") is True
+    snap = _overlay_published_snapshot(session, event, article, claim, decision)
     session.refresh(article)
     session.commit()
     return event, article, claim, snap
+
+
+def _overlay_published_snapshot(session: Session, event, article, claim, decision: dict | None) -> dict:
+    """Simula un snapshot histórico ya publicado. C5 no despublica por metadata nueva ausente."""
+    cid = str(claim.id)
+    runs = list(
+        session.scalars(
+            select(PipelineRun)
+            .where(PipelineRun.event_id == event.id)
+            .order_by(PipelineRun.started_at.desc())
+        )
+    )
+    target = int(article.published_version or article.current_version)
+    last_snap: dict = {}
+    for run in runs:
+        meta = dict(run.metadata_json or {})
+        raw = meta.get("evidence_snapshot")
+        if not isinstance(raw, dict):
+            continue
+        bound = raw.get("version")
+        version_after = meta.get("version_after")
+        if bound is None and version_after is None and meta.get("version") is None:
+            continue
+        matches = False
+        if bound is not None and int(bound) == target:
+            matches = True
+        if version_after is not None and int(version_after) == target:
+            matches = True
+        if meta.get("version") is not None and int(meta["version"]) == target:
+            matches = True
+        if not matches:
+            continue
+        snap = dict(raw)
+        if decision is None:
+            snap["decision_by_claim_id"] = {}
+            context = snap.get("article_context") if isinstance(snap.get("article_context"), dict) else {}
+            verification = context.get("verification") if isinstance(context.get("verification"), dict) else {}
+            verification["decision_by_claim_id"] = {}
+            context["verification"] = verification
+            snap["article_context"] = context
+        else:
+            row = {"claim_id": cid, **decision}
+            snap["decision_by_claim_id"] = {cid: row}
+            context = snap.get("article_context") or {}
+            for key in (
+                "confirmed_claims",
+                "single_source_claims",
+                "conflicting_claims",
+                "uncertain_claims",
+                "disproven_claims",
+                "outdated_claims",
+            ):
+                for item_row in context.get(key) or []:
+                    if str(item_row.get("id")) == cid:
+                        if decision.get("status"):
+                            item_row["status"] = decision["status"]
+                        if "support_basis" in decision:
+                            item_row["support_basis"] = decision["support_basis"]
+                        item_row["canonical_text"] = claim.canonical_text
+            snap["article_context"] = context
+        meta["evidence_snapshot"] = snap
+        meta["decision_by_claim_id"] = snap.get("decision_by_claim_id") or {}
+        run.metadata_json = meta
+        flag_modified(run, "metadata_json")
+        last_snap = snap
+    session.flush()
+    return last_snap
 
 
 def _later_live_supported(session: Session, event, claim) -> None:

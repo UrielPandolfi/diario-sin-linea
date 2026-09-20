@@ -183,14 +183,22 @@ def _fail_audit(**overrides) -> ArticleAuditResult:
     return ArticleAuditResult(**payload)
 
 
-def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str = "Un colectivo chocó en Pellegrini"):
+def _seed_draft(
+    session: Session,
+    *,
+    raw_text: str | None = None,
+    headline: str = "Un colectivo chocó en Pellegrini",
+    claim_text: str = "Un colectivo chocó en Pellegrini",
+    summary: str = "El choque ocurrió en Rosario.",
+    body: str = "Un colectivo chocó en Pellegrini.\n\nHay heridos según el draft.",
+):
     source = _source(session)
     item = _item(
         session,
         source.id,
         url="https://ejemplo.test/a",
         title="A",
-        body="Un colectivo chocó en Pellegrini",
+        body=claim_text,
         content_hash="h1",
         raw_text=raw_text,
     )
@@ -199,7 +207,7 @@ def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str 
     claim = _claim(
         session,
         event,
-        text="Un colectivo chocó en Pellegrini",
+        text=claim_text,
         claim_type="hecho",
         importance=ClaimImportance.HIGH,
         status=ClaimStatus.SUPPORTED,
@@ -209,7 +217,7 @@ def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str 
             claim_id=claim.id,
             source_item_id=item.id,
             evidence_type=EvidenceType.SUPPORTS,
-            excerpt="Un colectivo chocó en Pellegrini",
+            excerpt=claim_text,
             source_url=item.url,
         )
     )
@@ -217,8 +225,8 @@ def _seed_draft(session: Session, *, raw_text: str | None = None, headline: str 
         ArticleCreate(
             event_id=event.id,
             headline=headline,
-            summary="El choque ocurrió en Rosario.",
-            body="Un colectivo chocó en Pellegrini.\n\nHay heridos según el draft.",
+            summary=summary,
+            body=body,
         )
     )
     session.flush()
@@ -319,8 +327,8 @@ def test_fail_rewrite_respects_cap(db_session: Session) -> None:
         {
             "ArticleAuditResult": [_fail_audit(), _fail_audit(), _fail_audit()],
             "ArticleDraft": [
-                _draft(headline="Corrección uno"),
-                _draft(headline="Corrección dos"),
+                _draft(headline="Un colectivo chocó en Pellegrini esta tarde"),
+                _draft(headline="Un colectivo chocó en Pellegrini de madrugada"),
             ],
         }
     )
@@ -342,7 +350,7 @@ def test_fail_rewrite_respects_cap(db_session: Session) -> None:
     assert result["reason"] == "cap_exhausted"
     assert article.status == ArticleStatus.DRAFT
     assert article.current_version == 3
-    assert article.headline == "Corrección dos"
+    assert article.headline == "Un colectivo chocó en Pellegrini de madrugada"
     assert event.status == EventStatus.DETECTED
     assert count == 1
     assert [row.change_reason for row in versions] == ["initial", "audit_rewrite", "audit_rewrite"]
@@ -351,7 +359,7 @@ def test_fail_rewrite_respects_cap(db_session: Session) -> None:
     assert result["issues"]
     assert llm.calls[-1] == "ArticleAuditResult"
     audit_prompts = [prompt for call, prompt in zip(llm.calls, llm.user_prompts) if call == "ArticleAuditResult"]
-    assert "Corrección dos" in audit_prompts[-1]
+    assert "Un colectivo chocó en Pellegrini de madrugada" in audit_prompts[-1]
 
 
 def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_session: Session) -> None:
@@ -360,7 +368,7 @@ def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_s
     llm = FakeStructuredLLM(
         {
             "ArticleAuditResult": [_fail_audit(), RuntimeError("sol boom")],
-            "ArticleDraft": [_draft(headline="Draft corregido")],
+            "ArticleDraft": [_draft(headline="Un colectivo chocó en Pellegrini esta tarde")],
         }
     )
     result = _service(db_session, llm).audit(event.id, trigger="admin")
@@ -376,7 +384,7 @@ def test_rewrite_persists_when_next_sol_fails_then_retry_does_not_duplicate(db_s
     assert run.status == PipelineStatus.FAILED
     assert article.status == ArticleStatus.DRAFT
     assert article.current_version == 2
-    assert article.headline == "Draft corregido"
+    assert article.headline == "Un colectivo chocó en Pellegrini esta tarde"
     assert event.status == EventStatus.DETECTED
 
     retry_llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
@@ -787,13 +795,13 @@ def test_audit_flags_evaluative_voice_and_rewrites(db_session: Session) -> None:
     event, article = _seed_draft(
         db_session,
         headline="La escandalosa decisión de la jueza kirchnerista",
+        claim_text="La jueza suspendió la norma",
+        summary="Una polémica magistrada fulminó la ley.",
+        body=(
+            "La escandalosa decisión de la jueza kirchnerista suspendió la norma. "
+            "Según la jueza, «esta norma es inconstitucional»."
+        ),
     )
-    article.summary = "Una polémica magistrada fulminó la ley."
-    article.body = (
-        "La escandalosa decisión de la jueza kirchnerista suspendió la norma. "
-        "Según la jueza, «esta norma es inconstitucional»."
-    )
-    db_session.flush()
     blocking = ArticleAuditResult(
         passed=False,
         issues=[
@@ -823,14 +831,16 @@ def test_audit_flags_evaluative_voice_and_rewrites(db_session: Session) -> None:
 
 
 def test_audit_respects_attributed_quote_without_verification_objections(db_session: Session) -> None:
-    event, article = _seed_draft(db_session)
-    article.headline = "Una jueza suspendió la Ley 27.801"
-    article.summary = "La magistrada cuestionó la constitucionalidad de la norma."
-    article.body = (
-        "La jueza María Servini suspendió la Ley 27.801. "
-        "Según la jueza, «esta norma es inconstitucional porque anula garantías básicas»."
+    event, article = _seed_draft(
+        db_session,
+        headline="Una jueza suspendió la Ley 27.801",
+        claim_text="Una jueza suspendió la Ley 27.801",
+        summary="La magistrada cuestionó la constitucionalidad de la norma.",
+        body=(
+            "La jueza María Servini suspendió la Ley 27.801. "
+            "Según la jueza, «esta norma es inconstitucional porque anula garantías básicas»."
+        ),
     )
-    db_session.flush()
     llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
     result = _service(db_session, llm).audit(event.id, trigger="admin")
     prompt = load_prompt("article_audit.md").casefold()
@@ -838,26 +848,28 @@ def test_audit_respects_attributed_quote_without_verification_objections(db_sess
     assert "según la jueza" in user.casefold()
     assert "no las neutralices" in prompt
     assert result["passed"] is True
-    assert result["issues"] == []
+    assert not any(issue["severity"] in {"HIGH", "MEDIUM"} for issue in result["issues"])
     assert result["rewrite_count"] == 0
     assert "unsupported_claim" not in user.casefold()
     assert "verific" not in user.casefold() or "no verifiques" in llm.user_prompts[0].casefold()
 
 
 def test_audit_approves_neutral_text_without_verification_objections(db_session: Session) -> None:
-    event, article = _seed_draft(db_session)
-    article.headline = "Una jueza suspendió la Ley 27.801"
-    article.summary = "La resolución no está firme."
-    article.body = (
-        "La jueza María Servini hizo lugar a un amparo y suspendió la Ley 27.801. "
-        "La decisión no está firme."
+    event, article = _seed_draft(
+        db_session,
+        headline="Una jueza suspendió la Ley 27.801",
+        claim_text="Una jueza suspendió la Ley 27.801",
+        summary="La resolución no está firme.",
+        body=(
+            "La jueza María Servini hizo lugar a un amparo y suspendió la Ley 27.801. "
+            "La decisión no está firme."
+        ),
     )
-    db_session.flush()
     llm = FakeStructuredLLM({"ArticleAuditResult": _pass_audit()})
     result = _service(db_session, llm).audit(event.id, trigger="admin")
     user = llm.user_prompts[0].casefold()
     assert result["passed"] is True
-    assert result["issues"] == []
+    assert not any(issue["severity"] in {"HIGH", "MEDIUM"} for issue in result["issues"])
     assert "coverage" not in user
     assert "número" not in user
     assert "single_source" not in user
@@ -881,7 +893,7 @@ def test_unattributed_characterization_medium_triggers_rewrite_loop(db_session: 
     llm = FakeStructuredLLM(
         {
             "ArticleAuditResult": [blocking, _pass_audit()],
-            "ArticleDraft": [_draft(headline="Corrección con atribución")],
+            "ArticleDraft": [_draft(headline="Un colectivo chocó en Pellegrini esta tarde")],
         }
     )
     result = _service(db_session, llm).audit(event.id, trigger="admin")
@@ -890,7 +902,7 @@ def test_unattributed_characterization_medium_triggers_rewrite_loop(db_session: 
     assert result["rewrite_count"] == 1
     assert result["audit_count"] == 2
     assert llm.calls == ["ArticleAuditResult", "ArticleDraft", "ArticleAuditResult"]
-    assert article.headline == "Corrección con atribución"
+    assert article.headline == "Un colectivo chocó en Pellegrini esta tarde"
 
 
 def test_audit_schema_accepts_annotation_issue_types() -> None:
@@ -922,7 +934,7 @@ def test_audit_rewrite_remaps_claim_refs_to_uuid(db_session: Session) -> None:
     event, article = _seed_draft(db_session)
     claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
     rewrite = annotated_article_draft(
-        "Corrección sobre Pellegrini",
+        "Un colectivo chocó en Pellegrini",
         "El choque ocurrió en avenida Pellegrini.",
         paragraphs=[[("Un colectivo chocó en Pellegrini.", ["C1"])]],
     )
@@ -984,7 +996,7 @@ def test_rate_limit_after_rewrite_retries_call_without_new_version(db_session: S
     client = _openai_audit_client(
         [
             _fail_audit().model_dump_json(),
-            _draft(headline="Draft corregido").model_dump_json(),
+            _draft(headline="Un colectivo chocó en Pellegrini esta tarde").model_dump_json(),
             _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
             _pass_audit().model_dump_json(),
         ]
@@ -995,7 +1007,7 @@ def test_rate_limit_after_rewrite_retries_call_without_new_version(db_session: S
     assert result["passed"] is True
     assert result["rewrite_count"] == 1
     assert article.current_version == version_before + 1
-    assert article.headline == "Draft corregido"
+    assert article.headline == "Un colectivo chocó en Pellegrini esta tarde"
     assert delays == [20.0]
     published = PublishService(db_session).publish(event.id, trigger="test")
     assert published["published"] is True
@@ -1010,7 +1022,7 @@ def test_rate_limit_exhausted_after_rewrite_does_not_duplicate_or_publish(db_ses
     client = _openai_audit_client(
         [
             _fail_audit().model_dump_json(),
-            _draft(headline="Draft corregido").model_dump_json(),
+            _draft(headline="Un colectivo chocó en Pellegrini esta tarde").model_dump_json(),
             _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
             _openai_rate_limit(message="Rate limit reached for gpt-4o. Please try again in 19.908s.", retry_after="20"),
         ]
@@ -1029,7 +1041,7 @@ def test_rate_limit_exhausted_after_rewrite_does_not_duplicate_or_publish(db_ses
     assert result.get("passed") is not True
     assert result.get("reason") == "rate_limit_exceeded"
     assert article.current_version == 2
-    assert article.headline == "Draft corregido"
+    assert article.headline == "Un colectivo chocó en Pellegrini esta tarde"
     assert runs[-1].status == PipelineStatus.FAILED
     assert runs[-1].error_message
     assert PublishService(db_session).publish(event.id, trigger="test")["reason"] == "audit_not_passed"

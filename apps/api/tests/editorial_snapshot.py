@@ -7,12 +7,65 @@ from sqlalchemy.orm import Session
 
 from app.domain.enums import PipelineStatus
 from app.models import Claim, PipelineRun
+from app.schemas.editorial_evidence import Demotion, PropositionRole, ReasonCode, SupportKind
 from app.services.article_context import build_article_context
 from app.services.claim_coverage import claims_fingerprint
 from app.services.claim_service import CLAIM_STAGE
 from app.services.evidence_snapshot import capture_evidence_snapshot, persist_snapshot_fields
+from app.services.public_rendering import public_rendering_for
 from app.services.verification_outcome import VERIFICATION_STAGE
 from app.services.writing_service import WRITING_STAGE
+
+
+def _complete_decision_for_claim(claim) -> dict:
+    """Honest C4 flags for fixtures. Does not stamp authentic_primary on hechos."""
+    status = claim.status.value
+    utterance = (claim.claim_type or "") == "declaracion"
+    role = PropositionRole.UTTERANCE.value if utterance else PropositionRole.OTHER.value
+    if utterance:
+        basis = {
+            "known_independent_count": 1,
+            "kind": SupportKind.PRIMARY_SOURCE.value,
+            "statement_evidence_class": "authentic_primary",
+            "demotion": Demotion.NONE.value,
+        }
+        code = (
+            ReasonCode.PRIMARY_AUTHENTIC_UTTERANCE.value
+            if status == "SUPPORTED"
+            else ReasonCode.SINGLE_KNOWN_ORIGIN.value
+        )
+    elif status == "SUPPORTED":
+        basis = {
+            "known_independent_count": 2,
+            "kind": SupportKind.INDEPENDENT_REPORTING.value,
+            "demotion": Demotion.NONE.value,
+        }
+        code = ReasonCode.INDEPENDENT_CORROBORATION.value
+    else:
+        basis = {
+            "known_independent_count": 1,
+            "kind": SupportKind.SINGLE_REPORT.value,
+            "demotion": Demotion.INSUFFICIENT_INDEPENDENCE.value,
+        }
+        code = ReasonCode.SINGLE_KNOWN_ORIGIN.value
+    rendering = public_rendering_for(
+        status=status,
+        evaluation_state="complete",
+        support_basis=basis,
+        proposition_role=role,
+        reason_code=code,
+    )
+    return {
+        "claim_id": str(claim.id),
+        "status": status,
+        "unresolved": False,
+        "final_reason": "evaluated",
+        "proposition_role": role,
+        "evaluation_state": "complete",
+        "reason_code": code,
+        "support_basis": basis,
+        "public_rendering": rendering.model_dump() if rendering else None,
+    }
 
 
 def persist_version_snapshot(
@@ -75,19 +128,7 @@ def persist_version_snapshot(
         sol = []
         for claim in claims:
             cid = str(claim.id)
-            decisions[cid] = {
-                "claim_id": cid,
-                "status": claim.status.value,
-                "unresolved": False,
-                "final_reason": "evaluated",
-                "proposition_role": "other",
-                "evaluation_state": "complete",
-                "support_basis": {
-                    "known_independent_count": 1,
-                    "statement_evidence_class": "authentic_primary",
-                    "demotion": "none",
-                },
-            }
+            decisions[cid] = _complete_decision_for_claim(claim)
             selected.append({"claim_id": cid})
             sol.append(
                 {
@@ -188,14 +229,7 @@ def attach_verify_to_latest_claim_run(session: Session, event) -> PipelineRun:
                 "central_unverified": [],
             },
             "decision_by_claim_id": {
-                str(claim.id): {
-                    "claim_id": str(claim.id),
-                    "status": claim.status.value,
-                    "unresolved": False,
-                    "final_reason": "evaluated",
-                    "proposition_role": "other",
-                    "support_basis": {"known_independent_count": 2, "demotion": "none"},
-                }
+                str(claim.id): _complete_decision_for_claim(claim)
                 for claim in claims
             },
             "evaluated_claims": [

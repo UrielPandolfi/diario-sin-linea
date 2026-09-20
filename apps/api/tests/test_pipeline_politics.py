@@ -195,11 +195,10 @@ def test_ffaa_raise_pipeline_maps_claim_ref_and_exposes_uuid(db_session: Session
 
     draft = annotated_article_draft(
         "Según el anuncio, el Gobierno dispuso un aumento del 12,22% para las Fuerzas Armadas",
-        "El Ejecutivo anunció un incremento salarial del 12,22% para las Fuerzas Armadas.",
+        "Según el anuncio, el Ejecutivo dispuso un incremento salarial del 12,22% para las Fuerzas Armadas.",
         paragraphs=[
-            [("El anuncio se hizo durante una conferencia de prensa.", [])],
+            [("Según el anuncio, el Gobierno dispuso un aumento del 12,22% para las Fuerzas Armadas.", [claim_ref])],
             [("El aumento dispuesto es del 12,22%.", [claim_ref])],
-            [("Las tres fuentes coinciden en el porcentaje informado.", [])],
         ],
     )
     writing_llm = FakeStructuredLLM({"ArticleDraft": draft})
@@ -219,7 +218,7 @@ def test_ffaa_raise_pipeline_maps_claim_ref_and_exposes_uuid(db_session: Session
 
     audit_llm = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
     audited = AuditService(db_session, llm=audit_llm, writer=audit_llm).audit(event.id, trigger="writing")
-    assert audited["passed"] is True
+    assert audited["passed"] is True, audited.get("issues") or audited.get("reason")
     assert audited["rewrite_count"] == 0
     published = PublishService(db_session).publish(event.id, trigger="audit")
     assert published["published"] is True

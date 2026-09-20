@@ -2,18 +2,18 @@
 
 **Fecha:** 2026-09-20
 
-**Tarea:** Track C — PR C4 (`public_rendering`). C5 no empezó.
+**Tarea:** Track C — PR C5 (validador de superficie y coverage del titular). C6 no empezó.
 
 ## Qué quedó
 
-Cada decisión completa persiste un contrato `PublicRendering` (permisos de atribución, categórico, titular sin atribuir, lenguaje de corroboración independiente). Se deriva en código de status + evaluation_state + support_basis + rol + reason/scopes. Skipped/legacy: `None`. El GET de V1 lee el snapshot de V1; publicar V2 muestra el de V2. Writing no recibe el contrato. C3 quedó en `3523551`.
+Audit valida de forma determinista titular, bajada y lead contra `public_rendering` del snapshot de **esa** versión. Incumplimientos HIGH producen `structural_block` (sin rewrite, sin LLM extra, sin auto-publish). El núcleo del titular debe equivaler a un claim material. Matching conservador: EQUIVALENT valida; PARTIAL/mención = indeterminado LOW. Legacy/incompleto no se inventa ni cae a Verification live. C4 no se reescribió para hacer pasar tests.
 
 ## Validación
 
-- Dirigidos C4 (`test_public_rendering.py` + C1–C3 relacionados): **120 passed**
-- Suite API completa: **679 passed**, 1 warning Alembic preexistente
-- `docker compose exec api pytest -q` no se ejecutó: `docker` no está en PATH; se usó `python -m pytest -q` en `apps/api`
+- Dirigidos C5 (`test_surface_validation.py` + writing/audit/publish/Track B tocados): incluidos en la suite
+- Suite API completa: **697 passed**, 1 warning Alembic preexistente
+- `docker compose exec api pytest -q` no se ejecutó: se usó `python -m pytest -q` en `apps/api`
 
 ## Pendiente
 
-C5 (validador de superficie). No hay migración. No backfill de ArticleVersion.
+C6. No hay migración. No backfill de ArticleVersion.

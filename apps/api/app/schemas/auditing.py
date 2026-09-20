@@ -42,6 +42,12 @@ class AuditIssueReason(StrEnum):
     NORM_EFFECTIVE_AS_FACT = "norm_effective_as_fact"
     ACCUSATION_AS_FACT = "accusation_as_fact"
     INVALID_CLAIM_REF = "invalid_claim_ref"
+    SURFACE_ATTRIBUTION = "surface_attribution"
+    SURFACE_CATEGORICAL = "surface_categorical"
+    SURFACE_INDEPENDENT_LANGUAGE = "surface_independent_language"
+    HEADLINE_UNCOVERED = "headline_uncovered"
+    SURFACE_INDETERMINATE = "surface_indeterminate"
+    SURFACE_CONTRACT_INCOMPLETE = "surface_contract_incomplete"
 
 
 class AuditIssueAction(StrEnum):

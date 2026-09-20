@@ -97,7 +97,10 @@ def test_milei_writing_snapshot_and_audit_rewrite_use_the_same_evidence(db_sessi
     auditor = FakeStructuredLLM({"ArticleAuditResult": [ArticleAuditResult(passed=True, issues=[issue]), ArticleAuditResult(passed=True)]})
     rewriter = FakeStructuredLLM({"ArticleDraft": good})
     audited = AuditService(db_session, llm=auditor, writer=rewriter).audit(event.id, trigger="test")
-    assert audited["passed"] is True and audited["rewrite_count"] == 1 and audited["audit_count"] == 2
+    assert audited["passed"] is False
+    assert audited["reason"] == "structural_block"
+    assert audited["rewrite_count"] == 0
+    assert rewriter.calls == []
     audit_payload = json.loads(auditor.user_prompts[0].split("\n", 1)[1])
     audited_fact = next(c for c in audit_payload["evidence_posture"] if c["claim_id"] == factual.id)
     assert audited_fact["status"] == "SINGLE_SOURCE"
@@ -105,6 +108,6 @@ def test_milei_writing_snapshot_and_audit_rewrite_use_the_same_evidence(db_sessi
     assert "document_keys" not in audited_fact["support_basis"]
     assert "source_contexts" not in audit_payload
     article = db_session.scalars(select(Article).where(Article.event_id == event.id)).one()
-    assert article.body == CASE["attributed_with_limitation"]
-    assert len(list(db_session.scalars(select(ArticleVersion).where(ArticleVersion.article_id == article.id)))) == 2
+    assert CASE["fact"] in (article.body or "")
+    assert len(list(db_session.scalars(select(ArticleVersion).where(ArticleVersion.article_id == article.id)))) == 1
     assert len(list(db_session.scalars(select(PipelineRun).where(PipelineRun.event_id == event.id)))) >= 4

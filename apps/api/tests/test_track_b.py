@@ -135,7 +135,7 @@ def _publish_track_a(session: Session, event, claims_text: str, *, value: str = 
     )
     draft = annotated_article_draft(
         "Según la primera fuente, hubo seis heridos en el choque",
-        "Un choque en Rosario dejó heridos, según la primera fuente.",
+        "Según la primera fuente, un choque en Rosario dejó heridos.",
         [[(lead, ["C1"])]],
     )
     written = WritingService(session, llm=FakeStructuredLLM({"ArticleDraft": draft})).write(
@@ -311,7 +311,7 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
         {
             "ArticleDraft": annotated_article_draft(
                 "Según la segunda fuente, el tránsito sigue cortado tras el choque",
-                "Hay heridos y, según esa cobertura, el tránsito permanece cortado en Rosario.",
+                "Según esa cobertura, hay heridos y el tránsito permanece cortado en Rosario.",
                 [[("Según la segunda fuente, el tránsito permanece cortado tras el choque de Rosario.", ["C1"])]],
             )
         }
@@ -551,9 +551,9 @@ def test_track_b_contradiction_is_material_and_freezes_public_claims(db_session:
     writer = FakeStructuredLLM(
         {
             "ArticleDraft": annotated_article_draft(
-                "Hay cifras en conflicto sobre los heridos",
-                "Las fuentes no coinciden en el número de heridos.",
-                [[("Las fuentes hablan de seis u ocho heridos.", ["C1", "C2"])]],
+                    "Hay cifras en conflicto sobre los heridos",
+                    "Las fuentes se contradicen sobre el número de heridos.",
+                    [[("Las fuentes se contradicen: hablan de seis u ocho heridos.", ["C1", "C2"])]],
             )
         }
     )
@@ -618,11 +618,14 @@ def test_track_b_retry_continues_audit_without_v3(db_session: Session) -> None:
     )
     db_session.add(extra)
     db_session.flush()
+    from tests.editorial_snapshot import attach_verify_to_latest_claim_run
+
+    attach_verify_to_latest_claim_run(db_session, event)
     writer = FakeStructuredLLM(
         {
             "ArticleDraft": annotated_article_draft(
                 "Según la segunda fuente, el tránsito sigue cortado",
-                "Hay heridos y, según esa cobertura, el tránsito permanece cortado.",
+                "Según esa cobertura, hay heridos y el tránsito permanece cortado.",
                 [[("Según la segunda fuente, el tránsito permanece cortado.", ["C1"])]],
             )
         }
@@ -643,7 +646,7 @@ def test_track_b_retry_continues_audit_without_v3(db_session: Session) -> None:
     assert db_session.scalar(select(func.count()).select_from(ArticleVersion)) == 2
     pass_audit = FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})
     audited = AuditService(db_session, llm=pass_audit, writer=pass_audit).audit(event.id, trigger="writing")
-    assert audited["passed"] is True
+    assert audited["passed"] is True, audited.get("issues") or audited.get("reason")
     db_session.refresh(article)
     assert article.current_version == 2
     assert article.published_version == 1

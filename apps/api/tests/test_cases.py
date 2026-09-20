@@ -91,8 +91,8 @@ def _seed_published(session: Session, *, with_claims: bool = True):
     if with_claims:
         body, blocks = resolve_article_draft(
             annotated_article_draft(
-                "La medida empieza en septiembre",
-                "Resumen",
+                "La medida comienza en octubre",
+                "La medida comienza en octubre, según el documento.",
                 paragraphs=[
                     [("La medida comienza en octubre según el documento.", ["C1"])],
                     [("El anuncio se hizo en Rosario.", [])],
@@ -105,8 +105,8 @@ def _seed_published(session: Session, *, with_claims: bool = True):
     article, _created = ArticleService(session).create_draft(
         ArticleCreate(
             event_id=event.id,
-            headline="La medida empieza en septiembre",
-            summary="Resumen",
+            headline="La medida comienza en octubre",
+            summary="La medida comienza en octubre, según el documento.",
             body=body,
             body_blocks=blocks,
         )
@@ -346,12 +346,12 @@ def test_editorial_revise_claims_conflict_history_and_hold(db_session: Session, 
         db_session.refresh(article)
         ArticleService(db_session).update_content(
             article,
-            ArticleContentUpdate(
-                headline="Draft pipeline",
-                summary="Draft",
-                body="Borrador nuevo del pipeline.",
-                change_reason="material_change",
-            ),
+                ArticleContentUpdate(
+                    headline="La medida comienza en octubre",
+                    summary="La medida comienza en octubre, según el documento.",
+                    body="La medida comienza en octubre según el documento.\n\nBorrador nuevo del pipeline.",
+                    change_reason="material_change",
+                ),
         )
         article.status = ArticleStatus.DRAFT
         db_session.commit()

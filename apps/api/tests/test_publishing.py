@@ -310,9 +310,9 @@ def test_auto_publish_true_first_audit_waits_for_publish_task(db_session: Sessio
 
 
 def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> None:
-    event, article, claim = _seed_draft(db_session, headline="Titular publicado")
+    event, article, claim = _seed_draft(db_session, headline="Un colectivo chocó en Pellegrini")
     llm = FakeStructuredLLM(
-        {"ArticleDraft": _draft("Titular publicado", "Resumen", "Cuerpo live")}
+        {"ArticleDraft": _draft("Un colectivo chocó en Pellegrini", "El choque ocurrió en Rosario.", "Un colectivo chocó en Pellegrini")}
     )
     WritingService(db_session, llm=llm).write(event.id, trigger="test")
     _audit_pass(db_session, event)
