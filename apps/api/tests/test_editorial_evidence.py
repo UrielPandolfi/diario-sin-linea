@@ -145,6 +145,11 @@ def test_split_bregman_compound_when_text_requires_it() -> None:
     assert "dijo" in predicates
     assert "vigencia" in predicates or "alcance" in predicates
     assert len(parts) >= 2
+    said = next(row for row in parts if row.predicate == "dijo")
+    vigencia = next((row for row in parts if row.predicate == "vigencia"), None)
+    assert all(ev.evidence_type == EvidenceType.MENTIONS for ev in said.evidence)
+    if vigencia is not None:
+        assert any(ev.evidence_type == EvidenceType.SUPPORTS for ev in vigencia.evidence)
 
 
 def test_alberto_extractor_omission_recovers_denuncia_from_body(db_session: Session) -> None:
@@ -814,6 +819,8 @@ def test_split_judge_ruling_from_utterance() -> None:
     assert "suspend" in ruling.canonical_text.lower()
     assert "inconstitucional" in said.canonical_text.lower()
     assert "dijo" not in ruling.canonical_text.lower()
+    assert any(ev.evidence_type == EvidenceType.SUPPORTS for ev in ruling.evidence)
+    assert all(ev.evidence_type != EvidenceType.SUPPORTS for ev in said.evidence)
 
 
 def test_judge_utterance_is_not_covered_by_ruling() -> None:

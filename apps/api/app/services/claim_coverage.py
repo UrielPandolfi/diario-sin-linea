@@ -108,6 +108,41 @@ _FRAME_SKIP = (
 )
 _MENORES = "menor"
 _DESDE = "desde"
+_REACTION_NOUN = (
+    r"(?:pol[eé]mica|revuelo|reacci[oó]n(?:es)?|tormenta|esc[aá]ndalo|malestar|"
+    r"indignaci[oó]n|cr[ií]ticas?)"
+)
+_REACTION_VERB = (
+    r"(?:gener[oó]|provoc[oó]|desat[oó]|caus[oó]|desencaden[oó]|despert[oó]|"
+    r"encendi[oó]|suscit[oó]|generaron|provocaron|desataron)"
+)
+_COORDINATED_CONSEQUENCE_RE = re.compile(
+    rf"\s+y\s+(?P<tail>(?:no\s+)?(?:habr[ií]a\s+)?{_REACTION_VERB}\s+(?:una?\s+)?{_REACTION_NOUN}\b.*)$",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNSAFE_CONSEQUENCE_RE = re.compile(
+    rf"(?:\blo que\s+{_REACTION_VERB}\s+(?:una?\s+)?{_REACTION_NOUN}"
+    rf"|\b(?:mensaje|tuit|tweet|post|video|comunicado|audio|historia|hilo)\b"
+    rf"[^.]{{0,80}}?\bque\s+{_REACTION_VERB}\s+(?:una?\s+)?{_REACTION_NOUN}"
+    rf"|,\s+generando\s+(?:una?\s+)?{_REACTION_NOUN})",
+    re.IGNORECASE,
+)
+_PUBLICATION_UTTERANCE_RE = re.compile(
+    r"\b(publico|publicado|tuiteo|tuiteado|posteo|posteado|difundio|difundido|subio|escribio)\s+"
+    r"(un |una |el |la |su |este |esta |\d+\s+)?"
+    r"(mensaje|tuit|tweet|post|video|comunicado|audio|historia|hilo)s?\b"
+    r"|\b(publico|tuiteo|posteo)\s+que\b"
+)
+_PUBLICATION_ACT_RE = re.compile(
+    r"\b(publico|publicado|tuiteo|tuiteado|posteo|posteado|difundio|difundido)\b"
+)
+_QUALIFYING_SPEECH_RE = re.compile(
+    r"\b(califico|considero|llamo|tildo|describio|trato)\b.{0,48}?\b(de|como)\b"
+)
+_ATTRIBUTE_AND_ACT_RE = re.compile(
+    r"\b(es|fue)\s+(un |una )?(polemic[oa]|controvertido|controvertida|escandalos[oa])\b"
+    r".{0,48}?\s+y\s+(publico|tuiteo|dijo|afirmo|declaro)\b"
+)
 
 
 def claims_fingerprint(claims: list[Claim]) -> str:
@@ -174,9 +209,74 @@ def _has_any(text: str, markers: tuple[str, ...]) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _text_outside_quotes(text: str) -> str:
+    return _QUOTE_RE.sub(" ", text or "")
+
+
+def _has_publication_utterance(folded: str) -> bool:
+    return bool(_PUBLICATION_UTTERANCE_RE.search(folded or ""))
+
+
+def _has_publication_act(folded: str) -> bool:
+    return bool(_PUBLICATION_ACT_RE.search(folded or "")) or _has_publication_utterance(folded)
+
+
+def _has_speech_or_publication_act(text: str, claim_type: str | None = None) -> bool:
+    folded = normalize_name(text or "")
+    return (
+        canonicalize_claim_type(claim_type) == "declaracion"
+        or _has_any(folded, _UTTERANCE_MARKERS)
+        or bool(_QUOTE_RE.search(text or ""))
+        or _has_publication_act(folded)
+    )
+
+
+def _is_qualifying_speech(text: str) -> bool:
+    outside = _text_outside_quotes(text)
+    folded = normalize_name(outside)
+    if _COORDINATED_CONSEQUENCE_RE.search(outside) or _UNSAFE_CONSEQUENCE_RE.search(outside):
+        return False
+    return bool(_QUALIFYING_SPEECH_RE.search(folded))
+
+
+def _looks_reaction_proposition(text: str) -> bool:
+    folded = normalize_name(_text_outside_quotes(text))
+    return bool(re.search(rf"\b{_REACTION_VERB}\s+(?:una?\s+)?{_REACTION_NOUN}\b", folded))
+
+
+def _span_inside_quotes(text: str, start: int, end: int) -> bool:
+    for match in _QUOTE_RE.finditer(text or ""):
+        if match.start() <= start and end <= match.end():
+            return True
+    return False
+
+
+def _narrator_act_and_consequence(text: str, claim_type: str | None = None) -> bool:
+    if _is_qualifying_speech(text):
+        return False
+    outside = _text_outside_quotes(text)
+    if not _has_speech_or_publication_act(outside, claim_type) and not _has_speech_or_publication_act(text, claim_type):
+        return False
+    if _COORDINATED_CONSEQUENCE_RE.search(outside) or _UNSAFE_CONSEQUENCE_RE.search(outside):
+        return True
+    return False
+
+
+def _narrator_attribute_and_act(text: str, claim_type: str | None = None) -> bool:
+    outside = _text_outside_quotes(text)
+    folded = normalize_name(outside)
+    if not _ATTRIBUTE_AND_ACT_RE.search(folded):
+        return False
+    return _has_speech_or_publication_act(outside, claim_type) or _has_speech_or_publication_act(text, claim_type)
+
+
 def _is_frame_only(text: str) -> bool:
     folded = normalize_name(text)
-    if _has_any(folded, _EXISTENCE_MARKERS) or _has_any(folded, _UTTERANCE_MARKERS):
+    if (
+        _has_any(folded, _EXISTENCE_MARKERS)
+        or _has_any(folded, _UTTERANCE_MARKERS)
+        or _has_publication_utterance(folded)
+    ):
         return False
     return _has_any(folded, _FRAME_SKIP)
 
@@ -194,7 +294,12 @@ def proposition_role_for(claim: Claim | ExtractedClaim | str, claim_type: str | 
         return PropositionRole.OTHER
     if _has_any(folded, _ACCUSATION_TRUTH_MARKERS) and not _has_any(folded, _EXISTENCE_MARKERS):
         return PropositionRole.ACCUSATION_TRUTH
-    if kind == "declaracion" or _has_any(folded, _UTTERANCE_MARKERS) or _QUOTE_RE.search(text or ""):
+    if (
+        kind == "declaracion"
+        or _has_any(folded, _UTTERANCE_MARKERS)
+        or _QUOTE_RE.search(text or "")
+        or _has_publication_utterance(folded)
+    ):
         if _has_any(folded, _EFFECTIVE_MARKERS) or _has_any(folded, _SCOPE_MARKERS):
             return PropositionRole.OTHER
         return PropositionRole.UTTERANCE
@@ -216,6 +321,7 @@ def is_mixed_proposition(text: str, claim_type: str | None = None) -> bool:
         canonicalize_claim_type(claim_type) == "declaracion"
         or _has_any(folded, _UTTERANCE_MARKERS)
         or quote
+        or _has_publication_utterance(folded)
     )
     extra = _has_any(folded, _EFFECTIVE_MARKERS) or _has_any(folded, _SCOPE_MARKERS)
     existence = _has_any(folded, _EXISTENCE_MARKERS)
@@ -228,7 +334,113 @@ def is_mixed_proposition(text: str, claim_type: str | None = None) -> bool:
         return True
     if existence and _has_any(folded, _ACCUSATION_TRUTH_MARKERS):
         return True
+    if _narrator_act_and_consequence(text, claim_type):
+        return True
+    if _narrator_attribute_and_act(text, claim_type):
+        return True
     return False
+
+
+def _excerpt_aligns(canonical: str, excerpt: str) -> bool:
+    excerpt = (excerpt or "").strip()
+    if not excerpt:
+        return False
+    if _looks_reaction_proposition(canonical) or (
+        _has_narrator_consequence(canonical) and not _has_speech_or_publication_act(canonical)
+    ):
+        return _looks_reaction_proposition(excerpt) or _has_narrator_consequence(excerpt)
+    want = _act_bucket(canonical)
+    folded_ex = normalize_name(excerpt)
+    if want == "utterance":
+        has_speech = (
+            _has_any(folded_ex, _UTTERANCE_MARKERS)
+            or bool(_QUOTE_RE.search(excerpt))
+            or _has_publication_utterance(folded_ex)
+        )
+        if not has_speech:
+            return False
+    elif want != "other":
+        markers = {
+            "effective_date": _EFFECTIVE_MARKERS,
+            "normative_scope": _SCOPE_MARKERS,
+            "judicial_decision": _JUDICIAL_MARKERS,
+            "existence": _EXISTENCE_MARKERS,
+            "accusation_truth": _ACCUSATION_TRUTH_MARKERS,
+        }.get(want)
+        if markers and not _has_any(folded_ex, markers):
+            return False
+    match = propositions_equivalent(canonical, excerpt)
+    if match != CoverageMatch.NONE:
+        return True
+    tokens = token_set(canonical)
+    excerpt_tokens = token_set(excerpt)
+    if not tokens or not excerpt_tokens:
+        return False
+    overlap = len(tokens & excerpt_tokens) / max(1, min(len(tokens), len(excerpt_tokens)))
+    return overlap >= 0.25
+
+
+def _has_narrator_consequence(text: str) -> bool:
+    outside = _text_outside_quotes(text)
+    return bool(
+        _COORDINATED_CONSEQUENCE_RE.search(outside)
+        or _UNSAFE_CONSEQUENCE_RE.search(outside)
+        or _looks_reaction_proposition(outside)
+    )
+
+
+def _evidence_for_component(canonical: str, evidence: list[ExtractedEvidence]) -> list[ExtractedEvidence]:
+    kept: list[ExtractedEvidence] = []
+    for row in evidence:
+        if row.evidence_type != EvidenceType.SUPPORTS:
+            kept.append(row.model_copy())
+            continue
+        if _excerpt_aligns(canonical, row.excerpt or ""):
+            kept.append(row.model_copy())
+        else:
+            kept.append(row.model_copy(update={"evidence_type": EvidenceType.MENTIONS}))
+    return kept
+
+
+def _attach_subject(subject: str | None, text: str) -> str:
+    who = (subject or "").strip()
+    tail = (text or "").strip()
+    if not who or not tail:
+        return tail
+    folded_tail = normalize_name(tail)
+    folded_who = normalize_name(who)
+    if folded_tail.startswith(folded_who):
+        return tail
+    return f"{who} {tail}".strip()
+
+
+def _safe_coordinated_consequence_split(text: str) -> tuple[str, str] | None:
+    match = _COORDINATED_CONSEQUENCE_RE.search(text or "")
+    if match is None:
+        return None
+    if _span_inside_quotes(text, match.start(), match.end()):
+        return None
+    left = text[: match.start()].strip(" ,;")
+    tail = (match.group("tail") or "").strip()
+    if len(left) < 12 or not tail:
+        return None
+    if not _has_speech_or_publication_act(left):
+        return None
+    return left, tail
+
+
+def _act_claim_type(text: str, raw_type: str | None) -> str:
+    folded = normalize_name(text)
+    if (
+        _has_publication_utterance(folded)
+        or _has_any(folded, _UTTERANCE_MARKERS)
+        or canonicalize_claim_type(raw_type) == "declaracion"
+        or _QUOTE_RE.search(text or "")
+    ):
+        return "declaracion"
+    if any(token in folded for token in ("decreto", " resolucion", "resolución", "ley ")):
+        return "documento"
+    return raw_type or "hecho"
 
 
 def split_compound_extracted(raw: ExtractedClaim) -> list[ExtractedClaim]:
@@ -238,21 +450,60 @@ def split_compound_extracted(raw: ExtractedClaim) -> list[ExtractedClaim]:
     folded = normalize_name(text)
     parts: list[ExtractedClaim] = []
 
-    def _copy(*, canonical: str, claim_type: str, subject: str | None, predicate: str, object_text: str) -> None:
-        parts.append(
-            ExtractedClaim(
-                canonical_text=canonical,
-                claim_type=claim_type,
-                importance=raw.importance,
-                subject=subject or raw.subject,
-                predicate=predicate,
-                object_text=object_text,
-                normalized_value=raw.normalized_value,
-                unit=raw.unit,
-                occurred_at=raw.occurred_at,
-                evidence=list(raw.evidence),
-            )
+    def _copy(
+        *,
+        canonical: str,
+        claim_type: str,
+        subject: str | None,
+        predicate: str,
+        object_text: str,
+        inherit_metrics: bool = True,
+    ) -> ExtractedClaim:
+        part = ExtractedClaim(
+            canonical_text=canonical,
+            claim_type=claim_type,
+            importance=raw.importance,
+            subject=subject or raw.subject,
+            predicate=predicate,
+            object_text=object_text,
+            normalized_value=raw.normalized_value if inherit_metrics else None,
+            unit=raw.unit if inherit_metrics else None,
+            occurred_at=raw.occurred_at if inherit_metrics else None,
+            evidence=_evidence_for_component(canonical, list(raw.evidence)),
         )
+        parts.append(part)
+        return part
+
+    coordinated = _safe_coordinated_consequence_split(text)
+    if coordinated is not None:
+        left_text, right_text = coordinated
+        _copy(
+            canonical=left_text,
+            claim_type=_act_claim_type(left_text, raw.claim_type),
+            subject=raw.subject,
+            predicate=raw.predicate or ("dijo" if _has_any(normalize_name(left_text), _UTTERANCE_MARKERS) else "publico"),
+            object_text=left_text,
+            inherit_metrics=True,
+        )
+        right_canonical = _attach_subject(raw.subject, right_text)
+        _copy(
+            canonical=right_canonical,
+            claim_type="hecho",
+            subject=raw.subject,
+            predicate="reaccion",
+            object_text=right_text,
+            inherit_metrics=False,
+        )
+        expanded: list[ExtractedClaim] = []
+        for part in parts:
+            if (
+                is_mixed_proposition(part.canonical_text, part.claim_type)
+                and normalize_name(part.canonical_text) != normalize_name(text)
+            ):
+                expanded.extend(split_compound_extracted(part))
+            else:
+                expanded.append(part)
+        return expanded or [raw]
 
     if _has_any(folded, _UTTERANCE_MARKERS) or canonicalize_claim_type(raw.claim_type) == "declaracion" or _QUOTE_RE.search(text):
         said = text
@@ -345,7 +596,11 @@ def _act_bucket(text: str) -> str:
         return "normative_scope"
     if _has_any(folded, _JUDICIAL_MARKERS):
         return "judicial_decision"
-    if _has_any(folded, _UTTERANCE_MARKERS) or _QUOTE_RE.search(text or ""):
+    if (
+        _has_any(folded, _UTTERANCE_MARKERS)
+        or _QUOTE_RE.search(text or "")
+        or _has_publication_utterance(folded)
+    ):
         return "utterance"
     if _has_any(folded, _ACCUSATION_TRUTH_MARKERS):
         return "accusation_truth"

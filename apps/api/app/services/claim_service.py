@@ -835,7 +835,8 @@ class ClaimService:
                 dropped_raw.append((raw, DropReason.EMPTY_CANONICAL.value))
                 continue
             valid_evidence = self._valid_evidence(raw.evidence, sources, require_body=require_body)
-            if not valid_evidence:
+            has_supports = any(row.evidence_type == EvidenceType.SUPPORTS for row in valid_evidence.values())
+            if not valid_evidence or not has_supports:
                 repaired: list[ExtractedEvidence] = []
                 for row in raw.evidence:
                     if row.source_ref < 1 or row.source_ref > len(sources):
@@ -844,9 +845,15 @@ class ClaimService:
                     salvaged = salvage_excerpt(canonical, item.clean_text)
                     if not salvaged:
                         continue
-                    repaired.append(row.model_copy(update={"excerpt": salvaged}))
+                    repaired.append(
+                        row.model_copy(update={"excerpt": salvaged, "evidence_type": EvidenceType.SUPPORTS})
+                    )
                 if repaired:
-                    valid_evidence = self._valid_evidence(repaired, sources, require_body=require_body)
+                    salvaged_valid = self._valid_evidence(repaired, sources, require_body=require_body)
+                    for item_id, pending in salvaged_valid.items():
+                        current = valid_evidence.get(item_id)
+                        if current is None or _EVIDENCE_RANK[pending.evidence_type] > _EVIDENCE_RANK[current.evidence_type]:
+                            valid_evidence[item_id] = pending
             if valid_evidence and not _sources_support_figure(raw, sources, valid_evidence):
                 valid_evidence = {}
             if not valid_evidence:

@@ -428,9 +428,12 @@ def assess_origins(claim: Claim, *, packet_size: int | None = None) -> OriginAss
     result.reporting_independent = len({item for item in known_ids if item.startswith("reporting:")})
     result.information_origins = sorted(item for item in known_ids if not item.startswith("reprint:"))
     role = proposition_role_for(claim)
+    mixed = is_mixed_proposition(claim.canonical_text or "", getattr(claim, "claim_type", None))
     if _canonicalize_claim_type(getattr(claim, "claim_type", None)) == "declaracion" or role == PropositionRole.UTTERANCE:
         rows = supports or list(getattr(claim, "evidence", None) or [])
         classes = [classify_statement_row(claim, row) for row in rows]
+        if mixed:
+            classes = [item for item in classes if item != StatementEvidenceClass.AUTHENTIC_PRIMARY]
         if StatementEvidenceClass.AUTHENTIC_PRIMARY in classes:
             result.statement_evidence_class = StatementEvidenceClass.AUTHENTIC_PRIMARY
         elif StatementEvidenceClass.ATTRIBUTED_REPORT in classes:
@@ -496,6 +499,8 @@ def classify_statement_row(
         return StatementEvidenceClass.ATTRIBUTED_REPORT
     if attributed and not constitutive_host:
         return StatementEvidenceClass.ATTRIBUTED_REPORT
+    if is_mixed_proposition(getattr(claim, "canonical_text", None) or "", getattr(claim, "claim_type", None)):
+        return StatementEvidenceClass.NOT_RELEVANT
     return StatementEvidenceClass.AUTHENTIC_PRIMARY
 
 
