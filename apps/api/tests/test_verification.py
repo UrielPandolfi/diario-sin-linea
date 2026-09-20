@@ -432,6 +432,7 @@ def test_conflicting_unresolved_keeps_status_and_value(db_session: Session) -> N
     source = _source(db_session)
     item = _item(db_session, source.id, url="https://ejemplo.test/base", title="Base", body="Muertos", content_hash="h1")
     event = _event(db_session, item)
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
     two = _claim(
         db_session,
         event,
@@ -439,8 +440,12 @@ def test_conflicting_unresolved_keeps_status_and_value(db_session: Session) -> N
         claim_type="cifra",
         importance=ClaimImportance.HIGH,
         status=ClaimStatus.CONFLICTING,
+        subject="accidente",
+        predicate="cantidad_muertos",
         normalized_value="2",
         object_text="2 muertos",
+        unit="personas",
+        occurred_at=when,
     )
     three = _claim(
         db_session,
@@ -449,9 +454,15 @@ def test_conflicting_unresolved_keeps_status_and_value(db_session: Session) -> N
         claim_type="cifra",
         importance=ClaimImportance.HIGH,
         status=ClaimStatus.CONFLICTING,
+        subject="accidente",
+        predicate="cantidad_muertos",
         normalized_value="3",
         object_text="3 muertos",
+        unit="personas",
+        occurred_at=when,
     )
+    _evidence(db_session, two, item, excerpt="2 muertos")
+    _evidence(db_session, three, item, excerpt="3 muertos")
     llm = FakeStructuredLLM(
         {
             "VerificationResult": [

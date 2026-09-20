@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. C6 (admisión semántica del assessment y suficiencia del respaldo) en código y tests. C7 no empezó.
+Revisión: 2026-09-20. C7 (CONFLICTING solo entre proposiciones comparables) en código y tests. C8 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -83,7 +83,7 @@ Limitaciones de datos no conservados: snapshot ausente → ids del body, status 
 
 En código: `ClaimDecision` persiste `reason_code`, `verified_scope` y `unsupported_scope` (opcionales). `reason_code_for` mapea Demotion, status post-gate de contradicción, `SupportKind` y conteos de procedencia; `final_reason` es `render_reason(code, context)`. Un `claim_fragment` de QUALIFIES que es subconjunto propio del texto evaluado puede fijar `verified_scope`; no hay split del resto (`unsupported_scope=None`, alcance no determinado). QUALIFIES sin fragmento: ambos `None`. El GET solo serializa C3 si `evaluation_state=complete` (skipped/legacy/unknown no presuponen evaluación). Writing compacta sin esos campos. Independencia, `clamp_supported_status`, `authentic_primary` y umbrales de contradicción no cambiaron. Sin migración ni LLM extra.
 
-Limitación: no hay componente estructurado B, así que C3 no representa `unsupported_scope=B`. Eso queda para C8. `CONFLICTING`/`DISPROVEN` describen el status ya pasado por `valid_contradiction`; C3 no implementa C7. Primaria auténtica de un utterance no se mapea a `INDEPENDENT_CORROBORATION`.
+Limitación: no hay componente estructurado B, así que C3 no representa `unsupported_scope=B`. Eso queda para C8. `CONFLICTING`/`DISPROVEN` describen el status ya pasado por los gates (C7 comparabilidad / `valid_contradiction`); C3 no reabre esa comparación. Primaria auténtica de un utterance no se mapea a `INDEPENDENT_CORROBORATION`.
 
 ## Track C4 — public_rendering — 2026-09-20
 
@@ -101,7 +101,13 @@ Limitación del matching: overlap ≥0.6 con bucket `other` puede marcar EQUIVAL
 
 En código: `assessment_has_support` deja de mirar el `SUPPORTS` crudo del modelo. Cuenta solo juicios cuya admisión en `comparison_checks` quedó `SUPPORTS` (el mismo `_admit_relation` de utterance/trayectoria/conteo regulatorio/contradicción). Ese flag alimenta el status barato (`apply_primary_requirement`) y `needs_sol_after_assessment`. Un `SUPPORTS` rechazado no borra otro admitido. La suficiencia (independencia, primaria, `authentic_primary`) no cambió. `assessments[]` sigue siendo el dump del modelo (incluye `DOES_NOT_ESTABLISH`); `_apply_judgements` registra DNE en `comparison_checks` con `admitted=None` y no crea `ClaimEvidence`/`EventSource`. Un assessment DNE válido escribe `evaluation_state=complete`; `assessment=None` (sin paquete o error) no se guarda como DNE y escala a Sol. QUALIFIES admitido no es soporte total. Sin prompts nuevos, sin rondas extra, sin migración. Un `UNCERTAIN` cuyo único SUPPORTS crudo es rechazado ahora toma el escalado a Sol que ya existía (antes se evitaba). Tests: `test_verification_plan.py`, `test_proposition_comparison.py`, `test_verification.py`. C7 no empezó.
 
-Limitación: si el modelo etiqueta mal la relación semántica, C6 no la corrige con heurística narrativa; eso quedaría para un PR de prompt. Comparabilidad C7 y split C8 no se tocaron.
+Limitación: si el modelo etiqueta mal la relación semántica, C6 no la corrige con heurística narrativa; eso quedaría para un PR de prompt. Split C8 no se tocó.
+
+## Track C7 — CONFLICTING solo entre proposiciones comparables — 2026-09-20
+
+En código: `_reconcile_competing_values` y `_reconcile_verified_competitors` exigen `conflict_comparability` (helper en `evidence_comparison.py`) antes de marcar `CONFLICTING`. Dimensiones: sujeto, predicado, `occurred_at` y/o período explícito en el texto, unidad/base si es cuantitativo (mensual vs interanual, % vs puntos), ámbito en `object_text` cuando ambos lo tienen. `comparison_key` compartida no basta. Publicación ≠ período del dato: el reloj de competidores ya no usa `published_at` si falta `occurred_at`. Pares, no el grupo entero. Utterance vs contenido y actos de hablantes distintos no se contradicen solos; un `CONTRADICTS` comparable sobre el acto de habla sí se conserva. `SUPPORTS`+`CONTRADICTS` o el status propuesto del resolver/Sol no fijan conflicto si el excerpt o el par no son comparables. Un `CONTRADICTS` no admitido (C6) no reaparece. Al descartar el par no se asigna `SUPPORTED`. `DISPROVEN`/`valid_contradiction` no se relajaron. Decisiones `complete` se resincronizan si Verification cambia el status; `skipped` no pasa a `complete`. Sin prompts ni LLM extra. Tests: `test_claims.py`, `test_proposition_comparison.py`, `test_verification.py`. C8 no empezó.
+
+Limitación: no hay campo estructurado de período/ámbito/base aparte de `occurred_at`, `unit`, SPO y el texto; si el extractor no los llena, el par queda inconcluso. No se infiere tiempo ni se convierten unidades. Atomización C8 no se tocó.
 
 ## Independencia periodística — 2026-09-13
 

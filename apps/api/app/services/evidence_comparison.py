@@ -10,7 +10,30 @@ from app.services.claim_meaning import attributed_statement, temporal_comparison
 COMPARISON_POLICY_VERSION = "proposition-comparison-1"
 _APPROX = re.compile(r"cerca|cercano|alrededor|aproximad|aprox|\bunas?\b|\bunos?\b|~", re.I)
 _NEGATION = re.compile(r"\bno\b|\bnunca\b|\bdesminti[oó]\b|\bfals[oa]\b", re.I)
-_MONTH = re.compile(r"enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre|\d{4}-\d{2}", re.I)
+_MONTH = re.compile(
+    r"enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre|\d{4}-\d{2}",
+    re.I,
+)
+_YEAR = re.compile(r"\b((?:19|20)\d{2})\b")
+_DAY_MONTH = re.compile(
+    r"\b(\d{1,2})\s+(?:de\s+)?(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\b",
+    re.I,
+)
+_NUMERIC = re.compile(r"\d+(?:[.,]\d+)?")
+_BASIS_PATTERNS = (
+    (re.compile(r"puntos?\s+porcentuales|\bpp\b", re.I), "pp"),
+    (re.compile(r"inter\s*anual|\ba/a\b", re.I), "interanual"),
+    (re.compile(r"mensual|\bm/m\b", re.I), "mensual"),
+    (re.compile(r"acumulad", re.I), "acumulado"),
+)
+_SCOPE_STOP = {
+    "que", "del", "una", "unos", "unas", "para", "con", "por", "los", "las",
+    "el", "la", "de", "en", "un", "al", "es", "fue", "ser", "como", "este",
+    "esta", "estos", "estas", "hay", "hubo", "son", "era", "registraron",
+    "confirmaron", "se", "heridos", "muertos", "personas", "cantidad",
+    "cero", "uno", "dos", "tres", "cuatro", "cinco", "seis", "siete", "ocho",
+    "nueve", "diez", "once", "doce",
+}
 
 
 def _decimal(value: str):
@@ -144,3 +167,192 @@ def valid_count_support(claim, comparison, *, body: str, body_source: str) -> tu
     if _count_decimal(a.value) != _count_decimal(b.value):
         return False, "count_value_not_established"
     return True, "comparable_count_support"
+
+
+def _field(claim, name: str) -> str:
+    return (getattr(claim, name, None) or "").strip()
+
+
+def _is_utterance(claim) -> bool:
+    from app.schemas.editorial_evidence import PropositionRole
+    from app.services.claim_coverage import proposition_role_for
+
+    if _field(claim, "claim_type").lower() == "declaracion" or attributed_statement(_field(claim, "canonical_text")):
+        return True
+    try:
+        return proposition_role_for(claim) == PropositionRole.UTTERANCE
+    except Exception:
+        return False
+
+
+def is_quantitative_proposition(claim) -> bool:
+    if _field(claim, "unit"):
+        return True
+    if _field(claim, "claim_type").lower() in {"cifra", "estadistica", "presupuesto"}:
+        return True
+    return bool(_NUMERIC.search(_field(claim, "normalized_value")))
+
+
+def _period_tokens(text: str, occurred_at=None) -> set[str]:
+    tokens: set[str] = set()
+    if occurred_at is not None:
+        moment = occurred_at.date().isoformat() if hasattr(occurred_at, "date") else str(occurred_at)
+        if moment:
+            tokens.add(f"at:{moment}")
+    folded = normalize_name(text or "")
+    tokens.update(f"y:{year}" for year in _YEAR.findall(folded))
+    tokens.update(f"d:{day} {month}" for day, month in _DAY_MONTH.findall(folded))
+    months = {match.group(0).casefold() for match in _MONTH.finditer(folded) if match.group(0) and not match.group(0)[:4].isdigit()}
+    tokens.update(f"m:{month}" for month in months)
+    return tokens
+
+
+def _claim_period_tokens(claim) -> set[str]:
+    return _period_tokens(
+        " ".join(filter(None, [_field(claim, "canonical_text"), _field(claim, "object_text"), _field(claim, "unit")])),
+        getattr(claim, "occurred_at", None),
+    )
+
+
+def _measurement_basis(claim) -> str:
+    blob = " ".join(filter(None, [_field(claim, "unit"), _field(claim, "canonical_text"), _field(claim, "object_text")]))
+    for pattern, label in _BASIS_PATTERNS:
+        if pattern.search(blob):
+            return label
+    unit = _field(claim, "unit")
+    return _key(unit) if unit else ""
+
+
+def _scope_tokens(claim) -> set[str] | None:
+    raw = _field(claim, "object_text")
+    if not raw:
+        return None
+    folded = _NUMERIC.sub(" ", normalize_name(raw))
+    unit = _field(claim, "unit")
+    if unit:
+        folded = folded.replace(normalize_name(unit), " ")
+    tokens = token_set(folded) - _SCOPE_STOP
+    return tokens or None
+
+
+def _compare_optional(left: str, right: str, *, missing: str, different: str) -> str | None:
+    if left and right:
+        if _key(left) != _key(right):
+            return different
+        return None
+    if left or right:
+        return missing
+    return missing
+
+
+def contradiction_excerpt_incomparable(claim, excerpt: str) -> tuple[bool, str]:
+    """True when CONTRADICTS is known not to address this claim's proposition."""
+    excerpt = excerpt or ""
+    if _is_utterance(claim):
+        if not attributed_statement(excerpt):
+            return True, "statistics_do_not_refute_attribution"
+        subject = _field(claim, "subject")
+        if subject and _key(subject) not in normalize_name(excerpt):
+            return True, "speaker_not_established"
+        if not attributed_statement(excerpt):
+            return True, "statement_not_addressed"
+        return False, "statement_addressed"
+    claim_period = _period_tokens(
+        " ".join(filter(None, [_field(claim, "canonical_text"), _field(claim, "object_text")])),
+        getattr(claim, "occurred_at", None),
+    )
+    excerpt_period = _period_tokens(excerpt)
+    stated_claim = {token for token in claim_period if not token.startswith("at:")}
+    stated_excerpt = {token for token in excerpt_period if not token.startswith("at:")}
+    if stated_claim and stated_excerpt and stated_claim != stated_excerpt:
+        return True, "different_period"
+    left_basis = _measurement_basis(claim)
+    right_blob = excerpt
+    right_basis = ""
+    for pattern, label in _BASIS_PATTERNS:
+        if pattern.search(right_blob):
+            right_basis = label
+            break
+    if left_basis and right_basis and left_basis != right_basis:
+        return True, "different_unit"
+    return False, "not_known_incomparable"
+
+
+def mixed_evidence_supports_conflict(claim) -> bool:
+    from app.domain.enums import EvidenceType
+
+    types = {row.evidence_type for row in getattr(claim, "evidence", []) or []}
+    if EvidenceType.SUPPORTS not in types:
+        return False
+    for row in claim.evidence:
+        if row.evidence_type != EvidenceType.CONTRADICTS:
+            continue
+        incomparable, _reason = contradiction_excerpt_incomparable(claim, getattr(row, "excerpt", None) or "")
+        if not incomparable:
+            return True
+    return False
+
+
+def conflict_comparability(left, right) -> tuple[bool, str]:
+    """Whether two claims can compete as alternatives of one proposition.
+
+    Missing coordinates do not prove equality. A known difference is incomparable.
+    This is not the DISPROVEN gate: it does not require grounded Measurement.
+    """
+    left_u, right_u = _is_utterance(left), _is_utterance(right)
+    if left_u != right_u:
+        return False, "utterance_versus_content"
+    if left_u and right_u:
+        return False, "distinct_speech_acts"
+
+    subject = _compare_optional(
+        _field(left, "subject"),
+        _field(right, "subject"),
+        missing="missing_subject",
+        different="different_subject",
+    )
+    if subject:
+        return False, subject
+    predicate = _compare_optional(
+        _field(left, "predicate"),
+        _field(right, "predicate"),
+        missing="missing_predicate",
+        different="different_predicate",
+    )
+    if predicate:
+        return False, predicate
+
+    quantitative = is_quantitative_proposition(left) or is_quantitative_proposition(right)
+    left_basis, right_basis = _measurement_basis(left), _measurement_basis(right)
+    if quantitative:
+        if not left_basis or not right_basis:
+            return False, "missing_unit"
+        if left_basis != right_basis:
+            return False, "different_unit"
+    elif left_basis and right_basis and left_basis != right_basis:
+        return False, "different_unit"
+
+    left_at = getattr(left, "occurred_at", None)
+    right_at = getattr(right, "occurred_at", None)
+    left_period = {token for token in _claim_period_tokens(left) if not token.startswith("at:")}
+    right_period = {token for token in _claim_period_tokens(right) if not token.startswith("at:")}
+    if left_period and right_period and left_period != right_period:
+        return False, "different_period"
+    if left_at is not None and right_at is not None:
+        if left_at != right_at:
+            return False, "different_occurred_at"
+    elif left_at is not None or right_at is not None:
+        return False, "missing_occurred_at"
+    elif quantitative and (not left_period or not right_period):
+        return False, "missing_period"
+
+    left_scope, right_scope = _scope_tokens(left), _scope_tokens(right)
+    if left_scope and right_scope:
+        extra_left = left_scope - right_scope
+        extra_right = right_scope - left_scope
+        if extra_left and extra_right:
+            return False, "different_scope"
+    elif left_scope or right_scope:
+        return False, "missing_scope"
+
+    return True, "comparable_proposition"

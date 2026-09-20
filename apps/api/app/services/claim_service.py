@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import combinations
 import re
 from typing import Any
 from uuid import UUID
@@ -52,6 +53,7 @@ from app.services.claim_coverage import (
 )
 from app.services.information_origin import assess_origins, has_support_evidence
 from app.services.claim_meaning import attributed_statement, preserve_extracted_meaning, split_attributed_content
+from app.services.evidence_comparison import conflict_comparability, mixed_evidence_supports_conflict
 from app.services.verification_outcome import (
     is_verification_locked,
     verification_view_for_event,
@@ -284,9 +286,7 @@ def _competing_clock(members: list[Claim]) -> dict[Claim, datetime] | None:
         if published_complete or all(value is None for value in published.values()):
             return occurred  # type: ignore[return-value]
         return None
-
-    if published_complete:
-        return published  # type: ignore[return-value]
+    # Publication date is not the period of the proposition.
     return None
 
 
@@ -1108,9 +1108,10 @@ class ClaimService:
                 # Verification must establish relevance before declaring falsehood.
                 status = ClaimStatus.UNCERTAIN
                 needs.append({"claim_id": str(claim.id), "claim_ref": index})
-            types = {row.evidence_type for row in claim.evidence}
-            if EvidenceType.SUPPORTS in types and EvidenceType.CONTRADICTS in types:
+            if mixed_evidence_supports_conflict(claim):
                 status = ClaimStatus.CONFLICTING
+            elif status == ClaimStatus.CONFLICTING:
+                status = self._clamp_supported(claim, self._status_without_unfounded_conflict(claim))
             claim.status = status
             if item is not None and item.needs_external_verification:
                 needs.append({"claim_id": str(claim.id), "claim_ref": index})
@@ -1124,39 +1125,75 @@ class ClaimService:
             groups[comparison_key_for(claim)].append(claim)
         for members in groups.values():
             world = [claim for claim in members if not is_utterance_claim(claim)]
-            if len({assertion_key_for(claim) for claim in world}) < 2:
-                continue
-            clock = _competing_clock(world)
-            if clock is None:
-                for claim in world:
-                    if is_verification_locked(claim, members, view, verify_run):
-                        continue
-                    if claim.status not in _PROTECTED_STATUSES:
-                        claim.status = ClaimStatus.UNCERTAIN
-                continue
+            self._apply_competing_world(world, members, verify_run=verify_run, view=view)
+            self._clear_unfounded_utterance_conflicts(members, verify_run=verify_run, view=view)
+
+    def _apply_competing_world(self, world: list[Claim], members: list[Claim], *, verify_run, view) -> None:
+        if len({assertion_key_for(claim) for claim in world}) < 2:
+            return
+        clock = _competing_clock(world)
+        if clock is not None:
             latest = max(clock.values())
-            latest_members = [claim for claim in world if clock[claim] == latest]
             for claim in world:
                 if clock[claim] < latest and claim.status != ClaimStatus.DISPROVEN:
                     claim.status = ClaimStatus.OUTDATED
-            latest_keys = {assertion_key_for(claim) for claim in latest_members}
-            if len(latest_keys) >= 2:
-                for claim in latest_members:
-                    if claim.status == ClaimStatus.DISPROVEN:
-                        continue
-                    if is_verification_locked(claim, members, view, verify_run):
-                        continue
-                    claim.status = ClaimStatus.CONFLICTING
+            latest_members = [claim for claim in world if clock[claim] == latest]
+        else:
+            latest_members = world
+        conflicted, uncertain = self._competing_pair_outcomes(latest_members)
+        for claim in latest_members:
+            if claim.status == ClaimStatus.DISPROVEN:
                 continue
-            for claim in latest_members:
-                if is_verification_locked(claim, members, view, verify_run):
-                    continue
-                if claim.status == ClaimStatus.CONFLICTING:
-                    claim.status = self._clamp_supported(claim, self._heuristic_status(claim))
+            if is_verification_locked(claim, members, view, verify_run):
+                continue
+            if claim.id in conflicted:
+                claim.status = ClaimStatus.CONFLICTING
+            elif claim.id in uncertain:
+                claim.status = ClaimStatus.UNCERTAIN
+            elif claim.status == ClaimStatus.CONFLICTING and not mixed_evidence_supports_conflict(claim):
+                claim.status = self._clamp_supported(claim, self._status_without_unfounded_conflict(claim))
+
+    def _competing_pair_outcomes(self, members: list[Claim]) -> tuple[set[UUID], set[UUID]]:
+        conflicted: set[UUID] = set()
+        uncertain: set[UUID] = set()
+        insufficient = {
+            "missing_period",
+            "missing_occurred_at",
+            "missing_subject",
+            "missing_predicate",
+            "missing_unit",
+            "missing_scope",
+        }
+        for left, right in combinations(members, 2):
+            if assertion_key_for(left) == assertion_key_for(right):
+                continue
+            comparable, reason = conflict_comparability(left, right)
+            if comparable:
+                conflicted.add(left.id)
+                conflicted.add(right.id)
+            elif reason in insufficient:
+                uncertain.add(left.id)
+                uncertain.add(right.id)
+        uncertain -= conflicted
+        return conflicted, uncertain
+
+    def _clear_unfounded_utterance_conflicts(self, members: list[Claim], *, verify_run, view) -> None:
+        for claim in members:
+            if not is_utterance_claim(claim) or claim.status != ClaimStatus.CONFLICTING:
+                continue
+            if is_verification_locked(claim, members, view, verify_run):
+                continue
+            if mixed_evidence_supports_conflict(claim):
+                continue
+            claim.status = self._clamp_supported(claim, self._status_without_unfounded_conflict(claim))
+
+    def _status_without_unfounded_conflict(self, claim: Claim) -> ClaimStatus:
+        if any(row.evidence_type == EvidenceType.SUPPORTS for row in claim.evidence):
+            return ClaimStatus.SUPPORTED
+        return ClaimStatus.UNCERTAIN
 
     def _heuristic_status(self, claim: Claim) -> ClaimStatus:
-        types = {row.evidence_type for row in claim.evidence}
-        if EvidenceType.SUPPORTS in types and EvidenceType.CONTRADICTS in types:
+        if mixed_evidence_supports_conflict(claim):
             return ClaimStatus.CONFLICTING
         return clamp_supported_status(claim, ClaimStatus.SUPPORTED)
 

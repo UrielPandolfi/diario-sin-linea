@@ -84,7 +84,14 @@ def _ingest(session: Session, source_id, *, url: str, title: str, body: str, con
     ).item
 
 
-def _extract(text: str, *, value: str | None = None, excerpt: str | None = None) -> ExtractedClaim:
+def _extract(
+    text: str,
+    *,
+    value: str | None = None,
+    excerpt: str | None = None,
+    unit: str | None = None,
+    occurred_at=None,
+) -> ExtractedClaim:
     return ExtractedClaim(
         canonical_text=text,
         claim_type="hecho",
@@ -93,6 +100,8 @@ def _extract(text: str, *, value: str | None = None, excerpt: str | None = None)
         predicate="heridos",
         object_text=text,
         normalized_value=value,
+        unit=unit,
+        occurred_at=occurred_at,
         evidence=[
             ExtractedEvidence(
                 source_ref=1,
@@ -111,10 +120,20 @@ def _verify_llm(*statuses: ClaimStatus) -> FakeStructuredLLM:
     return FakeStructuredLLM({"VerificationResult": rows})
 
 
-def _publish_track_a(session: Session, event, claims_text: str, *, value: str = "6") -> Article:
+def _publish_track_a(
+    session: Session,
+    event,
+    claims_text: str,
+    *,
+    value: str = "6",
+    unit: str | None = None,
+    occurred_at=None,
+) -> Article:
     claims_llm = FakeStructuredLLM(
         {
-            "ClaimExtractionBatch": ClaimExtractionBatch(claims=[_extract(claims_text, value=value)]),
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[_extract(claims_text, value=value, unit=unit, occurred_at=occurred_at)]
+            ),
             "ClaimResolutionBatch": ClaimResolutionBatch(
                 items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SINGLE_SOURCE, reason="una fuente")]
             ),
@@ -506,7 +525,7 @@ def test_track_b_contradiction_is_material_and_freezes_public_claims(db_session:
     event = db_session.get(Event, detected["event_id"])
     assert event is not None
     event.relevance_score = 85
-    article = _publish_track_a(db_session, event, "Hubo seis heridos.", value="6")
+    article = _publish_track_a(db_session, event, "Hubo seis heridos.", value="6", unit="personas", occurred_at=WHEN)
     live_claim = db_session.scalars(select(Claim).where(Claim.event_id == event.id)).one()
     live_status = live_claim.status
 
@@ -526,7 +545,9 @@ def test_track_b_contradiction_is_material_and_freezes_public_claims(db_session:
     ).detect(item_b.id)
     claims_llm = FakeStructuredLLM(
         {
-            "ClaimExtractionBatch": ClaimExtractionBatch(claims=[_extract("Hubo ocho heridos", value="8")]),
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[_extract("Hubo ocho heridos", value="8", unit="personas", occurred_at=WHEN)]
+            ),
             "ClaimResolutionBatch": ClaimResolutionBatch(
                 items=[
                     ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, reason="discrepancia"),

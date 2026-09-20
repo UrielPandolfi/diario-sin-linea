@@ -3,10 +3,13 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from itertools import combinations
 from typing import Any
 from uuid import UUID
 
 from pydantic import ValidationError
+from itertools import combinations
+from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -73,6 +76,7 @@ from app.schemas.editorial_evidence import (
     StatementEvidenceClass,
     SupportBasis,
     VerificationBudget,
+    evaluation_is_complete,
 )
 from app.services.claim_coverage import (
     central_claim_ids,
@@ -81,7 +85,7 @@ from app.services.claim_coverage import (
     is_mixed_proposition,
     proposition_role_for,
 )
-from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for, is_utterance_claim
+from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for
 from app.services.information_origin import (
     assess_origins,
     demotion_for,
@@ -126,7 +130,12 @@ from app.services.verification_outcome import (
 from app.services.verification_policy import canonicalize_claim_type, select_claims
 from app.services.verification_policy import SelectedClaim
 from app.services.claim_meaning import attributed_statement, temporal_comparison
-from app.services.evidence_comparison import COMPARISON_POLICY_VERSION, valid_contradiction
+from app.services.evidence_comparison import (
+    COMPARISON_POLICY_VERSION,
+    conflict_comparability,
+    mixed_evidence_supports_conflict,
+    valid_contradiction,
+)
 
 SNIPPET_CHARS = 1500
 _PLANNER_ERRORS = (ProviderNotConfiguredError, ValidationError, ValueError, KeyError, RuntimeError)
@@ -550,34 +559,109 @@ class VerificationService:
         groups: dict[str, list[Claim]] = defaultdict(list)
         for claim in claims:
             groups[comparison_key_for(claim)].append(claim)
-        winners = [
-            claim
+        comparable_with: dict[UUID, list[Claim]] = defaultdict(list)
+        for members in groups.values():
+            for left, right in combinations(members, 2):
+                if assertion_key_for(left) == assertion_key_for(right):
+                    continue
+                if left.status == ClaimStatus.OUTDATED or right.status == ClaimStatus.OUTDATED:
+                    continue
+                if left.status == ClaimStatus.DISPROVEN or right.status == ClaimStatus.DISPROVEN:
+                    continue
+                comparable, _reason = conflict_comparability(left, right)
+                if not comparable:
+                    continue
+                if not self._admitted_support(left, payload) or not self._admitted_support(right, payload):
+                    continue
+                comparable_with[left.id].append(right)
+                comparable_with[right.id].append(left)
+        strong = {
+            claim.id
             for claim in claims
             if claim.status == ClaimStatus.SUPPORTED and is_strong_verification(claim.id, view, claim=claim)
-        ]
-        for winner in winners:
-            if not _has_structured_spo(winner):
+        }
+        changed: list[Claim] = []
+        for winner in claims:
+            if winner.id not in strong:
                 continue
-            for sibling in groups[comparison_key_for(winner)]:
-                if sibling.id == winner.id:
+            for sibling in comparable_with.get(winner.id, []):
+                if sibling.id in strong:
                     continue
-                if assertion_key_for(sibling) == assertion_key_for(winner):
+                if sibling.status in {ClaimStatus.OUTDATED, ClaimStatus.DISPROVEN}:
                     continue
-                if is_utterance_claim(sibling) or is_utterance_claim(winner):
-                    continue
-                if not _has_structured_spo(sibling):
-                    continue
-                if sibling.status == ClaimStatus.OUTDATED:
-                    continue
-                if sibling.status == ClaimStatus.SUPPORTED and is_strong_verification(sibling.id, view, claim=sibling):
-                    continue
-                if not any(row.evidence_type == EvidenceType.SUPPORTS for row in sibling.evidence):
-                    continue
-                if not _same_temporal_context(winner, sibling):
-                    continue
-                # A different supported assertion is not a grounded refutation of
-                # its sibling. Each DISPROVEN needs its own admitted contradiction.
-                sibling.status = ClaimStatus.CONFLICTING
+                if sibling.status != ClaimStatus.CONFLICTING:
+                    sibling.status = ClaimStatus.CONFLICTING
+                    changed.append(sibling)
+        for claim in claims:
+            if claim.status != ClaimStatus.CONFLICTING:
+                continue
+            if mixed_evidence_supports_conflict(claim):
+                continue
+            if comparable_with.get(claim.id):
+                continue
+            claim.status = self._status_from_remaining_support(claim, payload)
+            changed.append(claim)
+        for claim in changed:
+            self._sync_reconciled_decision(claim, payload)
+
+    def _has_comparable_competitor(self, claim: Claim, claims: list[Claim]) -> bool:
+        for other in claims:
+            if other.id == claim.id:
+                continue
+            if assertion_key_for(other) == assertion_key_for(claim):
+                continue
+            if not any(row.evidence_type == EvidenceType.SUPPORTS for row in claim.evidence):
+                continue
+            if not any(row.evidence_type == EvidenceType.SUPPORTS for row in other.evidence):
+                continue
+            comparable, _reason = conflict_comparability(claim, other)
+            if comparable:
+                return True
+        return False
+
+    def _admitted_support(self, claim: Claim, payload: dict[str, Any]) -> bool:
+        if not any(row.evidence_type == EvidenceType.SUPPORTS for row in claim.evidence):
+            return False
+        checks = (payload.get("comparison_checks") or {}).get(str(claim.id)) or []
+        if not checks:
+            return True
+        return any(str(row.get("admitted") or "") == EvidenceType.SUPPORTS.value for row in checks)
+
+    def _status_from_remaining_support(self, claim: Claim, payload: dict[str, Any]) -> ClaimStatus:
+        if not any(row.evidence_type == EvidenceType.SUPPORTS for row in claim.evidence):
+            return ClaimStatus.UNCERTAIN
+        cid = str(claim.id)
+        plan_data = (payload.get("plans") or {}).get(cid)
+        plan = VerificationPlan.model_validate(plan_data) if plan_data else None
+        primary_supports = bool((payload.get("primary_source_supports_claim") or {}).get(cid))
+        if plan is None:
+            from app.services.claim_service import clamp_supported_status
+
+            return clamp_supported_status(claim, ClaimStatus.SUPPORTED)
+        return apply_primary_requirement(claim, ClaimStatus.SUPPORTED, plan, primary_supports=primary_supports)
+
+    def _sync_reconciled_decision(self, claim: Claim, payload: dict[str, Any]) -> None:
+        cid = str(claim.id)
+        stored = (payload.get("decision_by_claim_id") or {}).get(cid)
+        if not evaluation_is_complete(stored):
+            return
+        plan_data = (payload.get("plans") or {}).get(cid)
+        plan = VerificationPlan.model_validate(plan_data) if plan_data else None
+        prior_checks = getattr(self, "_comparison_checks", [])
+        self._comparison_checks = list((payload.get("comparison_checks") or {}).get(cid) or [])
+        llm_reason = stored.get("llm_reason") if isinstance(stored, dict) else None
+        decision = self._decision_after_policy(
+            claim,
+            plan,
+            desired=claim.status,
+            llm_reason=llm_reason,
+            unresolved=claim.status in {ClaimStatus.CONFLICTING, ClaimStatus.UNCERTAIN},
+            primary_found=bool((payload.get("primary_found") or {}).get(cid)),
+            primary_supports=bool((payload.get("primary_source_supports_claim") or {}).get(cid)),
+            packet_size=len((payload.get("packets") or {}).get(cid) or []),
+        )
+        payload.setdefault("decision_by_claim_id", {})[cid] = decision.model_dump(mode="json")
+        self._comparison_checks = prior_checks
 
     def _plan_for(self, claim: Claim, event: Event) -> VerificationPlan:
         fallback = heuristic_plan(claim, jurisdiction=self.settings.editorial_country_code)
@@ -1094,7 +1178,20 @@ class VerificationService:
             has_support = any(ev.evidence_type == EvidenceType.SUPPORTS for ev in claim.evidence)
             claim.status = ClaimStatus.SINGLE_SOURCE if has_support else ClaimStatus.UNCERTAIN
             unresolved = not has_support
-        elif result.unresolved and result.status in {ClaimStatus.CONFLICTING, ClaimStatus.UNCERTAIN}:
+        elif result.status == ClaimStatus.CONFLICTING:
+            if mixed_evidence_supports_conflict(claim) or self._has_comparable_competitor(claim, event.claims):
+                claim.status = ClaimStatus.CONFLICTING
+                unresolved = bool(result.unresolved)
+            else:
+                has_support = any(ev.evidence_type == EvidenceType.SUPPORTS for ev in claim.evidence)
+                if has_support:
+                    claim.status = apply_primary_requirement(
+                        claim, ClaimStatus.SUPPORTED, plan, primary_supports=primary_supports
+                    )
+                else:
+                    claim.status = ClaimStatus.UNCERTAIN
+                    unresolved = True
+        elif result.unresolved and result.status == ClaimStatus.UNCERTAIN:
             claim.status = result.status
             unresolved = True
         else:
@@ -1315,14 +1412,3 @@ class VerificationService:
             )
         )
 
-
-def _has_structured_spo(claim: Claim) -> bool:
-    return bool((claim.subject or "").strip() and (claim.predicate or "").strip())
-
-
-def _same_temporal_context(left: Claim, right: Claim) -> bool:
-    if left.occurred_at is None and right.occurred_at is None:
-        return True
-    if left.occurred_at is None or right.occurred_at is None:
-        return False
-    return left.occurred_at == right.occurred_at

@@ -1681,3 +1681,394 @@ def test_incremental_keeps_historical_figures_and_persists_new_official_values(d
     assert not any("40.000" in text and "proyecto es de" in text for text in texts)
     assert any("52.000" in text for text in texts)
     assert sum(1 for claim in claims if claim.normalized_value == "40000") == 1
+
+
+def _two_outlet_event(db_session: Session, *, body_a: str, body_b: str, published_at=None):
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(
+        db_session,
+        source_a.id,
+        url="https://a.test/n",
+        title="A",
+        body=body_a,
+        content_hash="ha-c7",
+        published_at=published_at,
+    )
+    item_b = _item(
+        db_session,
+        source_b.id,
+        url="https://b.test/n",
+        title="B",
+        body=body_b,
+        content_hash="hb-c7",
+        published_at=published_at,
+    )
+    event = _event(db_session, item_a)
+    _attach(db_session, event, item_b)
+    return event
+
+
+def test_different_periods_do_not_conflict_on_shared_indicator(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    event = _two_outlet_event(
+        db_session,
+        body_a="El IPC de agosto de 2026 fue 2%.",
+        body_b="El IPC de junio de 2026 fue 3%.",
+        published_at=when,
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="El IPC de agosto de 2026 fue 2%",
+                    subject="IPC",
+                    predicate="variacion",
+                    normalized_value="2",
+                    object_text="2% en agosto de 2026",
+                    unit="%",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="IPC de agosto de 2026 fue 2%", confidence=0.9)],
+                ),
+                _extracted(
+                    text="El IPC de junio de 2026 fue 3%",
+                    subject="IPC",
+                    predicate="variacion",
+                    normalized_value="3",
+                    object_text="3% en junio de 2026",
+                    unit="%",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="IPC de junio de 2026 fue 3%", confidence=0.9)],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="cifras"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="cifras"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    claims = _event_claims(db_session, event.id)
+    assert ClaimStatus.CONFLICTING not in {claim.status for claim in claims}
+    assert all(claim.status in {ClaimStatus.SINGLE_SOURCE, ClaimStatus.UNCERTAIN} for claim in claims)
+
+
+def test_monthly_versus_interannual_units_do_not_conflict(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    event = _two_outlet_event(
+        db_session,
+        body_a="La inflación mensual fue 2%.",
+        body_b="La inflación interanual fue 19%.",
+        published_at=when,
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="La inflación mensual fue 2%",
+                    subject="inflacion",
+                    predicate="variacion",
+                    normalized_value="2",
+                    object_text="2% mensual",
+                    unit="%",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="inflación mensual fue 2%", confidence=0.9)],
+                ),
+                _extracted(
+                    text="La inflación interanual fue 19%",
+                    subject="inflacion",
+                    predicate="variacion",
+                    normalized_value="19",
+                    object_text="19% interanual",
+                    unit="%",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="inflación interanual fue 19%", confidence=0.9)],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="cifras"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="cifras"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    assert ClaimStatus.CONFLICTING not in {claim.status for claim in _event_claims(db_session, event.id)}
+
+
+def test_distinct_scope_does_not_inherit_group_conflict(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    source_c = _source(db_session, name="C", domain="c.test", feed_url="https://c.test/rss.xml")
+    item_a = _item(db_session, source_a.id, url="https://a.test/n", title="A", body="4 heridos.", content_hash="ha", published_at=when)
+    item_b = _item(db_session, source_b.id, url="https://b.test/n", title="B", body="6 heridos.", content_hash="hb", published_at=when)
+    item_c = _item(db_session, source_c.id, url="https://c.test/n", title="C", body="8 heridos en Córdoba.", content_hash="hc", published_at=when)
+    event = _event(db_session, item_a)
+    _attach(db_session, event, item_b)
+    _attach(db_session, event, item_c)
+    llm = FakeStructuredLLM(
+        {
+            "ClaimExtractionBatch": ClaimExtractionBatch(
+                claims=[
+                    _extracted(
+                        text="Se registraron 4 heridos",
+                        normalized_value="4",
+                        object_text="4 heridos",
+                        unit="personas",
+                        predicate="cantidad_heridos",
+                        occurred_at=when,
+                        evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9)],
+                    ),
+                    _extracted(
+                        text="Se registraron 6 heridos",
+                        normalized_value="6",
+                        object_text="6 heridos",
+                        unit="personas",
+                        predicate="cantidad_heridos",
+                        occurred_at=when,
+                        evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9)],
+                    ),
+                    _extracted(
+                        text="Se registraron 8 heridos en Córdoba",
+                        normalized_value="8",
+                        object_text="8 heridos en Córdoba",
+                        unit="personas",
+                        predicate="cantidad_heridos",
+                        occurred_at=when,
+                        evidence=[ExtractedEvidence(source_ref=3, evidence_type=EvidenceType.SUPPORTS, excerpt="8 heridos en Córdoba", confidence=0.9)],
+                    ),
+                ]
+            ),
+            "ClaimResolutionBatch": ClaimResolutionBatch(
+                items=[
+                    ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="grupo"),
+                    ClaimResolutionItem(claim_ref=2, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="grupo"),
+                    ClaimResolutionItem(claim_ref=3, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="grupo"),
+                ]
+            ),
+        }
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    by_value = {claim.normalized_value: claim.status for claim in _event_claims(db_session, event.id)}
+    assert by_value["4"] == ClaimStatus.CONFLICTING
+    assert by_value["6"] == ClaimStatus.CONFLICTING
+    assert by_value["8"] != ClaimStatus.CONFLICTING
+    assert by_value["8"] != ClaimStatus.SUPPORTED
+
+
+def test_utterance_is_not_refuted_by_factual_content(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    event = _two_outlet_event(
+        db_session,
+        body_a="Pérez dijo que el valor era 15.",
+        body_b="El valor es 19.",
+        published_at=when,
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                ExtractedClaim(
+                    canonical_text="Pérez dijo que el valor era 15",
+                    claim_type="declaracion",
+                    importance=ClaimImportance.HIGH,
+                    subject="Pérez",
+                    predicate="dijo",
+                    object_text="el valor era 15",
+                    normalized_value="15",
+                    unit="personas",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="Pérez dijo que el valor era 15", confidence=0.9)],
+                ),
+                ExtractedClaim(
+                    canonical_text="El valor es 19",
+                    claim_type="cifra",
+                    importance=ClaimImportance.HIGH,
+                    subject="valor",
+                    predicate="es",
+                    object_text="19",
+                    normalized_value="19",
+                    unit="personas",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="El valor es 19", confidence=0.9)],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="15 vs 19"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="15 vs 19"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    by_role = {claim.canonical_text: claim.status for claim in _event_claims(db_session, event.id)}
+    assert by_role["Pérez dijo que el valor era 15"] != ClaimStatus.CONFLICTING
+    assert by_role["Pérez dijo que el valor era 15"] != ClaimStatus.SUPPORTED
+
+
+def test_distinct_speakers_do_not_conflict_as_speech_acts(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    event = _two_outlet_event(
+        db_session,
+        body_a="Pérez dijo que el valor era 15.",
+        body_b="Gómez dijo que el valor era 19.",
+        published_at=when,
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                ExtractedClaim(
+                    canonical_text="Pérez dijo que el valor era 15",
+                    claim_type="declaracion",
+                    importance=ClaimImportance.HIGH,
+                    subject="Pérez",
+                    predicate="dijo",
+                    object_text="el valor era 15",
+                    normalized_value="15",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="Pérez dijo que el valor era 15", confidence=0.9)],
+                ),
+                ExtractedClaim(
+                    canonical_text="Gómez dijo que el valor era 19",
+                    claim_type="declaracion",
+                    importance=ClaimImportance.HIGH,
+                    subject="Gómez",
+                    predicate="dijo",
+                    object_text="el valor era 19",
+                    normalized_value="19",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="Gómez dijo que el valor era 19", confidence=0.9)],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="hablantes"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.CONFLICTING, confidence=0.8, reason="hablantes"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    assert ClaimStatus.CONFLICTING not in {claim.status for claim in _event_claims(db_session, event.id)}
+
+
+def test_non_quantitative_conflict_does_not_require_unit(db_session: Session) -> None:
+    event = _two_outlet_event(
+        db_session,
+        body_a="El decreto elimina X.",
+        body_b="El decreto no elimina X.",
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="El decreto elimina X",
+                    subject="decreto",
+                    predicate="elimina",
+                    object_text="X",
+                    normalized_value="si",
+                    evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="El decreto elimina X", confidence=0.9)],
+                ),
+                _extracted(
+                    text="El decreto no elimina X",
+                    subject="decreto",
+                    predicate="elimina",
+                    object_text="no X",
+                    normalized_value="no",
+                    evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="El decreto no elimina X", confidence=0.9)],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.8, reason="a"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.SUPPORTED, confidence=0.8, reason="b"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    assert {claim.status for claim in _event_claims(db_session, event.id)} == {ClaimStatus.CONFLICTING}
+
+
+def test_incomparable_contradicts_does_not_force_conflicting(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    event = _two_outlet_event(
+        db_session,
+        body_a="El IPC de agosto de 2026 fue 2%.",
+        body_b="El IPC de junio de 2026 fue 25%.",
+        published_at=when,
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="El IPC de agosto de 2026 fue 2%",
+                    subject="IPC",
+                    predicate="variacion",
+                    normalized_value="2",
+                    object_text="2% en agosto de 2026",
+                    unit="%",
+                    occurred_at=when,
+                    evidence=[
+                        ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="IPC de agosto de 2026 fue 2%", confidence=0.9),
+                        ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.CONTRADICTS, excerpt="IPC de junio de 2026 fue 25%", confidence=0.8),
+                    ],
+                )
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[ClaimResolutionItem(claim_ref=1, status=ClaimStatus.CONFLICTING, confidence=0.9, reason="2 vs 25")]
+        ),
+    )
+    result = _service(db_session, llm).resolve(event.id, trigger="admin")
+    claim = _event_claims(db_session, event.id)[0]
+    assert claim.status != ClaimStatus.CONFLICTING
+    assert claim.status != ClaimStatus.SUPPORTED
+    assert llm.calls == ["ClaimExtractionBatch", "ClaimResolutionBatch"]
+
+
+def test_conflicting_same_moment_does_not_add_llm_calls(db_session: Session) -> None:
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    event = _two_outlet_event(
+        db_session,
+        body_a="Se registraron 4 heridos.",
+        body_b="Se registraron 6 heridos.",
+        published_at=when,
+    )
+    llm = _llm(
+        ClaimExtractionBatch(
+            claims=[
+                _extracted(
+                    text="Se registraron 4 heridos",
+                    normalized_value="4",
+                    object_text="4 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=1, evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos", confidence=0.9)],
+                ),
+                _extracted(
+                    text="Se registraron 6 heridos",
+                    normalized_value="6",
+                    object_text="6 heridos",
+                    unit="personas",
+                    predicate="cantidad_heridos",
+                    occurred_at=when,
+                    evidence=[ExtractedEvidence(source_ref=2, evidence_type=EvidenceType.SUPPORTS, excerpt="6 heridos", confidence=0.9)],
+                ),
+            ]
+        ),
+        ClaimResolutionBatch(
+            items=[
+                ClaimResolutionItem(claim_ref=1, status=ClaimStatus.SUPPORTED, confidence=0.8, reason="a"),
+                ClaimResolutionItem(claim_ref=2, status=ClaimStatus.SUPPORTED, confidence=0.8, reason="b"),
+            ]
+        ),
+    )
+    _service(db_session, llm).resolve(event.id, trigger="admin")
+    assert {claim.status for claim in _event_claims(db_session, event.id)} == {ClaimStatus.CONFLICTING}
+    assert llm.calls == ["ClaimExtractionBatch", "ClaimResolutionBatch"]

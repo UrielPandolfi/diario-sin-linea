@@ -9,7 +9,11 @@ from app.schemas.evidence_comparison import EvidenceComparison, Measurement
 from app.schemas.verification import VerificationEvidence, VerificationPlan, VerificationResult, TemporalScope, VerificationTarget
 from app.services.claim_meaning import preserve_extracted_meaning
 from app.services.claim_coverage import proposition_role_for
-from app.services.evidence_comparison import valid_contradiction
+from app.services.evidence_comparison import (
+    conflict_comparability,
+    mixed_evidence_supports_conflict,
+    valid_contradiction,
+)
 from app.services.verification_plan import heuristic_plan, refine_plan, build_verification_queries, try_resolve_numeric_comparison
 from app.services.verification_service import VerificationService, _PacketSource
 from app.services.claim_service import ClaimService
@@ -17,7 +21,7 @@ from app.models import PipelineRun
 from app.domain.enums import PipelineStatus
 from app.providers.fakes import FakeStructuredLLM, FakeSearchProvider
 from sqlalchemy import select
-from tests.test_verification import _source, _item, _event, _claim
+from tests.test_verification import _source, _item, _event, _claim, _evidence
 
 
 ORIGINAL = "The Economist reconoció que el Gobierno logró bajar la inflación desde niveles cercanos al 13% mensual hasta alrededor del 2%."
@@ -376,3 +380,321 @@ def test_qualifies_partial_claim_does_not_promote_full_proposition(db_session):
     assert decision.public_rendering is not None
     assert decision.public_rendering.categorical_allowed is False
     assert decision.public_rendering.independent_confirmation_language_allowed is False
+
+
+def _ns_claim(**overrides):
+    payload = {
+        "canonical_text": "Se registraron 4 heridos",
+        "claim_type": "cifra",
+        "subject": "accidente",
+        "predicate": "cantidad_heridos",
+        "object_text": "4 heridos",
+        "normalized_value": "4",
+        "unit": "personas",
+        "occurred_at": None,
+        "evidence": [],
+    }
+    payload.update(overrides)
+    return SimpleNamespace(**payload)
+
+
+def test_conflict_comparability_requires_shared_coordinates():
+    from datetime import datetime, timezone
+
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    four = _ns_claim(occurred_at=when)
+    six = _ns_claim(canonical_text="Se registraron 6 heridos", object_text="6 heridos", normalized_value="6", occurred_at=when)
+    assert conflict_comparability(four, six) == (True, "comparable_proposition")
+    later = _ns_claim(canonical_text="Se confirmaron 6 heridos", object_text="6 heridos", normalized_value="6", occurred_at=datetime(2026, 8, 24, 17, 0, tzinfo=timezone.utc))
+    assert conflict_comparability(four, later)[0] is False
+    august = _ns_claim(canonical_text="El IPC de agosto de 2026 fue 2%", subject="IPC", predicate="variacion", object_text="2% en agosto de 2026", normalized_value="2", unit="%", occurred_at=when)
+    june = _ns_claim(canonical_text="El IPC de junio de 2026 fue 3%", subject="IPC", predicate="variacion", object_text="3% en junio de 2026", normalized_value="3", unit="%", occurred_at=when)
+    assert conflict_comparability(august, june) == (False, "different_period")
+    monthly = _ns_claim(canonical_text="La inflación mensual fue 2%", subject="inflacion", predicate="variacion", object_text="2% mensual", normalized_value="2", unit="%", occurred_at=when)
+    yoy = _ns_claim(canonical_text="La inflación interanual fue 19%", subject="inflacion", predicate="variacion", object_text="19% interanual", normalized_value="19", unit="%", occurred_at=when)
+    assert conflict_comparability(monthly, yoy) == (False, "different_unit")
+    missing = _ns_claim(occurred_at=None, canonical_text="Se registraron 4 heridos")
+    missing_other = _ns_claim(canonical_text="Se registraron 6 heridos", object_text="6 heridos", normalized_value="6", occurred_at=None)
+    assert conflict_comparability(missing, missing_other) == (False, "missing_period")
+    spoken = _ns_claim(canonical_text="Pérez dijo que el valor era 15", claim_type="declaracion", subject="Pérez", predicate="dijo", object_text="el valor era 15", unit="")
+    factual = _ns_claim(canonical_text="El valor es 19", claim_type="cifra", subject="valor", predicate="es", object_text="19", normalized_value="19")
+    assert conflict_comparability(spoken, factual) == (False, "utterance_versus_content")
+    other_speaker = _ns_claim(canonical_text="Gómez dijo que el valor era 19", claim_type="declaracion", subject="Gómez", predicate="dijo", object_text="el valor era 19", unit="", normalized_value="19")
+    assert conflict_comparability(spoken, other_speaker) == (False, "distinct_speech_acts")
+    decree_yes = SimpleNamespace(canonical_text="El decreto elimina X", claim_type="documento", subject="decreto", predicate="elimina", object_text="X", normalized_value="si", unit="", occurred_at=None)
+    decree_no = SimpleNamespace(canonical_text="El decreto no elimina X", claim_type="documento", subject="decreto", predicate="elimina", object_text="no X", normalized_value="no", unit="", occurred_at=None)
+    assert conflict_comparability(decree_yes, decree_no) == (True, "comparable_proposition")
+
+
+def test_mixed_evidence_ignores_incomparable_contradicts():
+    claim = _ns_claim(
+        canonical_text="El IPC de agosto de 2026 fue 2%",
+        subject="IPC",
+        predicate="variacion",
+        object_text="2% en agosto de 2026",
+        normalized_value="2",
+        unit="%",
+        evidence=[
+            SimpleNamespace(evidence_type=EvidenceType.SUPPORTS, excerpt="IPC de agosto de 2026 fue 2%"),
+            SimpleNamespace(evidence_type=EvidenceType.CONTRADICTS, excerpt="IPC de junio de 2026 fue 25%"),
+        ],
+    )
+    assert mixed_evidence_supports_conflict(claim) is False
+    negation = _ns_claim(
+        evidence=[
+            SimpleNamespace(evidence_type=EvidenceType.SUPPORTS, excerpt="4 heridos"),
+            SimpleNamespace(evidence_type=EvidenceType.CONTRADICTS, excerpt="desmintieron que hubiera heridos"),
+        ]
+    )
+    assert mixed_evidence_supports_conflict(negation) is True
+
+
+def test_verified_reconciler_requires_comparability(db_session):
+    from datetime import datetime, timezone
+
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(db_session, source_a.id, url="https://a.test/n", title="A", body="agosto 2%", content_hash="ha")
+    item_b = _item(db_session, source_b.id, url="https://b.test/n", title="B", body="junio 25%", content_hash="hb")
+    event = _event(db_session, item_a)
+    from app.services.event_service import EventService
+    from app.domain.enums import EventSourceRelation
+
+    EventService(db_session).attach_source(event, item_b.id, relation_type=EventSourceRelation.ADDITIONAL)
+    august = _claim(
+        db_session, event, text="El IPC de agosto de 2026 fue 2%", claim_type="cifra",
+        importance=ClaimImportance.HIGH, status=ClaimStatus.SUPPORTED, subject="IPC", predicate="variacion",
+        object_text="2% en agosto de 2026", normalized_value="2", unit="%", occurred_at=when,
+    )
+    june = _claim(
+        db_session, event, text="El IPC de junio de 2026 fue 25%", claim_type="cifra",
+        importance=ClaimImportance.HIGH, status=ClaimStatus.SUPPORTED, subject="IPC", predicate="variacion",
+        object_text="25% en junio de 2026", normalized_value="25", unit="%", occurred_at=when,
+    )
+    _evidence(db_session, august, item_a, excerpt="agosto 2%")
+    _evidence(db_session, june, item_b, excerpt="junio 25%")
+    payload = {
+        "selected": [{"claim_id": str(august.id), "reasons": ["policy:cifra"]}],
+        "skipped_search": [],
+        "primary_source_supports_claim": {str(august.id): True},
+        "sol": [{"claim_id": str(august.id), "status_after": "SUPPORTED", "unresolved": False}],
+        "comparison_checks": {},
+        "decision_by_claim_id": {},
+    }
+    VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [august, june], payload
+    )
+    assert august.status == ClaimStatus.SUPPORTED
+    assert june.status == ClaimStatus.SUPPORTED
+
+
+def test_rejected_c6_contradiction_is_not_conflict_basis(db_session):
+    source = _source(db_session)
+    item = _item(db_session, source.id, url="https://ejemplo.test/ipc", title="IPC", body=_observation("25"), content_hash="c6")
+    item.metadata_json = {"body_source": "extracted_html", "fetch_ok": True}
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session, event, text=STATISTIC, claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE, subject="IPC", predicate="variacion", object_text="2%", unit="% mensual",
+    )
+    _evidence(db_session, claim, item, excerpt=STATISTIC)
+    comparison = _comparison("25", period="junio de 2026")
+    result = VerificationResult(
+        status=ClaimStatus.CONFLICTING,
+        unresolved=True,
+        reason="el modelo ve otro mes",
+        evidence=[VerificationEvidence(source_ref=1, evidence_type=EvidenceType.CONTRADICTS, excerpt=_observation("25", period="junio de 2026"), comparison=comparison)],
+    )
+    packet = [_PacketSource(ref=1, url=item.url, title=item.title, snippet=item.clean_text, item=item, body_source="extracted_html")]
+    service = VerificationService(db_session)
+    service._comparison_checks = []
+    *_, decision = service._apply_result(event, claim, packet, result, VerificationPlan(), [], False)
+    assert claim.status != ClaimStatus.CONFLICTING
+    assert claim.status != ClaimStatus.SUPPORTED
+    assert decision.evaluation_state.value == "complete"
+    assert any(row["requested"] == "CONTRADICTS" and row["admitted"] != "CONTRADICTS" for row in service._comparison_checks)
+
+
+def test_verified_reconcile_keeps_disproven_requirements(db_session):
+    source = _source(db_session)
+    item = _item(db_session, source.id, url="https://ejemplo.test/ipc", title="IPC", body=_observation(), content_hash="disproven")
+    item.metadata_json = {"body_source": "extracted_html", "fetch_ok": True}
+    event = _event(db_session, item)
+    claim = _claim(db_session, event, text=STATISTIC, claim_type="cifra", importance=ClaimImportance.HIGH, status=ClaimStatus.SINGLE_SOURCE, subject="IPC")
+    comparison = _comparison()
+    result = VerificationResult(
+        status=ClaimStatus.DISPROVEN,
+        reason="falso",
+        evidence=[VerificationEvidence(source_ref=1, evidence_type=EvidenceType.CONTRADICTS, excerpt=_observation(), comparison=comparison)],
+    )
+    packet = [_PacketSource(ref=1, url=item.url, title=item.title, snippet=item.clean_text, item=item, body_source="extracted_html")]
+    VerificationService(db_session)._apply_result(event, claim, packet, result, VerificationPlan(), [], False)
+    assert claim.status == ClaimStatus.DISPROVEN
+
+
+def test_missing_period_does_not_promote_supported_after_discard(db_session):
+    from datetime import datetime, timezone
+    from app.schemas.editorial_evidence import EvaluationState, ReasonCode
+
+    source = _source(db_session)
+    item = _item(db_session, source.id, url="https://ejemplo.test/n", title="N", body="heridos", content_hash="h1")
+    event = _event(db_session, item)
+    four = _claim(
+        db_session, event, text="Se registraron 4 heridos", claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.CONFLICTING, subject="accidente", predicate="cantidad_heridos", object_text="4 heridos",
+        normalized_value="4", unit="personas",
+    )
+    six = _claim(
+        db_session, event, text="Se registraron 6 heridos", claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.CONFLICTING, subject="accidente", predicate="cantidad_heridos", object_text="6 heridos",
+        normalized_value="6", unit="personas",
+    )
+    _evidence(db_session, four, item, excerpt="4 heridos")
+    _evidence(db_session, six, item, excerpt="6 heridos")
+    payload = {
+        "comparison_checks": {},
+        "decision_by_claim_id": {
+            str(four.id): {
+                "claim_id": str(four.id),
+                "status": ClaimStatus.CONFLICTING.value,
+                "evaluation_state": EvaluationState.COMPLETE.value,
+                "reason_code": ReasonCode.CONFLICTING_COMPARABLE_EVIDENCE.value,
+            }
+        },
+        "plans": {},
+        "primary_source_supports_claim": {},
+        "sol": [],
+    }
+    VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [four, six], payload
+    )
+    assert four.status != ClaimStatus.CONFLICTING
+    assert six.status != ClaimStatus.CONFLICTING
+    assert four.status != ClaimStatus.SUPPORTED
+    assert six.status != ClaimStatus.SUPPORTED
+    decision = payload["decision_by_claim_id"][str(four.id)]
+    assert decision["evaluation_state"] == EvaluationState.COMPLETE.value
+    assert decision["status"] != ClaimStatus.SUPPORTED.value
+
+
+def test_c7_reconcile_does_not_change_published_v1(db_session):
+    from datetime import datetime, timezone
+    from app.domain.enums import EventSourceRelation
+    from app.services.event_service import EventService
+    from app.services.feed_ranking import compact_public_claims
+    from tests.editorial_snapshot import persist_version_snapshot
+    from app.services.article_service import ArticleService
+    from app.schemas import ArticleCreate
+
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(db_session, source_a.id, url="https://a.test/n", title="A", body="4 heridos", content_hash="ha")
+    item_b = _item(db_session, source_b.id, url="https://b.test/n", title="B", body="6 heridos", content_hash="hb")
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(event, item_b.id, relation_type=EventSourceRelation.ADDITIONAL)
+    four = _claim(
+        db_session, event, text="Se registraron 4 heridos", claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SINGLE_SOURCE, subject="accidente", predicate="cantidad_heridos", object_text="4 heridos",
+        normalized_value="4", unit="personas", occurred_at=when,
+    )
+    six = _claim(
+        db_session, event, text="Se registraron 6 heridos", claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED, subject="accidente", predicate="cantidad_heridos", object_text="6 heridos",
+        normalized_value="6", unit="personas", occurred_at=when,
+    )
+    _evidence(db_session, four, item_a, excerpt="4 heridos")
+    _evidence(db_session, six, item_b, excerpt="6 heridos")
+    article, _created = ArticleService(db_session).create_draft(
+        ArticleCreate(
+            event_id=event.id,
+            headline="Hubo heridos",
+            summary="Hubo heridos, según las fuentes.",
+            body="Según las fuentes, hubo heridos.",
+            body_blocks=[{"type": "paragraph", "segments": [{"text": "Según las fuentes, hubo heridos.", "claim_ids": [str(four.id)]}]}],
+        )
+    )
+    persist_version_snapshot(db_session, event, article)
+    from app.models import PipelineRun
+    from sqlalchemy.orm.attributes import flag_modified
+    from app.schemas.editorial_evidence import ReasonCode, Demotion, SupportKind
+
+    writing = db_session.scalars(
+        select(PipelineRun).where(PipelineRun.event_id == event.id, PipelineRun.stage == "writing")
+    ).first()
+    snap = dict(writing.metadata_json["evidence_snapshot"])
+    cid = str(four.id)
+    snap["decision_by_claim_id"] = {
+        cid: {
+            "claim_id": cid,
+            "status": ClaimStatus.SINGLE_SOURCE.value,
+            "evaluation_state": "complete",
+            "reason_code": ReasonCode.SINGLE_KNOWN_ORIGIN.value,
+            "public_rendering": {
+                "attribution_required": True,
+                "categorical_allowed": False,
+                "headline_unattributed_allowed": False,
+                "independent_confirmation_language_allowed": False,
+            },
+            "support_basis": {"known_independent_count": 1, "demotion": Demotion.INSUFFICIENT_INDEPENDENCE.value, "kind": SupportKind.SINGLE_REPORT.value},
+        }
+    }
+    writing.metadata_json = {**writing.metadata_json, "evidence_snapshot": snap}
+    flag_modified(writing, "metadata_json")
+    db_session.flush()
+    before = compact_public_claims(db_session, event, freeze_to_version=1)
+    payload = {
+        "selected": [{"claim_id": str(six.id), "reasons": ["policy:cifra"]}],
+        "primary_source_supports_claim": {str(six.id): True},
+        "sol": [{"claim_id": str(six.id), "status_after": "SUPPORTED", "unresolved": False}],
+        "comparison_checks": {},
+        "decision_by_claim_id": {},
+    }
+    VerificationService(db_session, llm=FakeStructuredLLM(), search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [four, six], payload
+    )
+    after = compact_public_claims(db_session, event, freeze_to_version=1)
+    assert four.status == ClaimStatus.CONFLICTING
+    assert after[0]["status"] == before[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert after[0]["reason_code"] == before[0]["reason_code"]
+    assert after[0]["presentation"]["verification_label"] == before[0]["presentation"]["verification_label"]
+
+
+def test_c7_does_not_add_verification_llm_calls(db_session):
+    from datetime import datetime, timezone
+    from app.domain.enums import EventSourceRelation
+    from app.services.event_service import EventService
+
+    when = datetime(2026, 8, 24, 16, 0, tzinfo=timezone.utc)
+    source_a = _source(db_session, name="A", domain="a.test", feed_url="https://a.test/rss.xml")
+    source_b = _source(db_session, name="B", domain="b.test", feed_url="https://b.test/rss.xml")
+    item_a = _item(db_session, source_a.id, url="https://a.test/n", title="A", body="4 heridos", content_hash="ha")
+    item_b = _item(db_session, source_b.id, url="https://b.test/n", title="B", body="6 heridos", content_hash="hb")
+    event = _event(db_session, item_a)
+    EventService(db_session).attach_source(event, item_b.id, relation_type=EventSourceRelation.ADDITIONAL)
+    four = _claim(
+        db_session, event, text="Se registraron 4 heridos", claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED, subject="accidente", predicate="cantidad_heridos", object_text="4 heridos",
+        normalized_value="4", unit="personas", occurred_at=when,
+    )
+    six = _claim(
+        db_session, event, text="Se registraron 6 heridos", claim_type="cifra", importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED, subject="accidente", predicate="cantidad_heridos", object_text="6 heridos",
+        normalized_value="6", unit="personas", occurred_at=when,
+    )
+    _evidence(db_session, four, item_a, excerpt="4 heridos")
+    _evidence(db_session, six, item_b, excerpt="6 heridos")
+    llm = FakeStructuredLLM()
+    llm.calls = ["sentinel"]
+    VerificationService(db_session, llm=llm, search=FakeSearchProvider([]))._reconcile_verified_competitors(
+        [four, six],
+        {
+            "selected": [{"claim_id": str(six.id), "reasons": ["policy:cifra"]}],
+            "primary_source_supports_claim": {str(six.id): True},
+            "sol": [{"claim_id": str(six.id), "status_after": "SUPPORTED", "unresolved": False}],
+            "comparison_checks": {},
+            "decision_by_claim_id": {},
+        },
+    )
+    assert llm.calls == ["sentinel"]
