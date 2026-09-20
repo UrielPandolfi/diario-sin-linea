@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. C3 (`reason_code` + scopes deterministas) en código y tests. C4 no empezó.
+Revisión: 2026-09-20. C4 (`public_rendering`) en código y tests. C5 no empezó.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -85,7 +85,13 @@ En código: `ClaimDecision` persiste `reason_code`, `verified_scope` y `unsuppor
 
 Limitación: no hay componente estructurado B, así que C3 no representa `unsupported_scope=B`. Eso queda para C8. `CONFLICTING`/`DISPROVEN` describen el status ya pasado por `valid_contradiction`; C3 no implementa C7. Primaria auténtica de un utterance no se mapea a `INDEPENDENT_CORROBORATION`.
 
-C4 no empezó.
+## Track C4 — public_rendering — 2026-09-20
+
+En código: `PublicRendering` opcional en `ClaimDecision`. Función pura `public_rendering_for` (sin DB, LLM ni texto del artículo). Solo `evaluation_state=complete` produce flags bool; skipped/pending/failed/legacy → `None` (permisos no determinados, no denegación evaluada). Persistido en la decisión y leído del snapshot de la versión (C2); snapshot sin el campo → `None`, sin backfill. Writing compacta sin el contrato. No hay validador de superficie ni `structural_block` (C5). Independencia y status epistemológico no se recalcularon.
+
+Limitación: QUALIFIES sin split C8 no autoriza categórico del compuesto; `unsupported_scope` sigue indeterminado. El contrato no se aplica al draft (C5).
+
+C5 no empezó.
 
 ## Independencia periodística — 2026-09-13
 

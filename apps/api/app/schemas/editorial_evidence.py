@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, ValidationError
 
 CONTRACT_VERSION = "editorial-evidence-1"
 
@@ -226,6 +226,48 @@ class SupportBasis(BaseModel):
     information_origins: list[str] = Field(default_factory=list)
 
 
+class PublicRendering(BaseModel):
+    """Presentation permissions for the evaluated proposition. Not a publish license.
+
+    None on a field (or a missing PublicRendering) means undetermined: skipped,
+    pending, failed, or unknown/legacy. False forbids; True permits only within
+    the proposition's legitimate scope.
+
+    attribution_required: keep source or speaker attribution required by the support.
+    categorical_allowed: may assert the evaluated proposition as fact within that
+        scope. Does not authorize widening the claim, dropping modality, or treating
+        declared content as true.
+    headline_unattributed_allowed: may put that proposition in the headline without
+        the attribution its support requires.
+    independent_confirmation_language_allowed: independent-corroboration wording
+        only when structured provenance already accredits it.
+    """
+
+    attribution_required: bool | None = None
+    categorical_allowed: bool | None = None
+    headline_unattributed_allowed: bool | None = None
+    independent_confirmation_language_allowed: bool | None = None
+
+
+def _coerce_public_rendering(value: Any) -> PublicRendering | None:
+    if value is None or value == "":
+        return None
+    if isinstance(value, PublicRendering):
+        return value
+    if isinstance(value, dict):
+        try:
+            return PublicRendering.model_validate(value)
+        except ValidationError:
+            return None
+    return None
+
+
+OptionalPublicRendering = Annotated[
+    PublicRendering | None,
+    BeforeValidator(_coerce_public_rendering),
+]
+
+
 class ClaimDecision(BaseModel):
     claim_id: str
     status: str
@@ -238,6 +280,19 @@ class ClaimDecision(BaseModel):
     reason_code: OptionalReasonCode = None
     verified_scope: str | None = None
     unsupported_scope: str | None = None
+    public_rendering: OptionalPublicRendering = None
+
+
+def read_public_rendering(decision: ClaimDecision | dict[str, Any] | None) -> PublicRendering | None:
+    """None if absent, invalid, or not a complete evaluation. Never infers True."""
+    if decision is None:
+        return None
+    if not evaluation_is_complete(decision):
+        return None
+    if isinstance(decision, ClaimDecision):
+        return decision.public_rendering
+    raw = decision.get("public_rendering") if isinstance(decision, dict) else None
+    return _coerce_public_rendering(raw)
 
 
 def read_reason_code(decision: ClaimDecision | dict[str, Any] | None) -> ReasonCode | None:

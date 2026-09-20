@@ -96,6 +96,7 @@ from app.services.editorial_reason import (
     reason_code_for,
     render_reason,
 )
+from app.services.public_rendering import public_rendering_for
 from app.services.event_service import EventService
 from app.services.evidence_source_registry import is_preferred_domain, preferred_domains
 from app.services.fetching import HttpFetcher, extract_text, is_extractable_document
@@ -719,6 +720,15 @@ class VerificationService:
             evaluation_state=EvaluationState.COMPLETE,
             verified_scope=verified,
             unsupported_scope=unsupported,
+            public_rendering=public_rendering_for(
+                status=claim.status.value,
+                evaluation_state=EvaluationState.COMPLETE,
+                support_basis=basis,
+                proposition_role=role.value,
+                reason_code=code,
+                verified_scope=verified,
+                unsupported_scope=unsupported,
+            ),
         )
 
     def _skipped_decision(self, claim: Claim, *, reason: str) -> ClaimDecision:
@@ -735,6 +745,7 @@ class VerificationService:
             reason_code=None,
             verified_scope=None,
             unsupported_scope=None,
+            public_rendering=None,
         )
 
     def _record_skipped_decisions(

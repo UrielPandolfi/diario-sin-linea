@@ -2,18 +2,18 @@
 
 **Fecha:** 2026-09-20
 
-**Tarea:** Track C — PR C3 (`reason_code` + scopes deterministas). C4 no empezó.
+**Tarea:** Track C — PR C4 (`public_rendering`). C5 no empezó.
 
 ## Qué quedó
 
-La resolución estructurada de un claim con `evaluation_state=complete` tiene `reason_code` determinista, `final_reason` renderizado desde ese código, y `verified_scope` solo cuando un `claim_fragment` de QUALIFIES identifica un subconjunto propio del texto evaluado. No hay split C8 del resto. Skipped/legacy no reciben esas razones. Independencia, umbrales de contradicción, Writing y C1/C2 se conservan.
+Cada decisión completa persiste un contrato `PublicRendering` (permisos de atribución, categórico, titular sin atribuir, lenguaje de corroboración independiente). Se deriva en código de status + evaluation_state + support_basis + rol + reason/scopes. Skipped/legacy: `None`. El GET de V1 lee el snapshot de V1; publicar V2 muestra el de V2. Writing no recibe el contrato. C3 quedó en `3523551`.
 
 ## Validación
 
-- Dirigidos C3: **103 passed**
-- Suite API completa: **671 passed**, 1 warning Alembic preexistente
+- Dirigidos C4 (`test_public_rendering.py` + C1–C3 relacionados): **120 passed**
+- Suite API completa: **679 passed**, 1 warning Alembic preexistente
 - `docker compose exec api pytest -q` no se ejecutó: `docker` no está en PATH; se usó `python -m pytest -q` en `apps/api`
 
 ## Pendiente
 
-C4 y el resto de Track C. No hay migración. No backfill de ArticleVersion.
+C5 (validador de superficie). No hay migración. No backfill de ArticleVersion.

@@ -32,6 +32,7 @@ from app.services.claim_card_presentation import (
 from app.services.editorial_gate import event_geo_keys, geo_places_conflict, item_geo_keys
 from app.services.editorial_label_policy import editorial_public_payload, labels_for_event_claims
 from app.services.editorial_reason import public_resolution_fields
+from app.services.public_rendering import public_rendering_payload
 from app.services.evidence_snapshot import (
     evidence_snapshot_for_version,
     snapshot_context_claims,
@@ -338,6 +339,7 @@ def compact_public_claims(
             payload.update(public_resolution_fields(decision))
         else:
             payload.update(public_resolution_fields(None))
+        payload["public_rendering"] = public_rendering_payload(decision if isinstance(decision, dict) else None)
         rows.append(payload)
     return rows
 

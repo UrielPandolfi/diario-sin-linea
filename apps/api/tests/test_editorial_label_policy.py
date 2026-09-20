@@ -620,6 +620,12 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
         "final_reason": "Un origen informativo conocido no alcanza para corroboración independiente (SINGLE_SOURCE).",
         "verified_scope": "Vital presentó una denuncia",
         "unsupported_scope": "penal",
+        "public_rendering": {
+            "attribution_required": True,
+            "categorical_allowed": False,
+            "headline_unattributed_allowed": False,
+            "independent_confirmation_language_allowed": False,
+        },
         "support_basis": {
             "known_independent_count": 1,
             "unknown_group_count": 0,
@@ -664,6 +670,9 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert v1_public[0]["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
     assert v1_public[0]["verified_scope"] == "Vital presentó una denuncia"
     assert v1_public[0]["unsupported_scope"] == "penal"
+    assert v1_public[0]["public_rendering"]["categorical_allowed"] is False
+    assert v1_public[0]["public_rendering"]["headline_unattributed_allowed"] is False
+    assert v1_public[0]["public_rendering"]["independent_confirmation_language_allowed"] is False
 
     claim.status = ClaimStatus.SUPPORTED
     db_session.flush()
@@ -691,6 +700,12 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
         "final_reason": "2 coberturas periodísticas independientes sostienen la proposición.",
         "verified_scope": claim.canonical_text,
         "unsupported_scope": None,
+        "public_rendering": {
+            "attribution_required": False,
+            "categorical_allowed": True,
+            "headline_unattributed_allowed": True,
+            "independent_confirmation_language_allowed": True,
+        },
         "support_basis": {
             "known_independent_count": 2,
             "unknown_group_count": 0,
@@ -729,6 +744,8 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert live_main["reason_code"] == ReasonCode.INDEPENDENT_CORROBORATION.value
     assert live_main["verified_scope"] == claim.canonical_text
     assert live_main["unsupported_scope"] is None
+    assert live_main["public_rendering"]["categorical_allowed"] is True
+    assert live_main["public_rendering"]["independent_confirmation_language_allowed"] is True
 
     frozen = compact_public_claims(db_session, event, freeze_to_version=1)
     assert {row["id"] for row in frozen} == {cid}
@@ -741,6 +758,8 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert frozen[0]["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
     assert frozen[0]["verified_scope"] == "Vital presentó una denuncia"
     assert frozen[0]["unsupported_scope"] == "penal"
+    assert frozen[0]["public_rendering"]["categorical_allowed"] is False
+    assert frozen[0]["public_rendering"]["independent_confirmation_language_allowed"] is False
     db_session.commit()
 
     with TestClient(app) as client:
@@ -756,6 +775,8 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert public_row["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
     assert public_row["verified_scope"] == "Vital presentó una denuncia"
     assert public_row["unsupported_scope"] == "penal"
+    assert public_row["public_rendering"]["categorical_allowed"] is False
+    assert public_row["public_rendering"]["independent_confirmation_language_allowed"] is False
 
     from app.domain.enums import ArticleStatus
     from app.models import ArticleVersion
@@ -846,6 +867,8 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert before_v2["published_version"] == 1
     assert before_v2["claims"][0]["presentation"]["verification_label"] == "Un solo origen"
     assert before_v2["claims"][0]["reason_code"] == ReasonCode.SINGLE_KNOWN_ORIGIN.value
+    assert before_v2["claims"][0]["public_rendering"]["categorical_allowed"] is False
+    assert still_v1[0]["public_rendering"]["categorical_allowed"] is False
 
     AuditService(db_session, llm=FakeStructuredLLM({"ArticleAuditResult": ArticleAuditResult(passed=True, issues=[])})).audit(
         event.id, trigger="test"
@@ -862,6 +885,8 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert v2_rows[0]["reason_code"] == ReasonCode.INDEPENDENT_CORROBORATION.value
     assert v2_rows[0]["verified_scope"] == claim.canonical_text
     assert v2_rows[0]["unsupported_scope"] is None
+    assert v2_rows[0]["public_rendering"]["categorical_allowed"] is True
+    assert v2_rows[0]["public_rendering"]["independent_confirmation_language_allowed"] is True
     with TestClient(app) as client:
         after_v2 = client.get(f"/api/v1/articles/{article.slug}").json()
     assert after_v2["published_version"] == 2
@@ -872,6 +897,8 @@ def test_public_claims_freeze_presentation_and_labels_to_published_snapshot(db_s
     assert after_v2["claims"][0]["reason_code"] == ReasonCode.INDEPENDENT_CORROBORATION.value
     assert after_v2["claims"][0]["verified_scope"] == claim.canonical_text
     assert after_v2["claims"][0]["unsupported_scope"] is None
+    assert after_v2["claims"][0]["public_rendering"]["categorical_allowed"] is True
+    assert after_v2["claims"][0]["public_rendering"]["independent_confirmation_language_allowed"] is True
 
 
 def test_frozen_v1_skipped_stays_unevaluated_after_later_complete(db_session: Session) -> None:
@@ -905,6 +932,7 @@ def test_frozen_v1_skipped_stays_unevaluated_after_later_complete(db_session: Se
     assert frozen[0]["verified_scope"] is None
     assert frozen[0]["unsupported_scope"] is None
     stored = snap["decision_by_claim_id"][cid]
+    assert frozen[0]["public_rendering"] is None
     assert read_evaluation_state(stored) is not None
     assert evaluation_is_complete(stored) is False
 
@@ -956,6 +984,7 @@ def test_frozen_legacy_decision_without_evaluation_state_keeps_evaluated_copy(db
     assert frozen[0]["verified_scope"] is None
     assert frozen[0]["unsupported_scope"] is None
     assert frozen[0]["status"] == ClaimStatus.SINGLE_SOURCE.value
+    assert frozen[0]["public_rendering"] is None
 
 
 def test_frozen_missing_decision_is_not_filled_from_live_verify(db_session: Session) -> None:
@@ -982,3 +1011,4 @@ def test_frozen_missing_decision_is_not_filled_from_live_verify(db_session: Sess
     assert frozen[0]["reason_code"] is None
     assert frozen[0]["verified_scope"] is None
     assert frozen[0]["unsupported_scope"] is None
+    assert frozen[0]["public_rendering"] is None

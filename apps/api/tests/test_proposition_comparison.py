@@ -303,3 +303,6 @@ def test_qualifies_partial_claim_does_not_promote_full_proposition(db_session):
     assert decision.unsupported_scope is None
     assert decision.verified_scope != text
     assert decision.final_reason == "La evidencia solo sostiene parte de la proposición."
+    assert decision.public_rendering is not None
+    assert decision.public_rendering.categorical_allowed is False
+    assert decision.public_rendering.independent_confirmation_language_allowed is False
