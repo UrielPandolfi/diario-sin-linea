@@ -102,7 +102,7 @@ class WritingService:
                 event_id=event.id,
                 pipeline_run_id=run.id,
             ):
-                result = self._run(event, trigger=trigger)
+                result = self._run(event, trigger=trigger, writing_run_id=str(run.id))
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = {**(run.metadata_json or {}), **result}
@@ -143,7 +143,7 @@ class WritingService:
         )
         return self.session.scalars(stmt).first()
 
-    def _run(self, event: Event, *, trigger: str) -> dict:
+    def _run(self, event: Event, *, trigger: str, writing_run_id: str) -> dict:
         pipeline_runs = self.pipeline.list_for_event(event.id, limit=50)
         claim_run, verify_run = pair_from_runs(list(pipeline_runs))
         decisions = ((verify_run.metadata_json if verify_run is not None else None) or {}).get("decision_by_claim_id") or {}
@@ -264,6 +264,7 @@ class WritingService:
                 article.status = ArticleStatus.DRAFT
             self.session.flush()
         evidence_snapshot["version"] = article.current_version
+        evidence_snapshot["writing_run_id"] = writing_run_id
         base.update(
             {
                 "article_id": str(article.id),
@@ -271,6 +272,7 @@ class WritingService:
                 "written": True,
                 "reason": change_reason,
                 "version": article.current_version,
+                "writing_run_id": writing_run_id,
                 "material_reasons": change.reasons,
             }
         )

@@ -2,12 +2,16 @@
 
 **Fecha:** 2026-09-20
 
-**Tarea:** TRACK C PR C10 — UI de respaldo (popover accesible y panel inferior móvil).
+**Tarea:** TRACK C PR C11 — trazabilidad por versión en Admin/export y cierre del track.
 
 ## Qué quedó
 
-C10 está en código sobre C9 (`ee56641`). Escritorio abre un popover (hover fino + ancho ≥768); el resto usa un bottom sheet modal. Desktop y móvil comparten `ClaimEvidenceList` y el copy público C9. No hay inferencia editorial en frontend ni llamadas al abrir. C11 no empezó.
+C11 está en código sobre C10 (`27692c1`). C2 ya ataba el snapshot a la versión; C11 expone esa cadena en Admin/export y sella `writing_run_id` al persistir Writing (fuera del prompt). Default: `published_version`. Selección explícita de borrador/histórica. Sin publicada: 409, no se presenta el borrador como live. Sin migración.
+
+Consulta: `GET /api/v1/admin/articles/{id}/trace` y `GET /api/v1/admin/articles/{id}/versions/{n}/trace`. Sección en `/admin/events/[id]`. Schema de export `article-version-trace-1` ≠ `contract_version` del snapshot.
+
+C11 cerrado. Track C no está “completo para merge/despliegue”: siguen los pendientes de C8–C10 (relativos/gerundios, mixtos históricos, QUALIFIES, `pending`/`failed`, visual de C10 solo en chat).
 
 ## Pendiente
 
-C11 (export/consulta). Relativos/gerundios y atributos vagos no se atomizan. Claims históricos mixtos no se migran. QUALIFIES sigue sin `unsupported_scope` por resta. `pending`/`failed` no se escriben en SUCCESS.
+No merge. No deploy. Verificación visual de C10 no versionada. Freeze público de claims sigue con `list_for_event(limit=50)`; el export C11 usa `list_lineage_runs` sin ese tope.

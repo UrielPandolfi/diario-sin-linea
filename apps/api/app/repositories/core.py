@@ -354,6 +354,23 @@ class PipelineRunRepository:
         )
         return list(self.session.scalars(stmt))
 
+    def list_lineage_runs(self, event_id: UUID) -> list[PipelineRun]:
+        """Writing, auditing, verification and claim_resolution for an event, newest first.
+
+        Unbounded: version export must not drop a bound V1 because a later run filled the usual 50 cap.
+        """
+        stmt = (
+            select(PipelineRun)
+            .where(
+                PipelineRun.event_id == event_id,
+                PipelineRun.stage.in_(
+                    ("writing", "auditing", "verification", "claim_resolution")
+                ),
+            )
+            .order_by(PipelineRun.started_at.desc())
+        )
+        return list(self.session.scalars(stmt))
+
     def list_for_item(self, source_item_id: UUID, *, limit: int = 20) -> list[PipelineRun]:
         stmt = (
             select(PipelineRun)
@@ -681,6 +698,14 @@ class ArticleRepository:
             ArticleVersion.version_number == version_number,
         )
         return self.session.scalars(stmt).first()
+
+    def list_versions(self, article_id: UUID) -> list[ArticleVersion]:
+        stmt = (
+            select(ArticleVersion)
+            .where(ArticleVersion.article_id == article_id)
+            .order_by(ArticleVersion.version_number.asc())
+        )
+        return list(self.session.scalars(stmt))
 
     def lock_by_id(self, article_id: UUID) -> Article | None:
         stmt = (

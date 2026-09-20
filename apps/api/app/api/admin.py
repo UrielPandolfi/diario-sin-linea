@@ -37,6 +37,7 @@ from app.services.publication_outcome import (
 )
 from app.schemas import SourceCreate, SourceUpdate
 from app.services.hero_image_service import ensure_in_own_session
+from app.services.version_traceability import VersionTraceError, build_article_version_trace
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
 from app.services.pipeline_lock import is_write_audit_publish_busy
@@ -201,6 +202,25 @@ def _article_out(article) -> dict:
         "slug": article.slug,
         "editorial_hold": bool(article.editorial_hold),
     }
+
+
+def _article_version_summaries(db, article) -> list[dict]:
+    if article is None:
+        return []
+    return [
+        {
+            "id": str(row.id),
+            "version_number": row.version_number,
+            "change_reason": row.change_reason,
+            "published_at": _iso(row.published_at),
+            "created_at": _iso(row.created_at),
+        }
+        for row in ArticleRepository(db).list_versions(article.id)
+    ]
+
+
+def _trace_http(exc: VersionTraceError) -> HTTPException:
+    return HTTPException(status_code=exc.http_status, detail=exc.code)
 
 
 def _audit_out(runs) -> dict | None:
@@ -599,7 +619,11 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             for link in event.event_entities
         ],
         "claims": _claims_out(event, db),
-        "article": _article_out(article) if article is not None else None,
+        "article": (
+            {**_article_out(article), "versions": _article_version_summaries(db, article)}
+            if article is not None
+            else None
+        ),
         "live": live,
         "audit": _audit_out(runs),
         "token_usage": {
@@ -611,6 +635,29 @@ def get_event(event_id: UUID, db: DbSession) -> dict:
             for run in runs
         ],
     }
+
+
+@router.get("/articles/{article_id}/trace", dependencies=[Depends(require_admin)])
+def get_article_trace(
+    article_id: UUID,
+    db: DbSession,
+    version: int | None = Query(default=None),
+) -> dict:
+    try:
+        return build_article_version_trace(db, article_id=article_id, version_number=version)
+    except VersionTraceError as exc:
+        raise _trace_http(exc) from exc
+
+
+@router.get(
+    "/articles/{article_id}/versions/{version_number}/trace",
+    dependencies=[Depends(require_admin)],
+)
+def get_article_version_trace(article_id: UUID, version_number: int, db: DbSession) -> dict:
+    try:
+        return build_article_version_trace(db, article_id=article_id, version_number=version_number)
+    except VersionTraceError as exc:
+        raise _trace_http(exc) from exc
 
 
 @router.post(

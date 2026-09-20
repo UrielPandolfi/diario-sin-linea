@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. Track C10 (popover/sheet de respaldo) en código. C11 no empezó.
+Revisión: 2026-09-20. Track C11 (trazabilidad por versión en Admin/export) en código. C11 cerrado; Track C no equivale a merge/despliegue.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -119,13 +119,53 @@ Limitación: no hay motor lingüístico general; cláusulas relativas, gerundios
 
 En código: `claim_card_presentation` es la fuente única del copy público. Precedencia: disponibilidad de evaluación → resultado gated (`DISPROVEN`/`CONFLICTING`) → rol/alcance (parcial, mixto, utterance) → suficiencia del respaldo admitido para la proposición completa. Familias: Confirmado, Declaración confirmada, Respaldo limitado, No confirmado, En disputa, Contradicho, Sin evaluación disponible (+ pending/failed/skipped). No deriva copy de `llm_reason` ni de prosa libre. El GET público proyecta ese renderer sobre el snapshot de `published_version`; no reescribe snapshots. `demotion` sale del DTO público y permanece en Admin (`include_internal`). Conteos (`documents_consulted`, `documents_supporting`, procedencias) van en el DTO ampliado; unknown es `None`, no 0. El consumidor web lee los textos del backend y no recalcula certeza. Writing compacta sin esos textos. Tests: `test_claim_card_presentation.py`, freeze en `test_editorial_label_policy.py`, GET en `test_public_api.py`, consumidor en `claim-popover-copy.test.ts`.
 
-Pendiente exclusivo de C11: export y Admin de consulta.
+Pendiente de comprobaciones anteriores (no bloquean C11): relativos/gerundios; claims históricos mixtos; QUALIFIES sin `unsupported_scope` por resta; `pending`/`failed` no se escriben en SUCCESS. Verificación visual de C10 quedó en el chat, no en el repo.
 
 ## Track C10 — popover y panel inferior de respaldo — 2026-09-20
 
 En código: el artículo público (`ArticleBody`) anota solo segmentos con `claim_ids` resolubles. Escritorio: popover si `(hover: hover) and (pointer: fine)` y ancho ≥768; si no, bottom sheet modal. Ambos renderizan `ClaimEvidenceList` desde `claimEvidenceCopy` (textos C9). Hover no roba foco; click/Enter fijan el popover; Escape y click exterior cierran; un solo overlay. El sheet traba scroll, atrapa foco y restaura al cerrar. `sourceKey` (`slug:published_version`) limpia el estado al cambiar de versión. Abrir no dispara fetch/Verification. `/dev/respaldo` sirve fixtures en desarrollo (`notFound` en production). Tests: `article-body.test.tsx`, `claim-popover-copy.test.ts`. Visual local: viewport 1280×800 (popover) y 390×844 (sheet) sobre `/dev/respaldo`.
 
-Limitación: no hay Radix; el overlay reutiliza el patrón de `context-sheets` (portal + foco + backdrop). jsdom se agregó al harness web porque no había DOM runner. C11 no está.
+Limitación: no hay Radix; el overlay reutiliza el patrón de `context-sheets` (portal + foco + backdrop). jsdom se agregó al harness web porque no había DOM runner. Verificación visual local documentada en el chat de C10, no versionada en el repo.
+
+## Track C11 — trazabilidad por versión (Admin/export) — 2026-09-20
+
+C2 ya persistía el snapshot por versión (`coverage_run_id`, `verification_run_id`, `claims_fingerprint`, `contract_version`) y el GET público lo congela a `published_version`. Faltaba consultarlo en Admin/export y sellar `writing_run_id` con semántica explícita.
+
+En código: `WritingService.write` copia `writing_run_id=str(run.id)` al snapshot **después** del LLM. `GET /api/v1/admin/articles/{id}/trace` (default publicado) y `.../versions/{n}/trace` armán `article-version-trace-1` desde esa versión resuelta una sola vez (`version_traceability.py`, `list_lineage_runs` sin tope 50). `article_version` = `version_number`; `article_version_id` = UUID de `ArticleVersion`. Sin publicada, el default responde 409 `not_published` (no sustituye `current_version`). Admin muestra una sección en el detalle del suceso y descarga JSON. El GET público no gana IDs internos. Sin migración, sin backfill, sin etapa nueva de pipeline.
+
+Mapa: campo → origen persistido → vínculo.
+
+| Campo | Origen | Vínculo con ArticleVersion |
+| --- | --- | --- |
+| article_id / event_id | `articles` | `article_versions.article_id` |
+| article_version | `article_versions.version_number` | identidad exportada |
+| article_version_id | `article_versions.id` | UUID de esa fila |
+| writing_run_id | snapshot `writing_run_id` o writing SUCCESS con `metadata.version` igual; rewrite: copiado / `version_before` del audit | no es la última corrida del evento |
+| verification_run_id, coverage_run_id, based_on_claim_run_id, claims_fingerprint, contract_version | snapshot de writing o audit (`version` / `version_after`) | C2 |
+| current_version / published_version | punteros del Article | contexto admin, no identidad |
+
+Legacy: IDs conocidos se conservan; ausentes → `missing_fields`; objeto borrado → `unresolvable_fields`; stage/evento contradictorio → `inconsistencies` (no se reescribe el snapshot). `revise` editorial no inventa Writing. Tests: `test_version_traceability.py`.
+
+C11 cerrado en código y tests dirigidos. Eso no convierte en hechas las comprobaciones visuales de C10 ni un merge.
+
+## Track C — matriz C1–C11 (cierres acreditados, sin reauditoría)
+
+| Fase | Commit | Estado acreditado | Pendiente visible |
+| --- | --- | --- | --- |
+| C1 | `3523551` | Contrato determinista de causa/alcance | — |
+| C2 | `efaa0a8` | Freeze público al snapshot de `published_version` | Freeze público sigue leyendo `list_for_event(limit=50)` |
+| C3 | `3523551` (mismo corte de contrato) | `reason_code` / scopes en snapshot | `pending`/`failed` no se escriben en SUCCESS |
+| C4 | `632f591` | `public_rendering` de permisos | Snapshot legacy → `None` |
+| C5 | `7c98fa7` | Superficies vs contrato de esa versión | — |
+| C6 | `a15310f` | Assessment barato solo con SUPPORTS admitidos | — |
+| C7 | `a99e59a` | CONFLICTING exige comparabilidad | — |
+| C8 | `f96eccd` | Split acto vs caracterización | Relativos/gerundios; QUALIFIES sin `unsupported_scope` por resta; mixtos históricos |
+| C8b | `8dfc167` | `verified_scope` exige SUPPORTS admitido | — |
+| C9 | `ee56641` | Copy público desde el contrato | Consumidor web no recalcula |
+| C10 | `27692c1` | Popover/sheet sobre copy C9 | Verificación visual en chat, no en repo; Next overlay de automatización no es de la app |
+| C11 | (este commit) | Export/Admin de la cadena por versión | No merge, no deploy |
+
+Terminar C11 ≠ Track C “completo para producción”.
 
 ## Track C — revisión integrada C1–C8 — 2026-09-20
 

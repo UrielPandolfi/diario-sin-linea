@@ -190,9 +190,17 @@ def persist_version_snapshot(
         stage=WRITING_STAGE,
         status=PipelineStatus.SUCCESS,
         finished_at=now,
-        metadata_json={**persist_snapshot_fields(snap), "written": True, "version": article.current_version},
+        metadata_json={},
     )
     session.add(writing)
+    session.flush()
+    snap["writing_run_id"] = str(writing.id)
+    writing.metadata_json = {
+        **persist_snapshot_fields(snap),
+        "written": True,
+        "version": article.current_version,
+        "writing_run_id": str(writing.id),
+    }
     session.flush()
     return snap
 

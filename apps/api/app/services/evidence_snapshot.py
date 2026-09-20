@@ -24,6 +24,7 @@ _SNAPSHOT_KEYS = (
     "central_unverified",
     "stale_verification",
     "version",
+    "writing_run_id",
     "article_context",
 )
 
@@ -62,10 +63,11 @@ def _looks_like_snapshot(payload: dict[str, Any]) -> bool:
     return bool(payload.get("contract_version") and (payload.get("coverage") is not None or payload.get("claims_fingerprint")))
 
 
-def evidence_snapshot_for_version(
+def evidence_snapshot_binding_for_version(
     runs: Sequence[PipelineRun],
     version: int,
-) -> dict[str, Any] | None:
+) -> tuple[dict[str, Any], PipelineRun] | None:
+    """First audit/writing snapshot explicitly bound to `version`. Newest-first if `runs` is."""
     target = int(version)
     for run in runs:
         meta = run.metadata_json or {}
@@ -73,15 +75,23 @@ def evidence_snapshot_for_version(
             snap = meta.get("evidence_snapshot")
             version_after = meta.get("version_after")
             if isinstance(snap, dict) and version_after is not None and int(version_after) == target:
-                return dict(snap)
+                return dict(snap), run
         if run.stage == WRITING_STAGE and run.status == PipelineStatus.SUCCESS:
             snap = snapshot_from_run_metadata(meta)
             if snap is None:
                 continue
             bound = snap.get("version") if snap.get("version") is not None else meta.get("version")
             if bound is not None and int(bound) == target:
-                return snap
+                return snap, run
     return None
+
+
+def evidence_snapshot_for_version(
+    runs: Sequence[PipelineRun],
+    version: int,
+) -> dict[str, Any] | None:
+    found = evidence_snapshot_binding_for_version(runs, version)
+    return None if found is None else found[0]
 
 
 def article_context_from_snapshot(snapshot: dict[str, Any] | None) -> ArticleContext | None:

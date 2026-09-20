@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { EditorialReviseForm, HoldOverrideForm } from "@/features/admin/editorial-revise-form";
+import { VersionTracePanel } from "@/features/admin/version-trace-panel";
 import { editorialLabelCopy } from "@/features/article/claim-status";
 import { adminFetch, adminJson, BODY_SOURCE_LABELS, formatCoverage, formatDuration, formatTokens, formatUsd, formatWhen, labelLookup, type AdminEventDetail } from "@/lib/admin";
 
@@ -471,6 +472,8 @@ export default function AdminEventDetailPage() {
               <p className="px-4 py-6 font-sans text-sm text-secondary">Sin article draft.</p>
             )}
           </section>
+
+          <VersionTracePanel detail={event} />
 
           {event.article?.editorial_hold ? (
             <HoldOverrideForm

@@ -230,6 +230,45 @@ export type AdminPublicationDetail = AdminSourceItem & {
   pipeline_runs: AdminPipelineRun[];
 };
 
+export type AdminArticleVersionSummary = {
+  id: string;
+  version_number: number;
+  change_reason: string | null;
+  published_at: string | null;
+  created_at: string | null;
+};
+
+export type AdminVersionTrace = {
+  export_schema: string;
+  article_id: string;
+  event_id: string;
+  article_version: number;
+  article_version_id: string;
+  writing_run_id: string | null;
+  writing_run_meaning: string;
+  writing_run_source: string | null;
+  verification_run_id: string | null;
+  coverage_run_id: string | null;
+  based_on_claim_run_id: string | null;
+  claims_fingerprint: string | null;
+  contract_version: string | null;
+  change_reason: string | null;
+  missing_fields: string[];
+  unresolvable_fields: string[];
+  inconsistencies: { field: string; detail: string }[];
+  selection: {
+    requested: number | "published";
+    resolved_version: number;
+    is_published_version: boolean;
+    is_current_version: boolean;
+  };
+  article_pointers: {
+    current_version: number;
+    published_version: number | null;
+  };
+  snapshot_source: { stage: string; run_id: string } | null;
+};
+
 export type AdminPublicationsPage = {
   items: AdminSourceItem[];
   total: number;
@@ -346,6 +385,7 @@ export type AdminEventDetail = AdminEvent & {
     published_at: string | null;
     slug: string;
     editorial_hold?: boolean;
+    versions?: AdminArticleVersionSummary[];
   } | null;
   live: {
     headline: string;

@@ -30,7 +30,7 @@ Routers (`main.py`): `api/health.py`, `api/public.py`, `api/cases.py`, `api/admi
 | Decisiones a preservar | `docs/ai/DECISIONS.md` (solo si hay evidencia de intención) |
 | Estado, stubs, hallazgos | `docs/ai/STATE.md` |
 | API pública / feed | `api/public.py`, `services/feed_ranking.py`; sitemap `GET /api/v1/sitemap-articles`; web `app/sitemap.ts`, `app/robots.ts`, `lib/seo/` |
-| Admin pipeline | `api/admin.py`, `apps/web/app/admin/` (Publicaciones `/admin/publications`, costos en tablero y suceso) |
+| Admin pipeline | `api/admin.py`, `apps/web/app/admin/` (Publicaciones `/admin/publications`, costos en tablero y suceso). Trazabilidad C11: `GET /api/v1/admin/articles/{id}/trace` y `.../versions/{n}/trace` (`version_traceability.py`) |
 | Casos de lectores / contacto | `api/cases.py`, `admin_cases.py`, `services/case_service.py`, `case_rate_limit.py`; UI `/contacto`, `/seguimiento/[token]`, `/admin/cases` |
 | Revisión editorial | `services/editorial_service.py`, `features/admin/editorial-revise-form.tsx` |
 | Config / providers | `core/config.py`, `.env.example`, `providers/registry.py` |
