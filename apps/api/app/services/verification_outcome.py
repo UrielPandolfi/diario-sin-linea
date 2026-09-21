@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -69,55 +70,86 @@ def latest_success_claim_resolution(session: Session, event_id: UUID) -> Pipelin
     ).first()
 
 
+def _run_status(run: PipelineRun) -> str:
+    status = run.status
+    return str(status.value if hasattr(status, "value") else status)
+
+
+def _is_success(run: PipelineRun) -> bool:
+    return _run_status(run) == PipelineStatus.SUCCESS.value
+
+
+def _verification_for_claim(claim_run: PipelineRun, runs: Sequence[PipelineRun]) -> PipelineRun | None:
+    """Match a SUCCESS verification to the claim set, not only to the newest run id.
+
+    A later claim_resolution can keep the same claims_fingerprint (source_already_extracted).
+    Requiring based_on_claim_run_id == newest run id drops a still-valid verification.
+    A different fingerprint is a new claim set and must not reuse the prior approval.
+    """
+    fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint")
+    if not fingerprint:
+        return None
+    claim_id = str(claim_run.id)
+    same_fingerprint: PipelineRun | None = None
+    for run in runs:
+        if run.stage != VERIFICATION_STAGE or not _is_success(run):
+            continue
+        meta = run.metadata_json or {}
+        if meta.get("claims_fingerprint") != fingerprint:
+            continue
+        if str(meta.get("based_on_claim_run_id") or "") == claim_id:
+            return run
+        if same_fingerprint is None:
+            same_fingerprint = run
+    return same_fingerprint
+
+
 def pair_from_runs(runs: list[PipelineRun]) -> tuple[PipelineRun | None, PipelineRun | None]:
     claim_run = None
     for run in runs:
-        if run.stage == CLAIM_STAGE and run.status == PipelineStatus.SUCCESS:
+        if run.stage == CLAIM_STAGE and _is_success(run):
             claim_run = run
             break
     if claim_run is None:
         return None, None
-    fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint")
-    if not fingerprint:
+    verify_run = _verification_for_claim(claim_run, runs)
+    if verify_run is None:
         return claim_run, None
-    claim_id = str(claim_run.id)
-    for run in runs:
-        if run.stage != VERIFICATION_STAGE or run.status != PipelineStatus.SUCCESS:
-            continue
-        meta = run.metadata_json or {}
-        if str(meta.get("based_on_claim_run_id") or "") != claim_id:
-            continue
-        if meta.get("claims_fingerprint") != fingerprint:
-            continue
-        return claim_run, run
-    return claim_run, None
+    based_on = str((verify_run.metadata_json or {}).get("based_on_claim_run_id") or "")
+    if based_on:
+        for run in runs:
+            if run.stage == CLAIM_STAGE and _is_success(run) and str(run.id) == based_on:
+                return run, verify_run
+    return claim_run, verify_run
 
 
 def compatible_verification_pair(session: Session, event_id: UUID) -> tuple[PipelineRun | None, PipelineRun | None]:
     claim_run = latest_success_claim_resolution(session, event_id)
     if claim_run is None:
         return None, None
-    fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint")
-    if not fingerprint:
+    verify_runs = list(
+        session.scalars(
+            select(PipelineRun)
+            .where(
+                PipelineRun.event_id == event_id,
+                PipelineRun.stage == VERIFICATION_STAGE,
+                PipelineRun.status == PipelineStatus.SUCCESS,
+            )
+            .order_by(PipelineRun.finished_at.desc())
+        ).all()
+    )
+    verify_run = _verification_for_claim(claim_run, verify_runs)
+    if verify_run is None:
         return claim_run, None
-    verify_runs = session.scalars(
-        select(PipelineRun)
-        .where(
-            PipelineRun.event_id == event_id,
-            PipelineRun.stage == VERIFICATION_STAGE,
-            PipelineRun.status == PipelineStatus.SUCCESS,
-        )
-        .order_by(PipelineRun.finished_at.desc())
-    ).all()
-    claim_id = str(claim_run.id)
-    for run in verify_runs:
-        meta = run.metadata_json or {}
-        if str(meta.get("based_on_claim_run_id") or "") != claim_id:
-            continue
-        if meta.get("claims_fingerprint") != fingerprint:
-            continue
-        return claim_run, run
-    return claim_run, None
+    based_on = str((verify_run.metadata_json or {}).get("based_on_claim_run_id") or "")
+    if based_on:
+        try:
+            based = session.get(PipelineRun, UUID(based_on))
+        except (TypeError, ValueError):
+            based = None
+        if based is not None and based.stage == CLAIM_STAGE and _is_success(based):
+            return based, verify_run
+    return claim_run, verify_run
 
 
 def verification_view_for_event(session: Session, event_id: UUID) -> tuple[PipelineRun | None, VerificationView]:
@@ -331,11 +363,13 @@ def writing_evidence_snapshot(
         or (isinstance(coverage, dict) and coverage.get("verification_incomplete"))
         or central_unverified
     )
+    based_on = verify_meta.get("based_on_claim_run_id")
+    coverage_run_id = based_on or (str(claim_run.id) if claim_run is not None else None)
     return {
         "contract_version": CONTRACT_VERSION,
-        "coverage_run_id": str(claim_run.id) if claim_run is not None else None,
+        "coverage_run_id": coverage_run_id,
         "verification_run_id": str(verify_run.id) if verify_run is not None else None,
-        "based_on_claim_run_id": verify_meta.get("based_on_claim_run_id"),
+        "based_on_claim_run_id": based_on,
         "claims_fingerprint": fingerprint,
         "evaluated_claims": verify_meta.get("evaluated_claims") or [],
         "decision_by_claim_id": verify_meta.get("decision_by_claim_id") or {},

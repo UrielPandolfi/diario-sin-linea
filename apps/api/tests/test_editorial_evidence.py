@@ -582,9 +582,10 @@ def test_new_extract_plus_failed_verify_does_not_reuse_prior_approval(db_session
     written = WritingService(db_session, llm=FakeStructuredLLM({"ArticleDraft": draft})).write(
         event.id, trigger="admin"
     )
-    if written.get("written"):
-        assert written.get("verification_run_id") is None
-        assert written.get("stale_verification") is True
+    assert written.get("written") is False
+    assert written.get("reason") == "verification_not_paired"
+    assert written.get("stale_verification") is True
+    assert written.get("verification_run_id") in (None, "")
 
 
 def test_video_search_hit_only_is_not_authentic_primary(db_session: Session) -> None:

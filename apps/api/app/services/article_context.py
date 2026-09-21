@@ -182,6 +182,22 @@ def last_success_run(runs: Sequence[PipelineRun], stage: str) -> PipelineRun | N
     return None
 
 
+def last_written_run(runs: Sequence[PipelineRun]) -> PipelineRun | None:
+    """Last Writing SUCCESS that actually produced a version.
+
+    `verification_not_paired` and `no_material_change` are SUCCESS with written=False.
+    Using them as the previous snapshot would block a later paired write of the same claims.
+    """
+    for run in runs:
+        if run.stage != "writing":
+            continue
+        if run.status != PipelineStatus.SUCCESS:
+            continue
+        if (run.metadata_json or {}).get("written") is True:
+            return run
+    return None
+
+
 def _to_context_claim(
     claim: Claim,
     *,

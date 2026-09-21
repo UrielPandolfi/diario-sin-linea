@@ -171,6 +171,14 @@ El tope `list_for_event(limit=50)` sí afectaba el GET público: esa consulta es
 
 Listo para revisión de merge ≠ despliegue validado. Limitaciones aceptadas de C8–C10 siguen.
 
+## Lote real post-C — 2026-09-21
+
+Diez entradas acreditadas por Redis `claimed_items` del poll `0b417818` (no «últimas 10» ni la ventana de 24 h). Siete eventos de ese lote; el cluster Beat 04:01 y los fixtures `traceqa-*.test` se excluyen del balance. `auto_poll_enabled=false`.
+
+Causa de `contract_unpaired` / `surface_contract_incomplete` en candidatos con verify SUCCESS del mismo fingerprint: `pair_from_runs` ataba Verification al id de la claim_resolution más nueva. Un extract posterior `source_already_extracted` rompía el par; Writing persistía snapshot sin `decision_by_claim_id`. En pollos `4704ee4e` Writing se disparó cuando terminó el verify del fingerprint viejo mientras el fingerprint nuevo seguía RUNNING. `public_rendering` sí estaba en el metadata de Verification SUCCESS; C4 lo omite del DTO de Writing, no del snapshot de Audit cuando hay par. C5 de Andis/Pilar/Jerez/Granja700 V1 permanece fail-closed.
+
+Corrección en `verification_outcome.pair_from_runs` / `compatible_verification_pair`, skip `verification_not_paired` en Writing, y `last_written_run`. Tests `test_snapshot_pairing.py`. Suite: 777 passed. Sin reproceso pago, sin backfill de snapshots, sin cambio de budget/prompts. Connection error: 7 tareas Celery succeeded con `error=Connection error.` ~04:17 UTC; SDK `max_retries=0`; `_fail` no relanza; sin request id ni status HTTP en logs.
+
 ## Track C — revisión integrada C1–C8 — 2026-09-20
 
 Hallazgo confirmado: `editorial_scopes` sellaba `verified_scope` con el texto entero si el status era `SINGLE_SOURCE`/`SUPPORTED`, aunque no hubiera `SUPPORTS` persistido. Un assessment completo cuyo único SUPPORTS era rechazado conservaba SINGLE_SOURCE y aparentaba alcance verificado. Corrección: el texto entero como `verified_scope` exige `SUPPORTS` admitido; sin él ambos scopes quedan `None`. QUALIFIES con fragmento no cambia. Tests: `test_single_source_without_admitted_supports_does_not_verify_the_claim`, `test_rejected_raw_supports_does_not_activate_cheap_support`. C9 consume esos scopes; no los recalcula.

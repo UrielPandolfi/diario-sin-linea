@@ -23,7 +23,7 @@ from app.schemas.writing import ArticleDraft
 from app.services.article_context import (
     build_article_context,
     claims_snapshot_for_version,
-    last_success_run,
+    last_written_run,
 )
 from app.services.article_service import ArticleService
 from app.services.claim_service import comparison_key_for
@@ -173,8 +173,8 @@ class WritingService:
 
         previous = None
         if article is not None:
-            previous_run = last_success_run(
-                self.pipeline.list_for_event(event.id, limit=50), WRITING_STAGE
+            previous_run = last_written_run(
+                self.pipeline.list_for_event(event.id, limit=50)
             )
             if previous_run is not None:
                 previous = (previous_run.metadata_json or {}).get("claims_snapshot") or []
@@ -205,6 +205,18 @@ class WritingService:
             source_context_chars=self.settings.writing_source_context_chars,
         )
         claim_run, verify_run = pair_from_runs(list(pipeline_runs))
+        if claim_run is not None and verify_run is None:
+            # A claim set without a SUCCESS verification of the same fingerprint
+            # must not persist a candidate: Audit would only see contract_unpaired
+            # / empty public_rendering. Tests without claim_resolution still write.
+            base["reason"] = "verification_not_paired"
+            base["stale_verification"] = True
+            base["coverage_run_id"] = str(claim_run.id)
+            base["claims_fingerprint"] = (claim_run.metadata_json or {}).get("claims_fingerprint")
+            if article is not None:
+                base["article_id"] = str(article.id)
+                base["version"] = article.current_version
+            return base
         evidence_snapshot = capture_evidence_snapshot(article_context, claim_run, verify_run)
         live = None
         if article is not None and article.published_version is not None:
@@ -468,7 +480,7 @@ def should_enqueue_write(session: Session, event_id: UUID) -> bool:
         if event is None:
             return True
         claims = list(event.claims)
-        previous_run = last_success_run(runs, WRITING_STAGE)
+        previous_run = last_written_run(runs)
         previous = ((previous_run.metadata_json if previous_run is not None else None) or {}).get("claims_snapshot")
         _claim_run, verify_run = pair_from_runs(list(runs))
         decisions = ((verify_run.metadata_json if verify_run is not None else None) or {}).get("decision_by_claim_id") or {}
