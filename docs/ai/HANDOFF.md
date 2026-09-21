@@ -2,16 +2,30 @@
 
 **Fecha:** 2026-09-21
 
-**Tarea:** Diagnóstico del lote real posterior a Track C (10 entradas del poll `0b417818`). No merge. No deploy. No reproceso pago.
+**Tarea:** Correcciones post-revisión del lote y `f87c58f`. No merge. No deploy. No reproceso pago.
 
 ## Qué quedó
 
-La portada mezclaba 2 artículos QA (`traceqa-*.test`), 2 publicaciones del cluster Beat 04:01 UTC (Ley BA `5a27192d`, Caulo `62fe3b38`) y la V1 de Milei World Tour (`d7894ad7`). Esa V1 sí pasó Audit; la V2 quedó bloqueada. Los fixtures QA están `is_monitored=false`; `auto_poll_enabled=false`. Export: `.editorial-evals/lote-post-c-diag.json` (antes de tocar código) y `.editorial-evals/lote-post-c-chain.json` (cadena, gitignored).
+Se conservó el pairing de `f87c58f` (fingerprint, no reutilizar otro fingerprint, skip `verification_not_paired`, `based_on` real). El export `lote-post-c-chain.json` se conserva; la copia corregida es `.editorial-evals/lote-post-c-chain-corrected.json` (`selection_method: c11_explicit_version`, gitignored).
 
-Bug demostrado: `pair_from_runs` exigía `based_on_claim_run_id ==` la claim_resolution más nueva. Un `source_already_extracted` con el mismo `claims_fingerprint` dejaba Writing sin par; persistía snapshot vacío (`contract_unpaired` + `surface_contract_incomplete`). Corrección: emparejar Verification SUCCESS por fingerprint; no reutilizar otro fingerprint; no escribir candidato si hay claim_run sin par; `last_written_run` ignora `written=False`. Tests: `test_snapshot_pairing.py`. Suite backend: 777 passed.
+Falsos positivos corregidos en código: export V2 Milei mezclado con snapshot V1; atribución ANDIS de la misma afirmación; match duración Pilar; match secretario/hambre Jerez; transferencia Granja700 caracterización→hecho cuando el titular solo afirma el hecho; skipped fingido como atribución.
 
-C5 de atribución/categorización en Andis (`07e56d84`) y Pilar (`e134e571`) es bloqueo justificado. Connection error de Verification: transporte OpenAI sin HTTP status; Celery marca la tarea succeeded porque `_fail` captura; no se agregaron retries.
+Bloqueo conservado: Jerez `7d7a8812` en titular sin atribución.
+
+Indeterminados: Pilar `f276190c`; Granja700 `529b15f0` (1.200); snapshots V2 unpaired (Milei `d7894ad7`, Granja700 `374b6916`).
+
+V1 Milei (`d7894ad7`) claim `12b66950`: en DB hay dos `Source` de Página/12 (RSS sin `domain` + research `pagina12.com.ar`) contados como `known_independent_count=2`. Identidad alineada a la regla vigente de un solo medio. **No** se reescribió V1. Independencia pendiente de revisar; corrección editorial solo si se decide usar `EditorialService.revise`.
+
+`last_written_run` / `claims_snapshot_for_version` ignoran `unaudited_candidate`. `_reporting_origin` usa el host normalizado. `auto_poll_enabled=false`. Suite API: 789 passed (2026-09-21).
 
 ## Pendiente
 
-Reproceso mínimo (no ejecutado): pollos `4704ee4e` y Milei NY `e362ee90` necesitan Verification SUCCESS del fingerprint actual y un Writing nuevo; Milei V2 / Granja 700 V2 con el mismo fingerprint pueden reescribirse sin LLM de verify. No reintentar los cinco FAILED. Imágenes api/worker/beat siguen en el build 03:37 UTC (código del lote); el arreglo está en el working tree / commit, no dentro de esos procesos hasta rebuild. Revisión de merge de Track C sigue aparte.
+Reproceso mínimo (no ejecutado):
+
+- ANDIS: reauditar el mismo candidato si, tras quitar los falsos positivos, no queda otro HIGH.
+- Jerez: el titular sigue sin atribuir la identificación. Corregir con `EditorialService.revise` y después auditar.
+- Pilar y Granja700 V1 (1.200 / principal skipped): resolver el contrato faltante; reauditar el mismo snapshot incompleto no lo completa.
+- Versiones con snapshot vacío (Milei V2, Granja700 V2): nueva versión con verificación compatible; no rellenar el snapshot vacío.
+- Pollos `4704ee4e` y Milei NY `e362ee90` siguen necesitando Verification SUCCESS del fingerprint actual.
+- Connection error de Verification: sin retries nuevos.
+- Revisión de merge de Track C sigue aparte.

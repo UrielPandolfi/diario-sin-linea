@@ -147,6 +147,69 @@ def test_single_outlet_stays_single_source() -> None:
     ) in {ReasonCode.SINGLE_KNOWN_ORIGIN, ReasonCode.INDEPENDENCE_NOT_ESTABLISHED}
 
 
+def test_same_outlet_rss_and_research_source_is_single_origin() -> None:
+    """RSS Source with empty domain + research Source for the same host is one outlet."""
+    excerpt_a = (
+        "Milei volverá hoy al país del norte, que ya visitó 18 veces. Pese al récord de giras, "
+        "el Gobierno se niega a aportar información sobre los costos y las comitivas."
+    )
+    excerpt_b = (
+        "Ante los pedidos de información pública, el gobierno sigue sin transparentar los gastos "
+        "y la conformación de las comitivas, aportes de terceros y explotación comercial de la "
+        "investidura presidencial."
+    )
+    rss = SimpleNamespace(
+        id=uuid4(),
+        domain=None,
+        feed_url="https://www.pagina12.com.ar/arc/outboundfeeds/rss/secciones/el-pais/notas/",
+        homepage_url=None,
+        is_monitored=True,
+    )
+    research = SimpleNamespace(
+        id=uuid4(),
+        domain="pagina12.com.ar",
+        feed_url=None,
+        homepage_url=None,
+        is_monitored=False,
+    )
+    item_a = SimpleNamespace(
+        clean_text=excerpt_a,
+        canonical_url="https://www.pagina12.com.ar/2026/09/21/el-world-tour-de-milei/",
+        url="https://www.pagina12.com.ar/2026/09/21/el-world-tour-de-milei/",
+        title="World Tour",
+        source=rss,
+        metadata_json={"body_source": "extracted_html", "fetch_ok": True},
+    )
+    item_b = SimpleNamespace(
+        clean_text=excerpt_b,
+        canonical_url="https://www.pagina12.com.ar/2026/09/21/nuevo-viaje-a-eeuu/",
+        url="https://www.pagina12.com.ar/2026/09/21/nuevo-viaje-a-eeuu/",
+        title="Cuentas",
+        source=research,
+        metadata_json={"body_source": "extracted_html", "fetch_ok": True},
+    )
+    claim = _claim(
+        text="El gobierno argentino no ha transparentado los gastos y la conformación de las comitivas en las giras de Milei.",
+        evidence=[
+            SimpleNamespace(
+                evidence_type=EvidenceType.SUPPORTS,
+                excerpt=excerpt_a,
+                source_item=item_a,
+                source_url=item_a.url,
+            ),
+            SimpleNamespace(
+                evidence_type=EvidenceType.SUPPORTS,
+                excerpt=excerpt_b,
+                source_item=item_b,
+                source_url=item_b.url,
+            ),
+        ],
+    )
+    assessment = assess_origins(claim)
+    assert assessment.known_independent == 1
+    assert clamp_supported_status(claim, ClaimStatus.SUPPORTED) == ClaimStatus.SINGLE_SOURCE
+
+
 def test_same_agency_wire_is_one_origin_despite_distinct_wording() -> None:
     body_a = (
         "Según Télam, se produjo un incendio en un depósito de Rosario durante la madrugada "

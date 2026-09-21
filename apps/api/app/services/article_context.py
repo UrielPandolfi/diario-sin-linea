@@ -23,6 +23,7 @@ from app.schemas.writing import (
     ContextVerificationSol,
 )
 from app.services.claim_service import comparison_key_for
+from app.services.evidence_snapshot import is_unaudited_candidate
 from app.services.verification_outcome import pair_from_runs
 
 _IMPORTANCE_RANK = {
@@ -69,6 +70,8 @@ def claims_snapshot_for_version(runs: Sequence[PipelineRun], version: int) -> li
         if run.stage != "writing" or run.status != PipelineStatus.SUCCESS:
             continue
         meta = run.metadata_json or {}
+        if is_unaudited_candidate(meta):
+            continue
         bound = meta.get("version")
         if bound is None or int(bound) != target:
             continue
@@ -186,15 +189,20 @@ def last_written_run(runs: Sequence[PipelineRun]) -> PipelineRun | None:
     """Last Writing SUCCESS that actually produced a version.
 
     `verification_not_paired` and `no_material_change` are SUCCESS with written=False.
-    Using them as the previous snapshot would block a later paired write of the same claims.
+    `unaudited_candidate` is SUCCESS with written=True but did not produce the text
+    (retry to enqueue Audit). Using it as the previous snapshot would hide the producer.
     """
     for run in runs:
         if run.stage != "writing":
             continue
         if run.status != PipelineStatus.SUCCESS:
             continue
-        if (run.metadata_json or {}).get("written") is True:
-            return run
+        meta = run.metadata_json or {}
+        if meta.get("written") is not True:
+            continue
+        if is_unaudited_candidate(meta):
+            continue
+        return run
     return None
 
 

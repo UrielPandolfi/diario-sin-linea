@@ -49,8 +49,27 @@ class SourceRepository:
         return len(list(self.session.scalars(stmt)))
 
     def get_by_domain(self, domain: str) -> Source | None:
-        stmt = select(Source).where(Source.domain == domain)
-        return self.session.scalars(stmt).first()
+        if not domain:
+            return None
+        from app.core.urls import url_domain
+
+        stripped = url_domain(f"https://{domain}") if "://" not in domain else url_domain(domain)
+        candidates = [item for item in dict.fromkeys([domain, stripped, f"www.{stripped}"]) if item]
+        found = self.session.scalars(select(Source).where(Source.domain.in_(candidates))).first()
+        if found is not None:
+            return found
+        for source in self.session.scalars(
+            select(Source).where(or_(Source.domain.is_(None), Source.domain == ""))
+        ):
+            for url in (source.feed_url, source.homepage_url):
+                if not url:
+                    continue
+                try:
+                    if url_domain(url) == stripped:
+                        return source
+                except Exception:
+                    continue
+        return None
 
 
 class SourceItemRepository:

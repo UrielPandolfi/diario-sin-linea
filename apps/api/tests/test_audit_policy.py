@@ -596,6 +596,33 @@ def test_certainty_findings_skips_atribuidos_a_sus_declaraciones() -> None:
     assert issues == []
 
 
+def test_certainty_findings_requires_equivalent_not_shared_name() -> None:
+    article = type(
+        "A",
+        (),
+        {
+            "headline": "Identificaron a Franco Ibán Jerez tras los incidentes denunciados por Gerardo Huesen en Graneros",
+            "summary": "Según un reporte periodístico, Franco Ibán Jerez fue identificado.",
+            "body": "Según un reporte periodístico, Franco Ibán Jerez fue identificado.",
+            "body_blocks": None,
+        },
+    )()
+    snapshot = {
+        "evaluated_claims": [
+            {
+                "claim_id": "791fab61",
+                "canonical_text": (
+                    'Franco Ibán Jerez afirmó que el Gobierno nacional los estaba haciendo "morir de hambre" '
+                    "durante los incidentes en Graneros."
+                ),
+                "status": "SINGLE_SOURCE",
+            }
+        ]
+    }
+    issues = certainty_findings(article, snapshot)
+    assert not any(issue.reason == AuditIssueReason.SINGLE_AS_CORROBORATED for issue in issues)
+
+
 def test_certainty_findings_skips_habria_anticipado() -> None:
     article = _single_source_article(
         headline="Pérez habló del costo fiscal.",

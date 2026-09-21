@@ -10,7 +10,11 @@ from app.domain.enums import PipelineStatus
 from app.models import Article, ArticleVersion, PipelineRun
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.services.claim_card_presentation import contains_llm_reason
-from app.services.evidence_snapshot import evidence_snapshot_binding_for_version, snapshot_sources_by_ref
+from app.services.evidence_snapshot import (
+    evidence_snapshot_binding_for_version,
+    is_unaudited_candidate,
+    snapshot_sources_by_ref,
+)
 from app.services.feed_ranking import compact_public_claims
 from app.services.pipeline_lock import AUDITING_STAGE, WRITING_STAGE
 from app.services.verification_outcome import CLAIM_STAGE, VERIFICATION_STAGE
@@ -303,6 +307,8 @@ def _writing_runs_bound_to(lineage: list[PipelineRun], version: int) -> list[Pip
         if run.stage != WRITING_STAGE or run.status != PipelineStatus.SUCCESS:
             continue
         meta = run.metadata_json or {}
+        if is_unaudited_candidate(meta):
+            continue
         bound = meta.get("version")
         snap = meta.get("evidence_snapshot")
         if bound is None and isinstance(snap, dict):

@@ -300,14 +300,19 @@ def _reporting_origin(row) -> str | None:
     if fetch_ok_from_item(item) is False:
         return None
     host = _host(document_key(row) or "")
+    src = getattr(item, "source", None) if item is not None else None
+    source_domain = getattr(src, "domain", None) if src is not None else None
+    if source_domain:
+        host = host or _host(f"https://{source_domain}")
+    if not host and src is not None:
+        host = _host(getattr(src, "feed_url", None) or "") or _host(getattr(src, "homepage_url", None) or "")
     if host and _is_weak_independent_host(host):
         return None
-    src = getattr(item, "source", None) if item is not None else None
+    if host:
+        return f"reporting:{host}"
     source_id = getattr(src, "id", None) if src is not None else None
     if source_id:
         return f"reporting:{source_id}"
-    if host:
-        return f"reporting:{host}"
     return None
 
 

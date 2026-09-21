@@ -79,12 +79,51 @@ def _is_success(run: PipelineRun) -> bool:
     return _run_status(run) == PipelineStatus.SUCCESS.value
 
 
+def _claim_ids_from_meta(meta: dict[str, Any] | None) -> set[str]:
+    raw = meta or {}
+    ids: set[str] = set()
+    for row in raw.get("evaluated_claims") or []:
+        if isinstance(row, dict) and row.get("claim_id"):
+            ids.add(str(row["claim_id"]))
+    for key in raw.get("decision_by_claim_id") or {}:
+        ids.add(str(key))
+    return ids
+
+
+def _verification_ids_compatible(claim_run: PipelineRun, verify_meta: dict[str, Any]) -> bool:
+    """Fingerprint match is not enough if the persisted claim IDs diverge."""
+    verify_eval = {
+        str(row["claim_id"])
+        for row in (verify_meta.get("evaluated_claims") or [])
+        if isinstance(row, dict) and row.get("claim_id")
+    }
+    verify_decisions = {str(key) for key in (verify_meta.get("decision_by_claim_id") or {})}
+    if verify_eval and verify_decisions and not verify_eval.issubset(verify_decisions):
+        return False
+    claim_eval = {
+        str(row["claim_id"])
+        for row in ((claim_run.metadata_json or {}).get("evaluated_claims") or [])
+        if isinstance(row, dict) and row.get("claim_id")
+    }
+    if claim_eval and verify_eval and claim_eval != verify_eval:
+        return False
+    if claim_eval and verify_decisions and not claim_eval.issubset(verify_decisions):
+        return False
+    verify_ids = verify_eval | verify_decisions
+    claim_ids = _claim_ids_from_meta(claim_run.metadata_json)
+    if claim_ids and verify_ids and not (claim_ids & verify_ids):
+        return False
+    return True
+
+
 def _verification_for_claim(claim_run: PipelineRun, runs: Sequence[PipelineRun]) -> PipelineRun | None:
     """Match a SUCCESS verification to the claim set, not only to the newest run id.
 
     A later claim_resolution can keep the same claims_fingerprint (source_already_extracted).
     Requiring based_on_claim_run_id == newest run id drops a still-valid verification.
     A different fingerprint is a new claim set and must not reuse the prior approval.
+    Fingerprint is not used to reconstruct a version or replace a registered based_on
+    with a later verify whose claim IDs are incompatible.
     """
     fingerprint = (claim_run.metadata_json or {}).get("claims_fingerprint")
     if not fingerprint:
@@ -96,6 +135,8 @@ def _verification_for_claim(claim_run: PipelineRun, runs: Sequence[PipelineRun])
             continue
         meta = run.metadata_json or {}
         if meta.get("claims_fingerprint") != fingerprint:
+            continue
+        if not _verification_ids_compatible(claim_run, meta):
             continue
         if str(meta.get("based_on_claim_run_id") or "") == claim_id:
             return run

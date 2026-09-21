@@ -465,7 +465,9 @@ def certainty_findings(article: Article | None, snapshot: dict[str, Any] | None)
     for surface in _article_surfaces(article):
         if passage_is_attributed(surface):
             continue
-        matched = next((claim for claim in claims if _surface_mentions_claim(surface, claim)), None)
+        from app.services.surface_validation import classify_link
+
+        matched = next((claim for claim in claims if classify_link(surface, claim) == "equivalent"), None)
         if matched is None:
             continue
         issues.append(

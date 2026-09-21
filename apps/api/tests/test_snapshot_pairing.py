@@ -283,3 +283,68 @@ def test_matching_verify_after_unpaired_skip_writes_without_touching_v1(db_sessi
     ).one()
     assert v1.headline == live_headline
     assert article.headline == "V2 con par vigente"
+
+
+def test_last_written_run_skips_unaudited_candidate() -> None:
+    from types import SimpleNamespace
+
+    from app.services.article_context import claims_snapshot_for_version, last_written_run
+
+    producer = SimpleNamespace(
+        stage="writing",
+        status=PipelineStatus.SUCCESS,
+        metadata_json={
+            "written": True,
+            "reason": "initial",
+            "version": 2,
+            "claims_snapshot": [{"id": "producer"}],
+        },
+    )
+    retry = SimpleNamespace(
+        stage="writing",
+        status=PipelineStatus.SUCCESS,
+        metadata_json={
+            "written": True,
+            "reason": "unaudited_candidate",
+            "version": 2,
+            "claims_snapshot": [{"id": "retry"}],
+        },
+    )
+    assert last_written_run([retry, producer]) is producer
+    assert claims_snapshot_for_version([retry, producer], 2) == [{"id": "producer"}]
+
+
+def test_pair_from_runs_rejects_fingerprint_with_incompatible_claim_ids(db_session: Session) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
+    event, claim, _item = _seed_event(db_session)
+    first = _claim_run(db_session, event, [claim])
+    meta = dict(first.metadata_json or {})
+    meta["evaluated_claims"] = [{"claim_id": str(claim.id), "canonical_text": claim.canonical_text}]
+    first.metadata_json = meta
+    flag_modified(first, "metadata_json")
+    other_id = "00000000-0000-0000-0000-000000000099"
+    db_session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=VERIFICATION_STAGE,
+            status=PipelineStatus.SUCCESS,
+            started_at=_now(),
+            finished_at=_now(),
+            metadata_json={
+                "claims_fingerprint": meta.get("claims_fingerprint"),
+                "based_on_claim_run_id": str(first.id),
+                "decision_by_claim_id": {other_id: {"claim_id": other_id, "status": "SUPPORTED"}},
+                "evaluated_claims": [{"claim_id": other_id, "canonical_text": "otro"}],
+            },
+        )
+    )
+    db_session.flush()
+    runs = list(
+        db_session.scalars(
+            select(PipelineRun).where(PipelineRun.event_id == event.id).order_by(PipelineRun.started_at.desc())
+        )
+    )
+    claim_run, verify_run = pair_from_runs(runs)
+    assert str(claim_run.id) == str(first.id)
+    assert verify_run is None

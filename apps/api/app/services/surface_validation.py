@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any, Literal
 
 from app.core.text import token_set
@@ -22,22 +23,13 @@ from app.services.audit_policy import (
     _ATTRIBUTION_MARKERS,
     _CLAIM_STOP,
     _PLURAL_PHRASES,
-    _clause_is_attributed,
     _clause_is_negated,
     _claim_id,
     _surface_mentions_claim,
     article_surface_map,
-    passage_is_attributed,
 )
 from app.services.claim_coverage import _act_bucket, propositions_equivalent
 from app.services.evidence_snapshot import snapshot_context_claims
-
-_FAIL_CLOSED = PublicRendering(
-    attribution_required=True,
-    categorical_allowed=False,
-    headline_unattributed_allowed=False,
-    independent_confirmation_language_allowed=False,
-)
 
 _INDEPENDENT_PHRASES = _PLURAL_PHRASES + (
     "fuentes independientes confirmaron",
@@ -90,6 +82,20 @@ _CONTRADICTION_PHRASES = (
 
 LinkKind = Literal["equivalent", "partial", "mention", "none"]
 
+_DISTINCTIVE_NUM = re.compile(r"(?<!\d)(?:\d{1,3}(?:[.\s]\d{3})+|\d{3,})(?!\d)")
+_ASSERTION_SPLITTERS = (
+    " mientras que",
+    " en tanto que",
+    " aunque ",
+    " aunque,",
+    " pero ",
+    " pero,",
+    " sino que",
+    " no obstante",
+    " sin embargo",
+    " por otro lado",
+)
+
 
 def _issue(
     *,
@@ -129,6 +135,12 @@ def _claim_text(row: dict[str, Any]) -> str:
 
 
 def _is_utterance_claim(claim: dict[str, Any], decision: dict[str, Any] | None) -> bool:
+    if _utterance_role_or_type(claim, decision):
+        return True
+    return _act_bucket(_claim_text(claim)) == "utterance"
+
+
+def _utterance_role_or_type(claim: dict[str, Any], decision: dict[str, Any] | None) -> bool:
     role = ""
     if isinstance(decision, dict):
         role = str(decision.get("proposition_role") or "")
@@ -136,10 +148,7 @@ def _is_utterance_claim(claim: dict[str, Any], decision: dict[str, Any] | None) 
         role = str(claim.get("proposition_role") or "")
     if role == "utterance":
         return True
-    kind = str(claim.get("claim_type") or "")
-    if kind == "declaracion":
-        return True
-    return _act_bucket(_claim_text(claim)) == "utterance"
+    return str(claim.get("claim_type") or "") == "declaracion"
 
 
 def _snapshot_claims(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -179,21 +188,93 @@ def _content_tokens(text: str) -> set[str]:
     return token_set(text) - _CLAIM_STOP
 
 
+def _distinctive_numbers(text: str) -> set[str]:
+    found: set[str] = set()
+    for raw in _DISTINCTIVE_NUM.findall(text or ""):
+        digits = "".join(ch for ch in raw if ch.isdigit())
+        if len(digits) >= 3:
+            found.add(digits.lstrip("0") or "0")
+    return found
+
+
+def _c5_keeps_equivalent(surface: str, claim_text: str) -> bool:
+    """C5 only. Does not change C8 coverage matching.
+
+    Drop a lax EQUIVALENT when the claim's distinctive numbers are absent from the
+    surface, or when neither Jaccard nor claim-token coverage is strong enough.
+    Extra tokens on the surface (lugar, marco) do not disqualify a covered claim.
+    """
+    claim_nums = _distinctive_numbers(claim_text)
+    surface_nums = _distinctive_numbers(surface)
+    if claim_nums - surface_nums:
+        return False
+    claim_toks = _content_tokens(claim_text)
+    surface_toks = _content_tokens(surface)
+    if not claim_toks or not surface_toks:
+        return False
+    shared = claim_toks & surface_toks
+    jaccard = len(shared) / len(claim_toks | surface_toks)
+    coverage = len(shared) / len(claim_toks)
+    return jaccard >= 0.35 or coverage >= 0.5
+
+
 def classify_link(surface: str, claim: dict[str, Any], decision: dict[str, Any] | None = None) -> LinkKind:
     text = _claim_text(claim)
     if not (surface or "").strip() or not text.strip():
         return "none"
     verified = str((decision or {}).get("verified_scope") or "").strip()
     if verified and propositions_equivalent(surface, verified) is CoverageMatch.EQUIVALENT:
-        return "equivalent"
+        if _c5_keeps_equivalent(surface, verified):
+            return "equivalent"
+        return "partial"
     match = propositions_equivalent(surface, text)
     if match is CoverageMatch.EQUIVALENT:
-        return "equivalent"
+        if _c5_keeps_equivalent(surface, text):
+            return "equivalent"
+        return "partial"
     if match is CoverageMatch.PARTIAL:
         return "partial"
     if _surface_mentions_claim(surface, claim):
         return "mention"
     return "none"
+
+
+def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    spans: list[tuple[int, int]] = []
+    start = 0
+    for match in re.finditer(r"\.(?:\s+|$)", text):
+        pos = match.start()
+        prev = text[pos - 1] if pos > 0 else ""
+        nxt = text[pos + 1] if pos + 1 < len(text) else ""
+        if prev.isdigit() and nxt.isdigit():
+            continue
+        spans.append((start, pos + 1))
+        start = match.end()
+    if start < len(text):
+        spans.append((start, len(text)))
+    return spans or [(0, len(text))]
+
+
+def _assertion_spans(sentence: str) -> list[tuple[int, int]]:
+    folded = sentence
+    cuts = {0, len(sentence)}
+    for marker in _ASSERTION_SPLITTERS:
+        start = 0
+        while True:
+            pos = folded.find(marker, start)
+            if pos < 0:
+                break
+            cuts.add(pos)
+            start = pos + len(marker)
+    ordered = sorted(cuts)
+    return [(ordered[i], ordered[i + 1]) for i in range(len(ordered) - 1)]
+
+
+def _span_containing(index: int, spans: list[tuple[int, int]], length: int) -> tuple[int, int]:
+    for start, end in spans:
+        if start <= index < end:
+            return start, end
+    return 0, length
 
 
 def _assertion_attributed(surface: str, claim_text: str) -> bool:
@@ -208,15 +289,13 @@ def _assertion_attributed(surface: str, claim_text: str) -> bool:
             index = pos
             break
     if index < 0:
-        return passage_is_attributed(surface)
-    sentence_start = 0
-    dot = folded.rfind(". ", 0, index)
-    if dot != -1:
-        sentence_start = dot + 2
-    prefix = folded[sentence_start:index]
-    if any(marker in prefix for marker in _ATTRIBUTION_MARKERS):
-        return True
-    return _clause_is_attributed(folded, index)
+        return False
+    sent_start, sent_end = _span_containing(index, _sentence_spans(folded), len(folded))
+    sentence = folded[sent_start:sent_end]
+    local = index - sent_start
+    ass_start, ass_end = _span_containing(local, _assertion_spans(sentence), len(sentence))
+    assertion = sentence[ass_start:ass_end]
+    return any(marker in assertion for marker in _ATTRIBUTION_MARKERS)
 
 
 def _is_modal(surface: str) -> bool:
@@ -249,7 +328,7 @@ def signals_independent_confirmation_language(text: str) -> bool:
 def _usable_rendering(decision: dict[str, Any] | None) -> tuple[PublicRendering | None, str]:
     state = read_evaluation_state(decision)
     if state is EvaluationState.SKIPPED or decision_looks_like_skip(decision):
-        return _FAIL_CLOSED, "skipped"
+        return None, "incomplete"
     rendering = read_public_rendering(decision)
     if state is EvaluationState.COMPLETE:
         if rendering is None:
@@ -343,19 +422,16 @@ def _surface_rule_findings(
         return issues
 
     has_fact_equivalent = any(
-        not _is_utterance_claim(claim, decision) for claim, decision, _rendering, _mode in equivalent
+        not _utterance_role_or_type(claim, decision) for claim, decision, _rendering, _mode in equivalent
     )
     # Si hay un hecho equivalente, el utterance hermano (p. ej. recovery de «reconoció»)
     # no aporta permisos ni veta la formulación: se valida contra el contrato del hecho.
+    # Una caracterización cotizada no es ese hermano y se examina aparte.
     targets = [
         row
         for row in equivalent
-        if not has_fact_equivalent or not _is_utterance_claim(row[0], row[1])
+        if not has_fact_equivalent or not _utterance_role_or_type(row[0], row[1])
     ]
-    fact_allows_categorical = any(
-        not _is_utterance_claim(claim, decision) and rendering.categorical_allowed
-        for claim, decision, rendering, _mode in targets
-    )
 
     for claim, decision, rendering, _mode in targets:
         cid = _claim_id(claim)
@@ -386,9 +462,8 @@ def _surface_rule_findings(
             and not _is_modal(text)
             and not has_fact_equivalent
         )
-        flag_categorical = (not fact_allows_categorical) and (
-            content_as_fact
-            or (rendering.categorical_allowed is False and _asserts_as_world_fact(text, claim, decision))
+        flag_categorical = content_as_fact or (
+            rendering.categorical_allowed is False and _asserts_as_world_fact(text, claim, decision)
         )
         if flag_categorical:
             issues.append(

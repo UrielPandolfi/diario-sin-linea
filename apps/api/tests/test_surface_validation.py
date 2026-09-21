@@ -494,11 +494,9 @@ def test_legacy_and_incomplete_do_not_invent_or_call_live(monkeypatch) -> None:
     assert called == []
     assert any(issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE for issue in legacy_issues)
     assert any(issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE for issue in incomplete_issues)
-    assert any(
-        issue.reason in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
-        for issue in skipped_issues
-    )
-    assert AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE not in {issue.reason for issue in skipped_issues}
+    assert any(issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE for issue in skipped_issues)
+    assert AuditIssueReason.SURFACE_ATTRIBUTION not in {issue.reason for issue in skipped_issues}
+    assert AuditIssueReason.SURFACE_CATEGORICAL not in {issue.reason for issue in skipped_issues}
 
 
 def test_c5_findings_do_not_enqueue_writing(db_session: Session) -> None:
@@ -569,3 +567,320 @@ def test_supported_fact_keeps_normal_publish_path(db_session: Session) -> None:
     assert "ArticleDraft" not in llm.calls
     published = PublishService(db_session).publish(event.id, trigger="test")
     assert published["published"] is True
+
+
+ANDIS_SUMMARY = (
+    "El relevamiento, que analizó la gestión del organismo hasta agosto de 2025, "
+    "también consignó pagos por $479.504 millones a prestadores de medicamentos e insumos, "
+    "de acuerdo con reportes periodísticos."
+)
+ANDIS_PAYMENTS = (
+    "La auditoría contabilizó pagos por $479.504 millones a prestadores por medicamentos "
+    "e insumos entre 2024 y el 21 de agosto de 2025."
+)
+ANDIS_HEADLINE = (
+    "Según una auditoría, la ex Andis registró un desfasaje de $158.717 millones "
+    "en sus informes de deuda"
+)
+ANDIS_LEAD = (
+    "Una auditoría detectó un desfasaje de $158.717 millones entre los informes de deuda "
+    "de la ex Agencia Nacional de Discapacidad (Andis), según reportes periodísticos que "
+    "citaron el relevamiento. La diferencia corresponde, de acuerdo con esas publicaciones, "
+    "a obligaciones que no habrían pasado por las áreas de control establecidas."
+)
+PILAR_HEADLINE = (
+    "Granja Tres Arroyos ofreció pagar parte de los salarios con pollos durante una conciliación obligatoria"
+)
+JEREZ_HEADLINE = (
+    "Identificaron a Franco Ibán Jerez tras los incidentes denunciados por Gerardo Huesen en Graneros"
+)
+GRANJA_FACT_HEADLINE = "Granja Tres Arroyos despidió a 700 trabajadores en Capitán Sarmiento"
+GRANJA_BOMBA = (
+    "Granja Tres Arroyos, el despido de 700 trabajadores y un efecto en cadena en el pueblo "
+    "«Es una bomba neutrónica en medio de la provincia» El drama de una comunidad tras los "
+    "despidos en la principal empresa avícola en Capitán Sarmiento."
+)
+
+
+def test_andis_trailing_attribution_covers_that_assertion() -> None:
+    claim = {
+        "id": "5822cdcf",
+        "canonical_text": ANDIS_PAYMENTS,
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+    }
+    snap = _snapshot([claim], {"5822cdcf": _decision("5822cdcf", status="SINGLE_SOURCE", rendering=_RESTRICTED)})
+    article = _article(headline=ANDIS_HEADLINE, summary=ANDIS_SUMMARY, body=ANDIS_LEAD)
+    issues = surface_validation_findings(snap, article)
+    assert not any(
+        issue.claim_id == "5822cdcf"
+        and issue.reason
+        in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
+        for issue in issues
+    )
+
+
+def test_trailing_marker_does_not_cover_a_coordinated_proposition() -> None:
+    from app.services.surface_validation import _assertion_attributed
+
+    mixed = (
+        "La auditoría contabilizó pagos por $479.504 millones a prestadores por medicamentos e insumos "
+        "entre 2024 y el 21 de agosto de 2025, mientras que, según un informe, la deuda aumentó."
+    )
+    assert "$479.504" in mixed
+    assert _assertion_attributed(ANDIS_SUMMARY, ANDIS_PAYMENTS) is True
+    assert _assertion_attributed(mixed, ANDIS_PAYMENTS) is False
+    claim = {
+        "id": "5822cdcf",
+        "canonical_text": ANDIS_PAYMENTS,
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+    }
+    snap = _snapshot([claim], {"5822cdcf": _decision("5822cdcf", status="SINGLE_SOURCE", rendering=_RESTRICTED)})
+    article = _article(headline=mixed, summary=mixed, body=mixed)
+    issues = surface_validation_findings(snap, article)
+    assert any(
+        issue.claim_id == "5822cdcf"
+        and issue.reason
+        in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
+        for issue in issues
+    )
+
+
+def test_andis_real_surfaces_have_no_high_false_positives_on_payments() -> None:
+    claims = [
+        {
+            "id": "5822cdcf",
+            "canonical_text": ANDIS_PAYMENTS,
+            "importance": "HIGH",
+            "status": "SINGLE_SOURCE",
+        },
+        {
+            "id": "a2efddc3",
+            "canonical_text": (
+                "Una auditoría detectó un desfasaje de 158.717 millones de pesos en los informes "
+                "de deuda de la ex Agencia Nacional de Discapacidad (Andis)."
+            ),
+            "importance": "HIGH",
+            "status": "SINGLE_SOURCE",
+        },
+        {
+            "id": "8b114168",
+            "canonical_text": (
+                "La auditoría analizó la gestión de la Andis hasta el 21 de agosto de 2025, "
+                "cuando el Gobierno desplazó a Diego Spagnuolo."
+            ),
+            "importance": "HIGH",
+            "status": "SUPPORTED",
+        },
+    ]
+    snap = _snapshot(
+        claims,
+        {
+            "5822cdcf": _decision("5822cdcf", status="SINGLE_SOURCE", rendering=_RESTRICTED),
+            "a2efddc3": _decision("a2efddc3", status="SINGLE_SOURCE", rendering=_RESTRICTED),
+            "8b114168": {
+                "claim_id": "8b114168",
+                "status": "SUPPORTED",
+                "evaluation_state": "skipped",
+                "public_rendering": None,
+            },
+        },
+    )
+    article = _article(headline=ANDIS_HEADLINE, summary=ANDIS_SUMMARY, body=ANDIS_LEAD)
+    issues = surface_validation_findings(snap, article)
+    high = [issue for issue in issues if issue.severity.value in {"HIGH", "MEDIUM"}]
+    assert not any(
+        issue.claim_id == "5822cdcf"
+        and issue.reason
+        in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
+        for issue in high
+    )
+    assert not high
+
+
+def test_pilar_duration_is_not_equivalent_and_skipped_principal_is_incomplete() -> None:
+    duration = {
+        "id": "9111b958",
+        "canonical_text": (
+            "La conciliación obligatoria es por 15 días hábiles, con posibilidad de una prórroga de cinco días."
+        ),
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+    }
+    principal = {
+        "id": "f276190c",
+        "canonical_text": "Granja Tres Arroyos ofreció a sus trabajadores pagar parte de los salarios con pollos.",
+        "importance": "HIGH",
+        "status": "SUPPORTED",
+    }
+    skipped = {
+        "claim_id": "x",
+        "status": "SINGLE_SOURCE",
+        "evaluation_state": "skipped",
+        "public_rendering": None,
+    }
+    snap = _snapshot(
+        [duration, principal],
+        {
+            "9111b958": {**skipped, "claim_id": "9111b958", "status": "SINGLE_SOURCE"},
+            "f276190c": {**skipped, "claim_id": "f276190c", "status": "SUPPORTED"},
+        },
+    )
+    article = _article(
+        headline=PILAR_HEADLINE,
+        summary=PILAR_HEADLINE + ".",
+        body=PILAR_HEADLINE + ".",
+    )
+    assert classify_link(PILAR_HEADLINE, duration) != "equivalent"
+    issues = surface_validation_findings(snap, article)
+    assert not any(
+        issue.claim_id == "9111b958" and issue.reason == AuditIssueReason.SURFACE_ATTRIBUTION for issue in issues
+    )
+    assert any(
+        issue.claim_id == "f276190c" and issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE for issue in issues
+    )
+
+
+def test_jerez_false_matches_drop_and_identification_stays_blocked() -> None:
+    secretary = {
+        "id": "6a782a00",
+        "canonical_text": "Franco Ibán Jerez fue secretario de Gobierno de la Municipalidad de Graneros en 2022.",
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+    }
+    hunger = {
+        "id": "791fab61",
+        "canonical_text": (
+            'Franco Ibán Jerez afirmó que el Gobierno nacional los estaba haciendo "morir de hambre" '
+            "durante los incidentes en Graneros."
+        ),
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+        "claim_type": "declaracion",
+    }
+    identification = {
+        "id": "7d7a8812",
+        "canonical_text": (
+            "Franco Ibán Jerez fue identificado como la persona que increpó al equipo del diputado "
+            "Gerardo Huesen durante incidentes en Graneros, Tucumán, el 19 de septiembre."
+        ),
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+    }
+    snap = _snapshot(
+        [secretary, hunger, identification],
+        {
+            "6a782a00": {
+                "claim_id": "6a782a00",
+                "status": "SINGLE_SOURCE",
+                "evaluation_state": "skipped",
+                "public_rendering": None,
+            },
+            "791fab61": _decision("791fab61", status="SINGLE_SOURCE", rendering=_RESTRICTED, role="utterance"),
+            "7d7a8812": _decision("7d7a8812", status="SINGLE_SOURCE", rendering=_RESTRICTED),
+        },
+    )
+    article = _article(
+        headline=JEREZ_HEADLINE,
+        summary=(
+            "Según un reporte periodístico, Franco Ibán Jerez fue identificado como la persona que "
+            "increpó al equipo del diputado Gerardo Huesen durante los incidentes del 19 de septiembre en Graneros."
+        ),
+        body=(
+            "Según un reporte periodístico, Franco Ibán Jerez fue identificado como la persona que "
+            "increpó al equipo del diputado nacional Gerardo Huesen durante los incidentes ocurridos "
+            "el 19 de septiembre en Graneros, Tucumán."
+        ),
+    )
+    assert classify_link(JEREZ_HEADLINE, secretary) != "equivalent"
+    assert classify_link(JEREZ_HEADLINE, hunger) != "equivalent"
+    assert classify_link(JEREZ_HEADLINE, identification) == "equivalent"
+    issues = surface_validation_findings(snap, article)
+    assert not any(issue.claim_id == "6a782a00" and issue.severity.value in {"HIGH", "MEDIUM"} for issue in issues)
+    assert any(
+        issue.claim_id == "7d7a8812"
+        and issue.reason == AuditIssueReason.SURFACE_ATTRIBUTION
+        and issue.claim_ref == "headline"
+        for issue in issues
+    )
+
+
+def test_granja700_supported_fact_does_not_license_or_inherit_characterization() -> None:
+    fact = {
+        "id": "61351a23",
+        "canonical_text": "Granja Tres Arroyos despidió a 700 trabajadores en Capitán Sarmiento.",
+        "importance": "HIGH",
+        "status": "SUPPORTED",
+    }
+    characterization = {
+        "id": "8a0b98c2",
+        "canonical_text": GRANJA_BOMBA,
+        "importance": "HIGH",
+        "status": "SINGLE_SOURCE",
+    }
+    telegrams = {
+        "id": "529b15f0",
+        "canonical_text": (
+            "Granja Tres Arroyos envió alrededor de 1.200 telegramas de despido a trabajadores "
+            "de sus plantas de Capitán Sarmiento, Esteban Echeverría y Pilar."
+        ),
+        "importance": "HIGH",
+        "status": "SUPPORTED",
+    }
+    snap = _snapshot(
+        [fact, characterization, telegrams],
+        {
+            "61351a23": _decision("61351a23", status="SUPPORTED", rendering=_OPEN),
+            "8a0b98c2": _decision("8a0b98c2", status="SINGLE_SOURCE", rendering=_RESTRICTED),
+            "529b15f0": {
+                "claim_id": "529b15f0",
+                "status": "SUPPORTED",
+                "evaluation_state": "skipped",
+                "public_rendering": None,
+            },
+        },
+    )
+    fact_only = _article(
+        headline=GRANJA_FACT_HEADLINE,
+        summary=GRANJA_FACT_HEADLINE + ".",
+        body=GRANJA_FACT_HEADLINE + ".",
+    )
+    fact_only_issues = surface_validation_findings(snap, fact_only)
+    assert not any(
+        issue.claim_id == "8a0b98c2" and issue.severity.value in {"HIGH", "MEDIUM"} for issue in fact_only_issues
+    )
+    assert not any(
+        issue.claim_id == "61351a23"
+        and issue.reason in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
+        for issue in fact_only_issues
+    )
+
+    compound_headline = f"{GRANJA_FACT_HEADLINE} y es una bomba neutrónica"
+    compound = _article(
+        headline=compound_headline,
+        summary=compound_headline + ".",
+        body=compound_headline + ".",
+    )
+    compound_issues = surface_validation_findings(snap, compound)
+    assert not any(
+        issue.claim_id == "61351a23"
+        and issue.reason in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
+        for issue in compound_issues
+    )
+    assert any(
+        issue.claim_id == "8a0b98c2"
+        and issue.reason in {AuditIssueReason.SURFACE_ATTRIBUTION, AuditIssueReason.SURFACE_CATEGORICAL}
+        for issue in compound_issues
+    )
+
+    twelve_hundred = _article(
+        headline=GRANJA_FACT_HEADLINE,
+        summary="La empresa envió alrededor de 1.200 telegramas de despido en tres plantas bonaerenses.",
+        body=GRANJA_FACT_HEADLINE + ".",
+    )
+    twelve_issues = surface_validation_findings(snap, twelve_hundred)
+    assert any(
+        issue.claim_id == "529b15f0" and issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE
+        for issue in twelve_issues
+    )

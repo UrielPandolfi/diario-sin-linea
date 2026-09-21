@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
@@ -509,3 +509,71 @@ def test_writing_run_id_stamped_without_entering_llm_payload(db_session: Session
     assert run is not None
     assert run.stage == WRITING_STAGE
     assert (run.metadata_json or {}).get("version") == result["version"]
+
+
+def test_v2_export_ignores_unaudited_candidate_and_does_not_fill_from_v1(db_session: Session) -> None:
+    from app.repositories import PipelineRunRepository
+    from app.services.article_context import claims_snapshot_for_version, last_written_run
+    from app.services.evidence_snapshot import bound_export_for_version, evidence_snapshot_binding_for_version
+
+    event, article, _claim, snap_v1 = _seed(db_session, hash_key="mileix", headline="Versión uno")
+    _mark_published(db_session, article, 1)
+    article, snap_v2 = _add_version(
+        db_session, event, article, headline="Versión dos", fingerprint="fp-mileix-v2"
+    )
+    v2_writing = db_session.get(PipelineRun, UUID(str(snap_v2["writing_run_id"])))
+    assert v2_writing is not None
+    meta = dict(v2_writing.metadata_json or {})
+    meta["claims_snapshot"] = [{"id": "producer-v2"}]
+    v2_writing.metadata_json = meta
+    flag_modified(v2_writing, "metadata_json")
+    later = datetime.now(timezone.utc) + timedelta(seconds=30)
+    db_session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=WRITING_STAGE,
+            status=PipelineStatus.SUCCESS,
+            started_at=later,
+            finished_at=later,
+            metadata_json={
+                "written": True,
+                "reason": "unaudited_candidate",
+                "version": 2,
+                "claims_snapshot": [{"id": "retry"}],
+            },
+        )
+    )
+    db_session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=AUDITING_STAGE,
+            status=PipelineStatus.SUCCESS,
+            started_at=later + timedelta(seconds=10),
+            finished_at=later + timedelta(seconds=10),
+            metadata_json={
+                "passed": True,
+                "version_after": 1,
+                "verification_run_id": snap_v1["verification_run_id"],
+                "evidence_snapshot": dict(snap_v1),
+            },
+        )
+    )
+    db_session.commit()
+
+    from app.services.writing_service import has_unaudited_candidate
+
+    lineage = PipelineRunRepository(db_session).list_lineage_runs(event.id)
+    bound = evidence_snapshot_binding_for_version(lineage, 2)
+    assert bound is not None
+    assert str(bound[0].get("writing_run_id")) == str(snap_v2["writing_run_id"])
+    assert last_written_run(lineage).id == v2_writing.id
+    assert claims_snapshot_for_version(lineage, 2) == [{"id": "producer-v2"}]
+    assert has_unaudited_candidate(article, lineage) is True
+
+    exported = bound_export_for_version(db_session, article_id=article.id, version_number=2)
+    assert exported["selection_method"] == "c11_explicit_version"
+    assert exported["writing_run_id"] == str(snap_v2["writing_run_id"])
+    assert exported["coherence"] == []
+    assert exported["snapshot"] is not None
+    assert int(exported["snapshot"]["version"]) == 2
+    assert str(exported["snapshot"].get("writing_run_id")) == str(snap_v2["writing_run_id"])

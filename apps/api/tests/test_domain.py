@@ -260,3 +260,25 @@ def test_ingest_strips_nul_bytes_from_text_fields(db_session: Session) -> None:
     assert "\x00" not in (item.raw_text or "")
     assert item.clean_text == "El IPC subió 2,1%"
     assert item.excerpt == "El IPC subió 2,1%"
+
+
+def test_get_by_domain_reuses_rss_source_without_stored_domain(db_session: Session) -> None:
+    from app.repositories import SourceRepository
+
+    rss = SourceService(db_session).create(
+        SourceCreate(
+            name="pagina12",
+            domain=None,
+            preferred_ingestion_method=IngestionMethod.RSS,
+            feed_url="https://www.pagina12.com.ar/arc/outboundfeeds/rss/secciones/el-pais/notas/",
+            is_monitored=True,
+            is_enabled=True,
+        )
+    )
+    db_session.flush()
+    found = SourceRepository(db_session).get_by_domain("pagina12.com.ar")
+    assert found is not None
+    assert found.id == rss.id
+    www = SourceRepository(db_session).get_by_domain("www.pagina12.com.ar")
+    assert www is not None
+    assert www.id == rss.id
