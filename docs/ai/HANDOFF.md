@@ -2,25 +2,26 @@
 
 **Fecha:** 2026-09-21
 
-**Tarea:** Prueba dirigida post-correcciones (ANDIS reaudit + Milei versión nueva). No merge. No deploy. Polling apagado. No se publicaron estas pruebas.
+**Tarea:** Cerrar `verification_now_paired` y auditar Milei V3. No merge. No deploy. Polling apagado. `AUTO_PUBLISH=false` en API/worker. No se publicó.
 
 ## Qué quedó
 
-**ANDIS** (`07e56d84`) V1, mismo texto: Audit `passed=true`, `rewrite_count=0`, `version_after=1`. Desaparecieron los HIGH `surface_attribution` / `surface_categorical` de `5822cdcf`. No quedó otro HIGH; solo LOW `surface_indeterminate`. El artículo quedó `READY_FOR_REVIEW`, **sin publicar** (la corrida fue in-process, no Celery).
+Commit `a6326e1` en `origin/track-c`: Writing emite versión nueva si el snapshot de la candidata está unpaired y ya hay par compatible; no rellena el vacío ni cambia `detect_material_change`. Tests fakes: par escribe V3; sin par no; repetir Writing no crea V4; V1/V2 conservan texto y snapshot. Pytest dirigido: `tests/test_snapshot_pairing.py` + `test_writing.py` + `test_version_traceability.py` + `test_track_b.py` → 50 passed.
 
-**Milei** (`d7894ad7`): había Verification compatible (`54bc6020`, fp `cdfe8cf0`). Writing no abría V3 sin un disparo: `no_material_change` + `unaudited_candidate` reauditaría V2 vacía. Se añadió `verification_now_paired` (versión nueva, no backfill). V3 Writing `888d5452` registra `verification_run_id=54bc6020`, `coverage_run_id=6be346ab`, `based_on=6be346ab`, 7 decisiones, `stale=false`. V2 unpaired se conserva. `published_version=1`. GET público sigue el titular y el snapshot de V1 (2 claims). Independencia de V1 (`12b66950`) sigue pendiente de revisar.
+API y worker recreados con esa imagen. `auto_poll_enabled=false`. `AUTO_PUBLISH=false`.
 
-Granja700 no se usó: no tiene V1 publicada.
+**ANDIS** (`07e56d84`) V1: Audit passed previo, `READY_FOR_REVIEW`, sin publicar. No se reprocesó ahora.
 
-`auto_poll_enabled=false`. Tests de `verification_now_paired`: par compatible escribe V3; sin par no; repetir Writing no crea V4; V1/V2 conservan texto y snapshot (`test_snapshot_pairing.py`).
+**Milei** (`d7894ad7`): V3 persistida Writing `1ae3ff99`, verify `54bc6020`, 7 decisiones, `published_version=1`. Audit Celery `2dc2b94e` (`admin`): `passed=false`, `reason=structural_block`, `version_after=3`, `rewrite_count=0`. HIGH: `surface_contract_incomplete` de `c0c73502` en titular y lead (`evaluation_state=skipped`, `public_rendering=null`). LOW `surface_indeterminate` no bloquean. Sin corrida de publish. V1 live intacta.
 
 ## Pendiente
 
-- Publicar ANDIS (Audit passed, `READY_FOR_REVIEW`) solo si se decide.
-- Auditar Milei V3 por el flujo habitual, sin publicar (`AUTO_PUBLISH` apagado).
+- Publicar ANDIS solo si se decide.
+- Milei V3: el bloqueo es contrato skipped de `c0c73502`, no un snapshot vacío. Completar esa evaluación; reauditar el mismo skipped no lo completa.
 - Jerez: atribuir identificación con `EditorialService.revise` y después auditar.
 - Pilar y Granja700 V1 (1.200 / principal skipped): completar contrato.
-- Granja700 V2 unpaired: no tiene live publicado; no se tocó.
+- Granja700 V2 unpaired: no tiene live publicado.
 - Pollos `4704ee4e` y Milei NY `e362ee90`: Verification SUCCESS del fingerprint actual.
+- Independencia V1 Milei `12b66950`: pendiente de revisar.
 - Connection error de Verification: sin retries nuevos.
 - Revisión de merge de Track C sigue aparte.

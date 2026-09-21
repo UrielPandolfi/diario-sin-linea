@@ -183,7 +183,7 @@ Corrección: helper C11 de snapshot por versión (`export_snapshot_for_version` 
 
 V1 Milei claim `12b66950`: procedencia leída en DB — dos `Source` para Página/12 (RSS `domain` vacío `6fcd5ecb` + research `pagina12.com.ar` `12bfecce`), `known_independent_count=2`. Identidad alineada a `test_same_outlet_two_items_is_single_source` (`_reporting_origin` por host; `get_by_domain` reusa RSS sin domain). V1 publicada no se reescribe. Independencia pendiente de **revisar** (corrección editorial solo vía `EditorialService.revise` si se decide). Connection error de Verification: transporte OpenAI sin HTTP status; Celery marca la tarea succeeded porque `_fail` captura; no se agregaron retries.
 
-Prueba dirigida 2026-09-21 (sin publicar): ANDIS V1 reauditada in-process → `passed`, sin HIGH de atribución, `READY_FOR_REVIEW`. Milei: par `6be346ab`/`54bc6020` ya existía; Writing no emitía V3 por `no_material_change`. Con `verification_now_paired` se escribió V3 (`888d5452`, 7 decisiones, verify `54bc6020`); V2 unpaired intacta; GET público sigue V1. Granja700 no se tocó (sin V1 publicada).
+Prueba dirigida 2026-09-21 (sin publicar): ANDIS V1 reauditada in-process → `passed`, sin HIGH de atribución, `READY_FOR_REVIEW`. `verification_now_paired` (`a6326e1`): Writing emite V nueva si el snapshot de la candidata está unpaired y hay par compatible. Milei V3 persistida (`1ae3ff99`, verify `54bc6020`); Audit Celery `2dc2b94e` → `passed=false`, `structural_block`, `rewrite_count=0`, HIGH `surface_contract_incomplete` de `c0c73502` (skipped / `public_rendering=null`) en titular y lead. `published_version=1`. `AUTO_PUBLISH=false`. Granja700 no se tocó.
 
 ## Track C — revisión integrada C1–C8 — 2026-09-20
 
