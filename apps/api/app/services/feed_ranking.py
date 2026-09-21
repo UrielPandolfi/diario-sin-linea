@@ -173,7 +173,7 @@ def _frozen_public_claims(
     version: int,
     allowed_ids: set[str] | None,
 ) -> tuple[list, object]:
-    runs = PipelineRunRepository(session).list_for_event(event.id, limit=50)
+    runs = PipelineRunRepository(session).list_snapshot_binding_runs(event.id, version)
     snapshot = evidence_snapshot_for_version(runs, version)
     view = view_from_evidence_snapshot(snapshot)
     rows_meta = snapshot_context_claims(snapshot)

@@ -371,6 +371,28 @@ class PipelineRunRepository:
         )
         return list(self.session.scalars(stmt))
 
+    def list_snapshot_binding_runs(self, event_id: UUID, version: int) -> list[PipelineRun]:
+        """Writing/auditing runs whose metadata is bound to `version`, newest first.
+
+        Directed: does not scan poll/detect/research and does not use a recency cap.
+        """
+        target = str(int(version))
+        meta = PipelineRun.metadata_json
+        stmt = (
+            select(PipelineRun)
+            .where(
+                PipelineRun.event_id == event_id,
+                PipelineRun.stage.in_(("writing", "auditing")),
+                or_(
+                    meta["version"].as_string() == target,
+                    meta["version_after"].as_string() == target,
+                    meta["evidence_snapshot"]["version"].as_string() == target,
+                ),
+            )
+            .order_by(PipelineRun.started_at.desc())
+        )
+        return list(self.session.scalars(stmt))
+
     def list_for_item(self, source_item_id: UUID, *, limit: int = 20) -> list[PipelineRun]:
         stmt = (
             select(PipelineRun)

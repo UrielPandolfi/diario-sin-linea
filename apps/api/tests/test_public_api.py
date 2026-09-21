@@ -281,3 +281,140 @@ def test_public_article_claims_follow_published_snapshot_not_live_verify(db_sess
     feed_item = next(item for item in feed["items"] if item["slug"] == article.slug)
     assert "claims" not in feed_item
     assert "presentation" not in feed_item
+
+
+def _public_claim_view(payload: dict) -> list[dict]:
+    rows = []
+    for row in payload.get("claims") or []:
+        presentation = row.get("presentation") or {}
+        rows.append(
+            {
+                "id": row.get("id"),
+                "canonical_text": row.get("canonical_text"),
+                "status": row.get("status"),
+                "verification_label": presentation.get("verification_label"),
+                "explanation": presentation.get("explanation"),
+                "presentation_kind": presentation.get("presentation_kind"),
+                "known_independent_count": presentation.get("known_independent_count"),
+                "editorial_labels": row.get("editorial_labels"),
+            }
+        )
+    return rows
+
+
+def test_public_article_keeps_v1_snapshot_after_later_runs_fill_the_50_cap(db_session: Session) -> None:
+    from uuid import UUID
+
+    from sqlalchemy import func, select
+
+    from app.domain.enums import PipelineStatus
+    from app.models import PipelineRun
+    from app.repositories import PipelineRunRepository
+    from app.services.evidence_snapshot import evidence_snapshot_for_version
+    from app.schemas.editorial_evidence import Demotion
+    from tests.test_editorial_label_policy import _later_live_supported, _publish_with_snapshot_decision
+    from tests.test_version_traceability import _add_version, _login, _mark_published
+
+    event, article, claim, snap_v1 = _publish_with_snapshot_decision(
+        db_session,
+        hash_key="pub50",
+        decision={
+            "status": ClaimStatus.SINGLE_SOURCE.value,
+            "unresolved": False,
+            "evaluation_state": "complete",
+            "llm_reason": None,
+            "support_basis": {
+                "known_independent_count": 1,
+                "unknown_group_count": 0,
+                "documents_consulted": 1,
+                "documents_supporting": 1,
+                "demotion": Demotion.INSUFFICIENT_INDEPENDENCE.value,
+                "kind": "single_report",
+            },
+        },
+    )
+    v1_write_id = UUID(str(snap_v1["writing_run_id"]))
+
+    with TestClient(app) as client:
+        before = client.get(f"/api/v1/articles/{article.slug}")
+    assert before.status_code == 200
+    before_json = before.json()
+    assert before_json["published_version"] == 1
+    before_claims = _public_claim_view(before_json)
+    assert before_claims[0]["verification_label"] == "Respaldo limitado"
+    before_body = before_json["body"]
+    before_headline = before_json["headline"]
+
+    article, snap_v2 = _add_version(
+        db_session, event, article, headline="Versión candidata dos", fingerprint="fp-pub50-v2"
+    )
+    _later_live_supported(db_session, event, claim)
+    later = datetime.now(timezone.utc) + timedelta(hours=2)
+    fillers = []
+    for index in range(51):
+        fillers.append(
+            PipelineRun(
+                event_id=event.id,
+                stage="research",
+                status=PipelineStatus.SUCCESS,
+                started_at=later + timedelta(seconds=index),
+                finished_at=later + timedelta(seconds=index, milliseconds=10),
+                metadata_json={"filler": index, "claims_fingerprint": "fp-pub50-v2"},
+            )
+        )
+    db_session.add_all(fillers)
+    db_session.commit()
+
+    repo = PipelineRunRepository(db_session)
+    capped = repo.list_for_event(event.id, limit=50)
+    assert len(capped) == 50
+    assert all(run.id != v1_write_id for run in capped)
+    assert evidence_snapshot_for_version(capped, 1) is None
+    bound = repo.list_snapshot_binding_runs(event.id, 1)
+    assert any(run.id == v1_write_id for run in bound)
+    assert evidence_snapshot_for_version(bound, 1) is not None
+
+    run_count = db_session.scalar(select(func.count()).select_from(PipelineRun).where(PipelineRun.event_id == event.id))
+    with TestClient(app) as client:
+        after = client.get(f"/api/v1/articles/{article.slug}")
+    assert after.status_code == 200
+    after_json = after.json()
+    assert after_json["published_version"] == 1
+    assert after_json["headline"] == before_headline
+    assert after_json["body"] == before_body
+    assert _public_claim_view(after_json) == before_claims
+    assert after_json["claims"][0]["presentation"]["verification_label"] != "Confirmado"
+    after_count = db_session.scalar(select(func.count()).select_from(PipelineRun).where(PipelineRun.event_id == event.id))
+    assert after_count == run_count
+
+    from app.models import ArticleVersion
+
+    version_count = db_session.scalar(
+        select(func.count()).select_from(ArticleVersion).where(ArticleVersion.article_id == article.id)
+    )
+    _mark_published(db_session, article, 2)
+    db_session.commit()
+    with TestClient(app) as client:
+        live_v2 = client.get(f"/api/v1/articles/{article.slug}").json()
+    assert live_v2["published_version"] == 2
+    assert live_v2["headline"] == "Versión candidata dos"
+    assert live_v2["body"] == "Versión candidata dos."
+    assert _public_claim_view(live_v2)[0]["verification_label"] != "Confirmado"
+    assert db_session.scalar(
+        select(func.count()).select_from(ArticleVersion).where(ArticleVersion.article_id == article.id)
+    ) == version_count
+
+    with TestClient(app) as client:
+        _login(client)
+        historic = client.get(f"/api/v1/admin/articles/{article.id}/versions/1/trace")
+        published_trace = client.get(f"/api/v1/admin/articles/{article.id}/trace")
+    assert historic.status_code == 200
+    historic_json = historic.json()
+    assert historic_json["article_version"] == 1
+    assert historic_json["writing_run_id"] == str(v1_write_id)
+    assert historic_json["version_content"]["headline"] == before_headline
+    assert published_trace.status_code == 200
+    assert published_trace.json()["article_version"] == 2
+    assert published_trace.json()["writing_run_id"] == snap_v2["writing_run_id"]
+    assert published_trace.json()["writing_run_id"] != str(v1_write_id)
+

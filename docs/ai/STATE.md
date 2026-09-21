@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-20. Track C11 (trazabilidad por versión en Admin/export) en código. C11 cerrado; Track C no equivale a merge/despliegue.
+Revisión: 2026-09-21. Pendientes post-C11 (tope 50 del freeze público y visual Admin de trazabilidad) cerrados. Track C listo para revisión de merge; eso no equivale a despliegue validado.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 
@@ -75,7 +75,7 @@ En código: `ClaimDecision.evaluation_state` opcional en `editorial-evidence-1` 
 
 ## Track C2 — presentation fiel al snapshot publicado — 2026-09-20
 
-En código: `GET /api/v1/articles/{key}` arma claims con `compact_public_claims(..., freeze_to_version=article.published_version)`. Esa versión es `PublishService` (`published_version = current_version` al publicar), no el Writing/Verification más reciente. El freeze lee `evidence_snapshot_for_version` → `view_from_evidence_snapshot` (decisiones, selected/sol del `article_context.verification`, primary desde `support_basis.primary_access`, skipped_search desde `llm_reason`). Membership = ids del snapshot ∩ `claim_ids` del body publicado; un claim nuevo del Event no entra en V1. `_VersionClaim` no rellena status/texto/SPO/evidencia con el Claim live. Labels (`CHECKED` incluido) usan esa view y esos proxies; la policy no cambió. `compact_public_claims` sin freeze y Admin `_claims_out` siguen live. Preview admin de versión no serializa claims. Sin migración, sin backfill, sin LLM extra.
+En código: `GET /api/v1/articles/{key}` arma claims con `compact_public_claims(..., freeze_to_version=article.published_version)`. Esa versión es `PublishService` (`published_version = current_version` al publicar), no el Writing/Verification más reciente. El freeze lista solo corridas writing/auditing atadas en JSONB a esa versión (`list_snapshot_binding_runs`; sin tope de recencia) y después `evidence_snapshot_for_version` → `view_from_evidence_snapshot` (decisiones, selected/sol del `article_context.verification`, primary desde `support_basis.primary_access`, skipped_search desde `llm_reason`). No usa `list_for_event(limit=50)`, ni la corrida más reciente, ni un fingerprint coincidente. Membership = ids del snapshot ∩ `claim_ids` del body publicado; un claim nuevo del Event no entra en V1. `_VersionClaim` no rellena status/texto/SPO/evidencia con el Claim live. Labels (`CHECKED` incluido) usan esa view y esos proxies; la policy no cambió. `compact_public_claims` sin freeze y Admin `_claims_out` siguen live. Preview admin de versión no serializa claims. Sin migración, sin backfill, sin LLM extra.
 
 Limitaciones de datos no conservados: snapshot ausente → ids del body, status default `SINGLE_SOURCE`, copy «Sin evaluación disponible», sin Verification live. `source_item_id` de evidencia congelada es `snapshot:{ref}`. `skipped_search` numérico no queda en el snapshot: CHECKED de un SUPPORTED numérico puede inferirse distinto. SPO/texto ausentes en el snapshot no se reconstruyen del Event actual (DISCREPANCY/FALSE_CLAIM de esa versión pueden faltar). Una decisión skip-shaped (`llm_reason` veto/policy_skip/budget/outside_recheck) sin `evaluation_state` no usa copy evaluado.
 
@@ -119,7 +119,7 @@ Limitación: no hay motor lingüístico general; cláusulas relativas, gerundios
 
 En código: `claim_card_presentation` es la fuente única del copy público. Precedencia: disponibilidad de evaluación → resultado gated (`DISPROVEN`/`CONFLICTING`) → rol/alcance (parcial, mixto, utterance) → suficiencia del respaldo admitido para la proposición completa. Familias: Confirmado, Declaración confirmada, Respaldo limitado, No confirmado, En disputa, Contradicho, Sin evaluación disponible (+ pending/failed/skipped). No deriva copy de `llm_reason` ni de prosa libre. El GET público proyecta ese renderer sobre el snapshot de `published_version`; no reescribe snapshots. `demotion` sale del DTO público y permanece en Admin (`include_internal`). Conteos (`documents_consulted`, `documents_supporting`, procedencias) van en el DTO ampliado; unknown es `None`, no 0. El consumidor web lee los textos del backend y no recalcula certeza. Writing compacta sin esos textos. Tests: `test_claim_card_presentation.py`, freeze en `test_editorial_label_policy.py`, GET en `test_public_api.py`, consumidor en `claim-popover-copy.test.ts`.
 
-Pendiente de comprobaciones anteriores (no bloquean C11): relativos/gerundios; claims históricos mixtos; QUALIFIES sin `unsupported_scope` por resta; `pending`/`failed` no se escriben en SUCCESS. Verificación visual de C10 quedó en el chat, no en el repo.
+Pendiente de comprobaciones anteriores (limitaciones aceptadas del track, no reabiertas aquí): relativos/gerundios; claims históricos mixtos; QUALIFIES sin `unsupported_scope` por resta; `pending`/`failed` no se escriben en SUCCESS. Verificación visual de C10 quedó en el chat, no en el repo. Visual Admin C11: 2026-09-21, viewport 1280×800, Next local `:3001` + API con el código actual (`AUTO_PUBLISH=false`, worker/beat apagados); capturas en el chat / `e:\temp\cursor\screenshots\admin-trace-*.png`. Overlay «1 Issue» de Next es de automatización Cursor (`data-cursor-ref`), no de la app.
 
 ## Track C10 — popover y panel inferior de respaldo — 2026-09-20
 
@@ -146,14 +146,18 @@ Mapa: campo → origen persistido → vínculo.
 
 Legacy: IDs conocidos se conservan; ausentes → `missing_fields`; objeto borrado → `unresolvable_fields`; stage/evento contradictorio → `inconsistencies` (no se reescribe el snapshot). `revise` editorial no inventa Writing. Tests: `test_version_traceability.py`.
 
-C11 cerrado en código y tests dirigidos. Eso no convierte en hechas las comprobaciones visuales de C10 ni un merge.
+C11 cerrado en código y tests dirigidos. Visual Admin de trazabilidad comprobada 2026-09-21. Eso no convierte en hechas las comprobaciones visuales de C10 ni un despliegue.
+
+## Track C — cierre pendientes post-C11 — 2026-09-21
+
+El tope `list_for_event(limit=50)` sí afectaba el GET público: esa consulta es newest-first de **todas** las etapas; 51 `research` posteriores dejan fuera el writing/auditing de V1, `evidence_snapshot_for_version` no halla snapshot y el freeze cae al fallback neutral (no al Verification live). Causa observable: copy/claims/labels de V1 ya no coinciden con el GET anterior al flood. Corrección: `_frozen_public_claims` usa `list_snapshot_binding_runs(event_id, version)` (writing/auditing, filtro JSONB `version` / `version_after` / `evidence_snapshot.version`, sin cap). El matcher de C2/C11 se reutiliza. `list_for_event(limit=50)` sigue en historial Admin y otros callers; no se sustituyó por otro tope. Regresión `test_public_article_keeps_v1_snapshot_after_later_runs_fill_the_50_cap` (endpoint público real, fakes). Publicar V2 cambia el GET; `/versions/1/trace` conserva la cadena de V1. Snapshot ausente / decisión vacía: `test_frozen_missing_decision_is_not_filled_from_live_verify`. Consultar no crea corridas ni versiones.
 
 ## Track C — matriz C1–C11 (cierres acreditados, sin reauditoría)
 
 | Fase | Commit | Estado acreditado | Pendiente visible |
 | --- | --- | --- | --- |
 | C1 | `3523551` | Contrato determinista de causa/alcance | — |
-| C2 | `efaa0a8` | Freeze público al snapshot de `published_version` | Freeze público sigue leyendo `list_for_event(limit=50)` |
+| C2 | `efaa0a8` + este cierre | Freeze público al snapshot de `published_version` vía consulta dirigida | — |
 | C3 | `3523551` (mismo corte de contrato) | `reason_code` / scopes en snapshot | `pending`/`failed` no se escriben en SUCCESS |
 | C4 | `632f591` | `public_rendering` de permisos | Snapshot legacy → `None` |
 | C5 | `7c98fa7` | Superficies vs contrato de esa versión | — |
@@ -163,9 +167,9 @@ C11 cerrado en código y tests dirigidos. Eso no convierte en hechas las comprob
 | C8b | `8dfc167` | `verified_scope` exige SUPPORTS admitido | — |
 | C9 | `ee56641` | Copy público desde el contrato | Consumidor web no recalcula |
 | C10 | `27692c1` | Popover/sheet sobre copy C9 | Verificación visual en chat, no en repo; Next overlay de automatización no es de la app |
-| C11 | (este commit) | Export/Admin de la cadena por versión | No merge, no deploy |
+| C11 | `b325852` | Export/Admin de la cadena por versión | Visual Admin comprobada 2026-09-21; no deploy |
 
-Terminar C11 ≠ Track C “completo para producción”.
+Listo para revisión de merge ≠ despliegue validado. Limitaciones aceptadas de C8–C10 siguen.
 
 ## Track C — revisión integrada C1–C8 — 2026-09-20
 
