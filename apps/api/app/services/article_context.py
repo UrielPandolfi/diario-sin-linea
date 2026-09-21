@@ -427,9 +427,14 @@ def build_article_context(
     sources, item_id_to_ref, url_to_ref = _sources(event, limit=max_sources)
     claim_refs: dict[str, str] = {}
     buckets: dict[str, list[ContextClaim]] = {name: [] for name in _STATUS_BUCKET.values()}
+    verify_paired = verify_run is not None and verify_run.status == PipelineStatus.SUCCESS
+    usable_as_fact = {"confirmed_claims", "single_source_claims"}
     for index, claim in enumerate(selected, start=1):
         bucket = _STATUS_BUCKET.get(claim.status)
         if bucket is None:
+            continue
+        decision = verification.decision_by_claim_id.get(str(claim.id))
+        if verify_paired and bucket in usable_as_fact and decision is None:
             continue
         ref = f"C{index}"
         claim_refs[ref] = str(claim.id)
@@ -440,7 +445,7 @@ def build_article_context(
                 excerpt_chars=excerpt_chars,
                 item_id_to_ref=item_id_to_ref,
                 url_to_ref=url_to_ref,
-                decision=verification.decision_by_claim_id.get(str(claim.id)),
+                decision=decision,
                 related_claim_ids=related.get(str(claim.id)),
             )
         )

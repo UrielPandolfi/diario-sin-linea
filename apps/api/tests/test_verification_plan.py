@@ -306,6 +306,13 @@ def test_policy_skips_well_supported_declaration_not_high_stat() -> None:
         evidence=declaration.evidence,
     )
     assert policy_selects(ruling) is True
+    from app.services.verification_policy import cheap_live_evaluation_eligible
+
+    assert cheap_live_evaluation_eligible(well_hecho, skip_reason="policy_skip") is True
+    assert cheap_live_evaluation_eligible(well_hecho, skip_reason="budget") is True
+    assert cheap_live_evaluation_eligible(well_hecho, skip_reason="veto") is False
+    assert cheap_live_evaluation_eligible(declaration, skip_reason="policy_skip") is False
+    assert cheap_live_evaluation_eligible(cifra, skip_reason="policy_skip") is False
 
 
 def test_select_claims_still_vetoes_mundane() -> None:

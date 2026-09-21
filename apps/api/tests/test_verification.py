@@ -1919,3 +1919,207 @@ def test_new_cheap_evaluation_does_not_change_published_snapshot(db_session: Ses
     assert claim.status == ClaimStatus.UNCERTAIN
     assert article.published_version == 1
 
+
+def _extracted_item(session: Session, source_id, *, url: str, title: str, body: str, content_hash: str):
+    from app.core.source_content import merge_item_metadata
+
+    item = _item(
+        session,
+        source_id,
+        url=url,
+        title=title,
+        body=body,
+        content_hash=content_hash,
+    )
+    merge_item_metadata(item, body_source="extracted_html", fetch_ok=True)
+    session.flush()
+    return item
+
+
+def test_skipped_supported_claim_is_not_confirmed_for_writing(db_session: Session) -> None:
+    from app.services.article_context import build_article_context
+    from app.services.claim_coverage import claims_fingerprint
+    from app.services.claim_service import CLAIM_STAGE
+
+    source = _source(db_session)
+    item = _item(
+        db_session,
+        source.id,
+        url="https://ejemplo.test/skip-supported",
+        title="Declaración ya corroborada",
+        body="El ministro dijo que el decreto está vigente.",
+        content_hash="h-skip-sup",
+    )
+    event = _event(db_session, item)
+    claim = _claim(
+        db_session,
+        event,
+        text="El ministro dijo que el decreto está vigente",
+        claim_type="declaracion",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    fingerprint = claims_fingerprint([claim])
+    claim_run = PipelineRun(
+        event_id=event.id,
+        stage=CLAIM_STAGE,
+        status=PipelineStatus.SUCCESS,
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+        metadata_json={"claims_fingerprint": fingerprint},
+    )
+    verify = PipelineRun(
+        event_id=event.id,
+        stage=VERIFICATION_STAGE,
+        status=PipelineStatus.SUCCESS,
+        started_at=datetime.now(timezone.utc),
+        finished_at=datetime.now(timezone.utc),
+        metadata_json={
+            "claims_fingerprint": fingerprint,
+            "based_on_claim_run_id": None,
+            "decision_by_claim_id": {
+                str(claim.id): {
+                    "claim_id": str(claim.id),
+                    "status": "SUPPORTED",
+                    "evaluation_state": "skipped",
+                    "llm_reason": "policy_skip",
+                    "public_rendering": None,
+                    "support_basis": {},
+                }
+            },
+            "selected": [],
+            "skipped_policy": [{"claim_id": str(claim.id), "reason": "policy_skip"}],
+        },
+    )
+    db_session.add_all([claim_run, verify])
+    verify.metadata_json["based_on_claim_run_id"] = str(claim_run.id)
+    db_session.flush()
+    db_session.expire(event, ["claims"])
+    runs = list(
+        db_session.scalars(select(PipelineRun).where(PipelineRun.event_id == event.id))
+    )
+    context = build_article_context(event, pipeline_runs=runs)
+    assert context.confirmed_claims == []
+    assert str(claim.id) not in context.verification.decision_by_claim_id
+
+
+def test_well_supported_high_hecho_gets_live_evidence_contract_without_paid_slot(
+    db_session: Session,
+) -> None:
+    from app.repositories import PipelineRunRepository
+    from app.services.article_context import build_article_context
+    from app.services.claim_coverage import claims_fingerprint
+    from app.services.claim_service import CLAIM_STAGE
+    from app.services.event_service import EventService
+    from app.services.verification_policy import is_well_supported
+
+    source_a = _source(
+        db_session,
+        name="Cronica Test",
+        domain="cronica.test",
+        feed_url="https://www.cronica.test/rss.xml",
+    )
+    source_b = _source(
+        db_session,
+        name="Info Digital Test",
+        domain="informedigital.test",
+        feed_url="https://www.informedigital.test/rss.xml",
+    )
+    text = "Javier Milei viajará a Estados Unidos por decimonovena vez."
+    excerpt_a = (
+        "Javier Milei viajará a Estados Unidos por decimonovena vez según la agenda "
+        "oficial de la gira presidencial prevista para esta semana en Nueva York."
+    )
+    excerpt_b = (
+        "El presidente concretará su visita número 19 a Estados Unidos y permanecerá "
+        "tres días en Nueva York antes de volver el viernes, según otra redacción."
+    )
+    item_a = _extracted_item(
+        db_session,
+        source_a.id,
+        url="https://www.cronica.test/milei-19",
+        title="Gira",
+        body=excerpt_a,
+        content_hash="h-milei-a",
+    )
+    item_b = _extracted_item(
+        db_session,
+        source_b.id,
+        url="https://www.informedigital.test/milei-19",
+        title="Visita",
+        body=excerpt_b,
+        content_hash="h-milei-b",
+    )
+    event = _event(db_session, item_a, title_internal=text, short_summary=text)
+    EventService(db_session).attach_source(event, item_b.id)
+    well = _claim(
+        db_session,
+        event,
+        text=text,
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    _evidence(db_session, well, item_a, excerpt=excerpt_a)
+    _evidence(db_session, well, item_b, excerpt=excerpt_b)
+    fillers = [
+        _claim(
+            db_session,
+            event,
+            text=f"El ministro anunció que el decreto número {index + 1} está vigente",
+            claim_type="declaracion",
+            importance=ClaimImportance.HIGH,
+            status=ClaimStatus.SINGLE_SOURCE,
+        )
+        for index in range(5)
+    ]
+    db_session.expire(well, ["evidence"])
+    db_session.refresh(well)
+    assert is_well_supported(well) is True
+    pool = [well, *fillers]
+    fingerprint = claims_fingerprint(pool)
+    db_session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=CLAIM_STAGE,
+            status=PipelineStatus.SUCCESS,
+            started_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc),
+            metadata_json={
+                "claims_fingerprint": fingerprint,
+                "evaluated_claims": [
+                    {"claim_id": str(row.id), "canonical_text": row.canonical_text} for row in pool
+                ],
+            },
+        )
+    )
+    db_session.flush()
+    search = FakeSearchProvider()
+    llm = FakeStructuredLLM({"VerificationResult": _sol()})
+    result = _service(db_session, llm, search).verify(event.id, trigger="admin")
+    cid = str(well.id)
+    assert cid not in {row["claim_id"] for row in result["selected"]}
+    assert result["decision_by_claim_id"][cid]["evaluation_state"] == "complete"
+    assert result["decision_by_claim_id"][cid]["llm_reason"] == "live_evidence"
+    assert result["decision_by_claim_id"][cid]["public_rendering"]
+    assert result["decision_by_claim_id"][cid]["status"] == "SUPPORTED"
+    assert any(
+        row["claim_id"] == cid and row["reason"] == "live_evidence"
+        for row in result["cheap_live_evaluations"]
+    )
+    assert all(row["claim_id"] != cid for row in result["skipped_policy"])
+    assert len(result["selected"]) == 5
+    assert llm.calls.count("VerificationResult") == 5
+    assert llm.calls.count("VerificationPlan") == 0
+    well_queries = [query.text for query in search.queries if "decimonovena" in query.text]
+    assert well_queries == []
+    db_session.expire(event, ["claims"])
+    context = build_article_context(
+        event, pipeline_runs=PipelineRunRepository(db_session).list_for_event(event.id, limit=50)
+    )
+    confirmed_ids = {row.id for row in context.confirmed_claims}
+    assert cid in confirmed_ids
+    assert cid in context.verification.decision_by_claim_id
+    confirmed = next(row for row in context.confirmed_claims if row.id == cid)
+    assert confirmed.status == ClaimStatus.SUPPORTED
+

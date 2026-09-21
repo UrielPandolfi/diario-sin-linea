@@ -127,8 +127,12 @@ from app.services.verification_outcome import (
     latest_success_claim_resolution,
     view_from_mapping,
 )
-from app.services.verification_policy import canonicalize_claim_type, select_claims
-from app.services.verification_policy import SelectedClaim
+from app.services.verification_policy import (
+    canonicalize_claim_type,
+    cheap_live_evaluation_eligible,
+    select_claims,
+    SelectedClaim,
+)
 from app.services.claim_meaning import attributed_statement, temporal_comparison
 from app.services.evidence_comparison import (
     COMPARISON_POLICY_VERSION,
@@ -344,6 +348,7 @@ class VerificationService:
             "verification_incomplete": bool(budget.central_unverified),
             "selected": [{"claim_id": str(row.claim.id), "reasons": row.reasons} for row in selected],
             "skipped_policy": skipped_policy,
+            "cheap_live_evaluations": [],
             "consumed_needs_external_verification": consumed,
             "queries": {},
             "plans": {},
@@ -840,6 +845,29 @@ class VerificationService:
             public_rendering=None,
         )
 
+    def _live_evidence_decision(self, claim: Claim, event: Event) -> ClaimDecision:
+        plan = heuristic_plan(claim, jurisdiction=self.settings.editorial_country_code)
+        preferred = preferred_domains(
+            plan.jurisdiction,
+            plan.verification_target.value,
+            plan.subject.value,
+            province=event.province,
+            judicial_forum=plan.judicial_forum.value,
+            claim_text=claim.canonical_text,
+        )
+        found = claim_has_preferred_evidence(claim, preferred)
+        authentic = self._utterance_primary_supports(claim)
+        return self._decision_after_policy(
+            claim,
+            plan,
+            desired=claim.status,
+            llm_reason="live_evidence",
+            unresolved=False,
+            primary_found=found or authentic,
+            primary_supports=found or authentic,
+            packet_size=len(claim.evidence),
+        )
+
     def _record_skipped_decisions(
         self,
         event: Event,
@@ -851,7 +879,26 @@ class VerificationService:
             cid = str(row.get("claim_id") or "")
             if cid:
                 reasons[cid] = str(row.get("reason") or "policy_skip")
+        by_id = {str(claim.id): claim for claim in event.claims}
+        remaining: list[dict] = []
+        cheap = payload.setdefault("cheap_live_evaluations", [])
         decisions = payload.setdefault("decision_by_claim_id", {})
+        for row in skipped_policy:
+            cid = str(row.get("claim_id") or "")
+            claim = by_id.get(cid)
+            reason = str(row.get("reason") or "policy_skip")
+            if (
+                claim is not None
+                and cid not in decisions
+                and cheap_live_evaluation_eligible(claim, skip_reason=reason)
+            ):
+                decisions[cid] = self._live_evidence_decision(claim, event).model_dump(mode="json")
+                cheap.append({"claim_id": cid, "reason": "live_evidence", "omitted_reason": reason})
+                payload.setdefault("skipped_search", []).append(cid)
+                payload["verified"] = int(payload.get("verified") or 0) + 1
+                continue
+            remaining.append(row)
+        payload["skipped_policy"] = remaining
         for claim in event.claims:
             cid = str(claim.id)
             if cid in decisions:

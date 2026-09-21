@@ -2,26 +2,25 @@
 
 **Fecha:** 2026-09-21
 
-**Tarea:** Cerrar `verification_now_paired` y auditar Milei V3. No merge. No deploy. Polling apagado. `AUTO_PUBLISH=false` en API/worker. No se publicó.
+**Tarea:** Cerrar el desajuste `c0c73502` (policy_skip vs Writing confirmed). No merge. No deploy. Polling apagado. No reprocesar el lote. No llamadas pagas. Snapshots históricos no se modificaron.
 
 ## Qué quedó
 
-Commit `a6326e1` en `origin/track-c`: Writing emite versión nueva si el snapshot de la candidata está unpaired y ya hay par compatible; no rellena el vacío ni cambia `detect_material_change`. Tests fakes: par escribe V3; sin par no; repetir Writing no crea V4; V1/V2 conservan texto y snapshot. Pytest dirigido: `tests/test_snapshot_pairing.py` + `test_writing.py` + `test_version_traceability.py` + `test_track_b.py` → 50 passed.
+HIGH `hecho` well-supported omitido del tope de cinco ya no queda `skipped`+`public_rendering=null`. Verification cierra contrato con evidencia live de esa corrida (`live_evidence`, sin search/Sol, sin copiar V1). Writing no trata skipped SUPPORTED como confirmado. Si el snapshot actual está skipped y el par compatible ahora está complete, Writing emite versión nueva (`verification_contract_completed`) sin cambiar `detect_material_change`. Límite de cinco, C5 y trazabilidad se conservan.
 
-API y worker recreados con esa imagen. `auto_poll_enabled=false`. `AUTO_PUBLISH=false`.
+Tests fakes dirigidos: 197 passed (`test_verification.py`, `test_snapshot_pairing.py`, `test_writing.py`, `test_verification_plan.py`, `test_editorial_evidence.py`, `test_evidence_posture.py`, `test_writing_certainty.py`, `test_audit_policy.py`, `test_surface_validation.py`).
 
-**ANDIS** (`07e56d84`) V1: Audit passed previo, `READY_FOR_REVIEW`, sin publicar. No se reprocesó ahora.
+**Milei** (`d7894ad7`) V3 y V1 no se tocaron. El bloqueo de Audit V3 sigue siendo el contrato skipped de `c0c73502`.
 
-**Milei** (`d7894ad7`): V3 persistida Writing `1ae3ff99`, verify `54bc6020`, 7 decisiones, `published_version=1`. Audit Celery `2dc2b94e` (`admin`): `passed=false`, `reason=structural_block`, `version_after=3`, `rewrite_count=0`. HIGH: `surface_contract_incomplete` de `c0c73502` en titular y lead (`evaluation_state=skipped`, `public_rendering=null`). LOW `surface_indeterminate` no bloquean. Sin corrida de publish. V1 live intacta.
+## Recuperar esta nota (mínimo)
+
+Con API/worker corriendo este código, `AUTO_PUBLISH=false` y polling off: Verification admin del suceso (sin RSS ni research nuevo). Writing debería emitir V4 por `verification_contract_completed` (no reauditar V3 skipped). Después Audit de esa versión. No publicar salvo decisión. No copiar V1 a mano.
 
 ## Pendiente
 
+- Ejecutar esa Verification+Writing+Audit de Milei cuando el stack tenga el commit.
 - Publicar ANDIS solo si se decide.
-- Milei V3: el bloqueo es contrato skipped de `c0c73502`, no un snapshot vacío. Completar esa evaluación; reauditar el mismo skipped no lo completa.
 - Jerez: atribuir identificación con `EditorialService.revise` y después auditar.
-- Pilar y Granja700 V1 (1.200 / principal skipped): completar contrato.
-- Granja700 V2 unpaired: no tiene live publicado.
-- Pollos `4704ee4e` y Milei NY `e362ee90`: Verification SUCCESS del fingerprint actual.
+- Pilar y Granja700: contrato incompleto / unpaired.
 - Independencia V1 Milei `12b66950`: pendiente de revisar.
-- Connection error de Verification: sin retries nuevos.
 - Revisión de merge de Track C sigue aparte.

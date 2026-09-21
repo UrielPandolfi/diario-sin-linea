@@ -30,6 +30,7 @@ from app.services.claim_service import comparison_key_for
 from app.services.evidence_snapshot import (
     capture_evidence_snapshot,
     evidence_snapshot_for_version,
+    pair_completes_skipped_claims,
     persist_snapshot_fields,
     snapshot_lacks_usable_verification,
 )
@@ -196,9 +197,17 @@ class WritingService:
             and claim_run is not None
             and verify_run is not None
         )
+        skipped_now_complete = (
+            article is not None
+            and claim_run is not None
+            and verify_run is not None
+            and pair_completes_skipped_claims(current_snap, verify_run)
+        )
         if article is not None and not change.is_material:
             if unpaired_now_paired:
                 base["material_reasons"] = list(change.reasons) + ["verification_now_paired"]
+            elif skipped_now_complete:
+                base["material_reasons"] = list(change.reasons) + ["verification_contract_completed"]
             elif has_unaudited_candidate(article, pipeline_runs):
                 base["article_id"] = str(article.id)
                 base["version"] = article.current_version
@@ -269,6 +278,8 @@ class WritingService:
         )
         if "verification_now_paired" in (base.get("material_reasons") or []):
             change_reason = "verification_now_paired"
+        elif "verification_contract_completed" in (base.get("material_reasons") or []):
+            change_reason = "verification_contract_completed"
         else:
             change_reason = "initial" if article is None else ",".join(change.reasons) or "material_change"
         if article is None:
@@ -491,6 +502,12 @@ def should_enqueue_write(session: Session, event_id: UUID) -> bool:
             return True
         pipeline = PipelineRunRepository(session)
         runs = pipeline.list_for_event(event_id, limit=50)
+        _claim_run, verify_run = pair_from_runs(list(runs))
+        current_snap = (
+            evidence_snapshot_for_version(runs, article.current_version) if article is not None else None
+        )
+        if pair_completes_skipped_claims(current_snap, verify_run):
+            return True
         if has_unaudited_candidate(article, runs):
             return True
         stmt = (
@@ -504,7 +521,6 @@ def should_enqueue_write(session: Session, event_id: UUID) -> bool:
         claims = list(event.claims)
         previous_run = last_written_run(runs)
         previous = ((previous_run.metadata_json if previous_run is not None else None) or {}).get("claims_snapshot")
-        _claim_run, verify_run = pair_from_runs(list(runs))
         decisions = ((verify_run.metadata_json if verify_run is not None else None) or {}).get("decision_by_claim_id") or {}
         current = snapshot_claims(claims, decisions=decisions)
         return detect_material_change(previous, current).is_material

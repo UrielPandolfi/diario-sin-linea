@@ -337,6 +337,26 @@ def policy_selects(claim: Claim) -> bool:
     return False
 
 
+CHEAP_LIVE_SKIP_REASONS = frozenset({"policy_skip", "budget"})
+
+
+def cheap_live_evaluation_eligible(claim: Claim, *, skip_reason: str | None = None) -> bool:
+    """HIGH well-supported hecho omitted from the paid-5 still needs a complete live contract.
+
+    Does not copy a prior Verification decision. Declarations and vetoes stay skipped.
+    """
+    if skip_reason is not None and skip_reason not in CHEAP_LIVE_SKIP_REASONS:
+        return False
+    kind = canonicalize_claim_type(claim.claim_type)
+    if kind != "hecho":
+        return False
+    if claim.importance != ClaimImportance.HIGH:
+        return False
+    if is_vetoed(claim):
+        return False
+    return is_well_supported(claim)
+
+
 @dataclass(frozen=True)
 class SelectedClaim:
     claim: Claim

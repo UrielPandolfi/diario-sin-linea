@@ -596,3 +596,209 @@ def test_repeat_write_after_verification_now_paired_does_not_create_another_vers
             ArticleVersion.version_number == 4,
         )
     ).first() is None
+
+
+def _skipped_decision_for_claim(claim) -> dict:
+    return {
+        "claim_id": str(claim.id),
+        "status": claim.status.value,
+        "unresolved": False,
+        "llm_reason": "policy_skip",
+        "evaluation_state": "skipped",
+        "public_rendering": None,
+        "support_basis": {},
+    }
+
+
+def _live_evidence_verify_run(session: Session, event, claim_run: PipelineRun, claims) -> PipelineRun:
+    fingerprint = claims_fingerprint(claims)
+    decisions = {str(claim.id): _complete_decision_for_claim(claim) for claim in claims}
+    for row in decisions.values():
+        row["llm_reason"] = "live_evidence"
+    run = PipelineRun(
+        event_id=event.id,
+        stage=VERIFICATION_STAGE,
+        status=PipelineStatus.SUCCESS,
+        started_at=_now(),
+        finished_at=_now(),
+        metadata_json={
+            "claims_fingerprint": fingerprint,
+            "based_on_claim_run_id": str(claim_run.id),
+            "decision_by_claim_id": decisions,
+            "evaluated_claims": [
+                {"claim_id": str(claim.id), "canonical_text": claim.canonical_text} for claim in claims
+            ],
+            "selected": [],
+            "cheap_live_evaluations": [
+                {"claim_id": str(claim.id), "reason": "live_evidence", "omitted_reason": "policy_skip"}
+                for claim in claims
+            ],
+        },
+    )
+    session.add(run)
+    session.flush()
+    return run
+
+
+def _skipped_v2_after_published_v1(session: Session):
+    from app.schemas import ArticleContentUpdate
+    from app.services.article_service import ArticleService
+    from app.services.evidence_snapshot import persist_snapshot_fields
+    from app.services.material_change import snapshot_claims
+    from app.services.verification_outcome import writing_evidence_snapshot
+    from app.services.writing_service import WRITING_STAGE
+
+    event, claim, _item = _seed_event(session)
+    first = _claim_run(session, event, [claim])
+    verify_v1 = _verify_run(session, event, first, [claim])
+    first_write = WritingService(session, llm=FakeStructuredLLM({"ArticleDraft": _draft()})).write(
+        event.id, trigger="new_event"
+    )
+    article = session.scalars(select(Article).where(Article.event_id == event.id)).one()
+    v1_headline = article.headline
+    v1_summary = article.summary
+    v1_body = article.body
+    article.status = ArticleStatus.PUBLISHED
+    article.published_version = 1
+    article.published_at = _now()
+    session.flush()
+
+    skipped_verify = PipelineRun(
+        event_id=event.id,
+        stage=VERIFICATION_STAGE,
+        status=PipelineStatus.SUCCESS,
+        started_at=_now() + timedelta(seconds=8),
+        finished_at=_now() + timedelta(seconds=8),
+        metadata_json={
+            "claims_fingerprint": (first.metadata_json or {}).get("claims_fingerprint"),
+            "based_on_claim_run_id": str(first.id),
+            "decision_by_claim_id": {str(claim.id): _skipped_decision_for_claim(claim)},
+            "evaluated_claims": [{"claim_id": str(claim.id), "canonical_text": claim.canonical_text}],
+            "selected": [],
+            "skipped_policy": [{"claim_id": str(claim.id), "reason": "policy_skip"}],
+        },
+    )
+    session.add(skipped_verify)
+    session.flush()
+
+    article.status = ArticleStatus.DRAFT
+    article = ArticleService(session).update_content(
+        article,
+        ArticleContentUpdate(
+            headline="V2 skipped contract",
+            summary="V2 skipped contract.",
+            body="V2 skipped contract.",
+            change_reason="existing_event",
+        ),
+    )
+    skipped_snap = writing_evidence_snapshot(first, skipped_verify, version=2)
+    skipped_snap["decision_by_claim_id"] = {str(claim.id): _skipped_decision_for_claim(claim)}
+    meta = persist_snapshot_fields(skipped_snap)
+    meta.update(
+        {
+            "written": True,
+            "reason": "existing_event",
+            "version": 2,
+            "claims_snapshot": snapshot_claims([claim]),
+            "claims_fingerprint": (first.metadata_json or {}).get("claims_fingerprint"),
+        }
+    )
+    session.add(
+        PipelineRun(
+            event_id=event.id,
+            stage=WRITING_STAGE,
+            status=PipelineStatus.SUCCESS,
+            started_at=_now() + timedelta(seconds=10),
+            finished_at=_now() + timedelta(seconds=10),
+            metadata_json=meta,
+        )
+    )
+    session.flush()
+    return event, claim, article, first, verify_v1, skipped_verify, v1_headline, v1_summary, v1_body
+
+
+def test_skipped_contract_writes_new_version_when_live_evidence_completes(db_session: Session) -> None:
+    from app.repositories import PipelineRunRepository
+    from app.services.evidence_snapshot import evidence_snapshot_for_version
+    from app.services.writing_service import should_enqueue_write
+
+    event, claim, article, first, verify_v1, skipped_verify, v1_headline, v1_summary, v1_body = (
+        _skipped_v2_after_published_v1(db_session)
+    )
+    live = _live_evidence_verify_run(db_session, event, first, [claim])
+    live.started_at = skipped_verify.started_at + timedelta(seconds=5)
+    live.finished_at = live.started_at
+    db_session.flush()
+    assert should_enqueue_write(db_session, event.id) is True
+    llm = FakeStructuredLLM({"ArticleDraft": _draft(headline="V3 contrato completo")})
+    result = WritingService(db_session, llm=llm).write(event.id, trigger="existing_event")
+    assert result["written"] is True
+    assert result["version"] == 3
+    assert "verification_contract_completed" in (result.get("material_reasons") or [])
+    assert result["verification_run_id"] == str(live.id)
+    assert str(live.id) != str(verify_v1.id)
+    assert str(live.id) != str(skipped_verify.id)
+    db_session.refresh(article)
+    assert article.current_version == 3
+    assert article.published_version == 1
+    v1 = db_session.scalars(
+        select(ArticleVersion).where(
+            ArticleVersion.article_id == article.id, ArticleVersion.version_number == 1
+        )
+    ).one()
+    assert v1.headline == v1_headline
+    assert v1.summary == v1_summary
+    assert v1.body == v1_body
+    v3 = evidence_snapshot_for_version(PipelineRunRepository(db_session).list_lineage_runs(event.id), 3)
+    assert v3 is not None
+    assert str(v3.get("verification_run_id")) == str(live.id)
+    decision = (v3.get("decision_by_claim_id") or {}).get(str(claim.id)) or {}
+    assert decision.get("evaluation_state") == "complete"
+    assert decision.get("llm_reason") == "live_evidence"
+    assert decision.get("public_rendering")
+    repeat = WritingService(
+        db_session, llm=FakeStructuredLLM({"ArticleDraft": _draft(headline="V4 no")})
+    ).write(event.id, trigger="existing_event")
+    db_session.refresh(article)
+    assert article.current_version == 3
+    assert repeat.get("reason") in {"unaudited_candidate", "no_material_change"}
+
+
+def test_still_skipped_verification_does_not_copy_v1_or_write_version(db_session: Session) -> None:
+    event, claim, article, first, verify_v1, skipped_verify, v1_headline, _, _ = (
+        _skipped_v2_after_published_v1(db_session)
+    )
+    later_skip = PipelineRun(
+        event_id=event.id,
+        stage=VERIFICATION_STAGE,
+        status=PipelineStatus.SUCCESS,
+        started_at=skipped_verify.started_at + timedelta(seconds=5),
+        finished_at=skipped_verify.started_at + timedelta(seconds=5),
+        metadata_json={
+            "claims_fingerprint": (first.metadata_json or {}).get("claims_fingerprint"),
+            "based_on_claim_run_id": str(first.id),
+            "decision_by_claim_id": {str(claim.id): _skipped_decision_for_claim(claim)},
+            "evaluated_claims": [{"claim_id": str(claim.id), "canonical_text": claim.canonical_text}],
+            "selected": [],
+            "skipped_policy": [{"claim_id": str(claim.id), "reason": "policy_skip"}],
+        },
+    )
+    db_session.add(later_skip)
+    db_session.flush()
+    llm = FakeStructuredLLM({"ArticleDraft": _draft(headline="No copiar V1")})
+    result = WritingService(db_session, llm=llm).write(event.id, trigger="existing_event")
+    db_session.refresh(article)
+    assert article.current_version == 2
+    assert result.get("written") is not True or result.get("reason") == "unaudited_candidate"
+    assert not llm.calls
+    v1 = db_session.scalars(
+        select(ArticleVersion).where(
+            ArticleVersion.article_id == article.id, ArticleVersion.version_number == 1
+        )
+    ).one()
+    assert v1.headline == v1_headline
+    assert db_session.scalars(
+        select(ArticleVersion).where(
+            ArticleVersion.article_id == article.id, ArticleVersion.version_number == 3
+        )
+    ).first() is None

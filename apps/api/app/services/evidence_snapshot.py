@@ -6,6 +6,7 @@ from typing import Any
 
 from app.domain.enums import PipelineStatus
 from app.models import PipelineRun
+from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state
 from app.schemas.writing import ArticleContext
 from app.services.pipeline_lock import AUDITING_STAGE, WRITING_STAGE
 from app.services.verification_outcome import writing_evidence_snapshot
@@ -44,6 +45,49 @@ def snapshot_lacks_usable_verification(snapshot: dict[str, Any] | None) -> bool:
     if not snapshot.get("verification_run_id"):
         return True
     return not (snapshot.get("decision_by_claim_id") or {})
+
+
+def snapshot_skipped_claim_ids(snapshot: dict[str, Any] | None) -> set[str]:
+    ids: set[str] = set()
+    decisions = (snapshot or {}).get("decision_by_claim_id") or {}
+    if not isinstance(decisions, dict):
+        return ids
+    for key, row in decisions.items():
+        if not isinstance(row, dict):
+            continue
+        state = read_evaluation_state(row)
+        rendering = row.get("public_rendering")
+        if state == EvaluationState.SKIPPED or (state == EvaluationState.COMPLETE and rendering is None):
+            ids.add(str(row.get("claim_id") or key))
+    return ids
+
+
+def pair_completes_skipped_claims(
+    snapshot: dict[str, Any] | None,
+    verify_run: PipelineRun | None,
+) -> bool:
+    """True when the current compatible verify completed a skipped contract on this version.
+
+    Uses this run's decisions, not a prior version's Verification id.
+    """
+    skipped = snapshot_skipped_claim_ids(snapshot)
+    if not skipped or verify_run is None or verify_run.status != PipelineStatus.SUCCESS:
+        return False
+    decisions = (verify_run.metadata_json or {}).get("decision_by_claim_id") or {}
+    if not isinstance(decisions, dict):
+        return False
+    snap_verify = str((snapshot or {}).get("verification_run_id") or "")
+    if snap_verify and snap_verify == str(verify_run.id):
+        return False
+    for cid in skipped:
+        row = decisions.get(cid)
+        if not isinstance(row, dict):
+            continue
+        if read_evaluation_state(row) != EvaluationState.COMPLETE:
+            continue
+        if row.get("public_rendering"):
+            return True
+    return False
 
 
 def capture_evidence_snapshot(
