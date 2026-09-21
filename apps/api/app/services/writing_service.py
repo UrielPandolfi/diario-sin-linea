@@ -27,7 +27,12 @@ from app.services.article_context import (
 )
 from app.services.article_service import ArticleService
 from app.services.claim_service import comparison_key_for
-from app.services.evidence_snapshot import capture_evidence_snapshot, persist_snapshot_fields
+from app.services.evidence_snapshot import (
+    capture_evidence_snapshot,
+    evidence_snapshot_for_version,
+    persist_snapshot_fields,
+    snapshot_lacks_usable_verification,
+)
 from app.services.material_change import build_knowledge_delta, detect_material_change, snapshot_claims
 from app.services.pipeline_lock import AUDITING_STAGE, WRITING_STAGE, is_write_audit_publish_busy
 from app.services.verification_outcome import pair_from_runs
@@ -180,19 +185,33 @@ class WritingService:
                 previous = (previous_run.metadata_json or {}).get("claims_snapshot") or []
 
         change = detect_material_change(previous, claims_snapshot)
+        current_snap = (
+            evidence_snapshot_for_version(pipeline_runs, article.current_version) if article is not None else None
+        )
+        unpaired_now_paired = (
+            article is not None
+            and article.published_version is not None
+            and int(article.current_version) != int(article.published_version)
+            and snapshot_lacks_usable_verification(current_snap)
+            and claim_run is not None
+            and verify_run is not None
+        )
         if article is not None and not change.is_material:
-            if has_unaudited_candidate(article, pipeline_runs):
+            if unpaired_now_paired:
+                base["material_reasons"] = list(change.reasons) + ["verification_now_paired"]
+            elif has_unaudited_candidate(article, pipeline_runs):
                 base["article_id"] = str(article.id)
                 base["version"] = article.current_version
                 base["written"] = True
                 base["reason"] = "unaudited_candidate"
                 base["material_reasons"] = change.reasons
                 return base
-            base["article_id"] = str(article.id)
-            base["version"] = article.current_version
-            base["reason"] = "no_material_change"
-            base["material_reasons"] = change.reasons
-            return base
+            else:
+                base["article_id"] = str(article.id)
+                base["version"] = article.current_version
+                base["reason"] = "no_material_change"
+                base["material_reasons"] = change.reasons
+                return base
 
         article_context = build_article_context(
             event,
@@ -248,7 +267,10 @@ class WritingService:
         body, body_blocks = resolve_article_draft(
             draft, claim_ref_map=context_claim_ref_map(prompt_context)
         )
-        change_reason = "initial" if article is None else ",".join(change.reasons) or "material_change"
+        if "verification_now_paired" in (base.get("material_reasons") or []):
+            change_reason = "verification_now_paired"
+        else:
+            change_reason = "initial" if article is None else ",".join(change.reasons) or "material_change"
         if article is None:
             article, created = self.article_service.create_draft(
                 ArticleCreate(
@@ -285,7 +307,7 @@ class WritingService:
                 "reason": change_reason,
                 "version": article.current_version,
                 "writing_run_id": writing_run_id,
-                "material_reasons": change.reasons,
+                "material_reasons": list(base.get("material_reasons") or change.reasons),
             }
         )
         if knowledge_delta is not None:

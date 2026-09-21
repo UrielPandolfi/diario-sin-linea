@@ -35,6 +35,17 @@ def is_unaudited_candidate(meta: dict[str, Any] | None) -> bool:
     return (meta or {}).get("reason") == UNAUDITED_CANDIDATE_REASON
 
 
+def snapshot_lacks_usable_verification(snapshot: dict[str, Any] | None) -> bool:
+    """True when this version's snapshot cannot be audited as a paired contract."""
+    if not snapshot:
+        return True
+    if snapshot.get("stale_verification"):
+        return True
+    if not snapshot.get("verification_run_id"):
+        return True
+    return not (snapshot.get("decision_by_claim_id") or {})
+
+
 def capture_evidence_snapshot(
     article_context: ArticleContext,
     claim_run: PipelineRun | None,

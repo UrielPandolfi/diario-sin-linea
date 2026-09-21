@@ -183,6 +183,8 @@ Corrección: helper C11 de snapshot por versión (`export_snapshot_for_version` 
 
 V1 Milei claim `12b66950`: procedencia leída en DB — dos `Source` para Página/12 (RSS `domain` vacío `6fcd5ecb` + research `pagina12.com.ar` `12bfecce`), `known_independent_count=2`. Identidad alineada a `test_same_outlet_two_items_is_single_source` (`_reporting_origin` por host; `get_by_domain` reusa RSS sin domain). V1 publicada no se reescribe. Independencia pendiente de **revisar** (corrección editorial solo vía `EditorialService.revise` si se decide). Connection error de Verification: transporte OpenAI sin HTTP status; Celery marca la tarea succeeded porque `_fail` captura; no se agregaron retries.
 
+Prueba dirigida 2026-09-21 (sin publicar): ANDIS V1 reauditada in-process → `passed`, sin HIGH de atribución, `READY_FOR_REVIEW`. Milei: par `6be346ab`/`54bc6020` ya existía; Writing no emitía V3 por `no_material_change`. Con `verification_now_paired` se escribió V3 (`888d5452`, 7 decisiones, verify `54bc6020`); V2 unpaired intacta; GET público sigue V1. Granja700 no se tocó (sin V1 publicada).
+
 ## Track C — revisión integrada C1–C8 — 2026-09-20
 
 Hallazgo confirmado: `editorial_scopes` sellaba `verified_scope` con el texto entero si el status era `SINGLE_SOURCE`/`SUPPORTED`, aunque no hubiera `SUPPORTS` persistido. Un assessment completo cuyo único SUPPORTS era rechazado conservaba SINGLE_SOURCE y aparentaba alcance verificado. Corrección: el texto entero como `verified_scope` exige `SUPPORTS` admitido; sin él ambos scopes quedan `None`. QUALIFIES con fragmento no cambia. Tests: `test_single_source_without_admitted_supports_does_not_verify_the_claim`, `test_rejected_raw_supports_does_not_activate_cheap_support`. C9 consume esos scopes; no los recalcula.
