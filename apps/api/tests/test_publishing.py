@@ -33,7 +33,7 @@ from app.services.publish_service import PublishService
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.writing_service import WRITING_STAGE, WritingService
-from tests.editorial_snapshot import persist_version_snapshot
+from tests.editorial_snapshot import persist_paired_verification, persist_version_snapshot
 
 
 def _source(session: Session, **overrides):
@@ -349,8 +349,18 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
         )
     )
     db_session.flush()
+    persist_paired_verification(db_session, event)
+    update_body = (
+        "El choque dejó seis heridos. Un colectivo chocó en Pellegrini."
+    )
     update_llm = FakeStructuredLLM(
-        {"ArticleDraft": _draft("Nuevo titular con heridos", "s", "cuerpo nuevo")}
+        {
+            "ArticleDraft": _draft(
+                "El choque dejó seis heridos",
+                "El choque ocurrió en Rosario.",
+                update_body,
+            )
+        }
     )
     written = WritingService(db_session, llm=update_llm).write(event.id, trigger="test")
     db_session.refresh(article)
@@ -359,7 +369,7 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
     assert article.status == ArticleStatus.DRAFT
     assert article.published_version == live_version
     assert article.published_at == published_at
-    assert article.headline == "Nuevo titular con heridos"
+    assert article.headline == "El choque dejó seis heridos"
     assert event.status == EventStatus.PUBLISHED
 
     live = db_session.scalars(
@@ -374,8 +384,16 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
         {
             "ArticleAuditResult": [_fail_audit(), _fail_audit(), _fail_audit()],
             "ArticleDraft": [
-                _draft("Cap 1"),
-                _draft("Cap 2"),
+                _draft(
+                    "El choque dejó seis heridos esta tarde",
+                    "El choque ocurrió en Rosario.",
+                    update_body,
+                ),
+                _draft(
+                    "El choque dejó seis heridos de madrugada",
+                    "El choque ocurrió en Rosario.",
+                    update_body,
+                ),
             ],
         }
     )
@@ -383,6 +401,7 @@ def test_published_update_keeps_live_until_passed_audit(db_session: Session) -> 
     blocked = _publish(db_session, event)
     db_session.refresh(article)
     assert exhausted["cap_exhausted"] is True
+    assert exhausted["reason"] == "cap_exhausted"
     assert blocked["reason"] == "audit_not_passed"
     assert article.published_version == live_version
     assert article.status == ArticleStatus.DRAFT

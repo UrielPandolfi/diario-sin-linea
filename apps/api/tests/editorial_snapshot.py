@@ -68,10 +68,9 @@ def _complete_decision_for_claim(claim) -> dict:
     }
 
 
-def persist_version_snapshot(
+def persist_paired_verification(
     session: Session,
     event,
-    article,
     *,
     coverage_gap: bool = False,
     stale: bool = False,
@@ -79,7 +78,10 @@ def persist_version_snapshot(
     expected_central: list[dict] | None = None,
     deferred: list[dict] | None = None,
     fingerprint: str | None = None,
-) -> dict:
+) -> tuple[PipelineRun, PipelineRun | None]:
+    """Claim+verify SUCCESS for the current claim set. Does not create a writing run."""
+    session.flush()
+    session.expire(event, ["claims"])
     session.refresh(event)
     claims = list(event.claims)
     fp = fingerprint or (claims_fingerprint(claims) if claims else "fp-empty")
@@ -98,11 +100,12 @@ def persist_version_snapshot(
     elif claims:
         expected = [
             {
-                "proposition": claims[0].canonical_text,
+                "proposition": claim.canonical_text,
                 "role": "other",
                 "match": "equivalent",
-                "match_claim_id": str(claims[0].id),
+                "match_claim_id": str(claim.id),
             }
+            for claim in claims
         ]
     else:
         expected = []
@@ -171,6 +174,37 @@ def persist_version_snapshot(
         )
         session.add(verify_run)
         session.flush()
+    return claim_run, verify_run
+
+
+def persist_version_snapshot(
+    session: Session,
+    event,
+    article,
+    *,
+    coverage_gap: bool = False,
+    stale: bool = False,
+    central_unverified: list[str] | None = None,
+    expected_central: list[dict] | None = None,
+    deferred: list[dict] | None = None,
+    fingerprint: str | None = None,
+) -> dict:
+    claim_run, verify_run = persist_paired_verification(
+        session,
+        event,
+        coverage_gap=coverage_gap,
+        stale=stale,
+        central_unverified=central_unverified,
+        expected_central=expected_central,
+        deferred=deferred,
+        fingerprint=fingerprint,
+    )
+    unverified = list(central_unverified or [])
+    coverage = (claim_run.metadata_json or {}).get("coverage") or {
+        "coverage_gap": coverage_gap,
+        "expected_central": [],
+        "verification_incomplete": bool(unverified),
+    }
     session.expire(event, ["claims"])
     runs = list(
         session.scalars(
@@ -189,7 +223,7 @@ def persist_version_snapshot(
         event_id=event.id,
         stage=WRITING_STAGE,
         status=PipelineStatus.SUCCESS,
-        finished_at=now,
+        finished_at=datetime.now(timezone.utc),
         metadata_json={},
     )
     session.add(writing)
