@@ -34,12 +34,26 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+psycopg://sin_linea:sin_linea@localhost:5432/sin_linea"
     )
+    # Pytest only. Absence must abort the suite; never a fallback for database_url.
+    test_database_url: str | None = None
 
     @field_validator("database_url", mode="before")
     @classmethod
     def coerce_psycopg3_database_url(cls, value: object) -> object:
         if isinstance(value, str):
             return normalize_database_url(value)
+        return value
+
+    @field_validator("test_database_url", mode="before")
+    @classmethod
+    def coerce_psycopg3_test_database_url(cls, value: object) -> object:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return None
+            return normalize_database_url(stripped)
         return value
 
     redis_url: str = "redis://localhost:6379/0"

@@ -20,6 +20,18 @@ def test_existing_psycopg3_url_is_unchanged() -> None:
     assert normalize_database_url(url) == url
 
 
+def test_blank_test_database_url_is_not_a_fallback(monkeypatch) -> None:
+    get_settings.cache_clear()
+    monkeypatch.setenv("TEST_DATABASE_URL", "  ")
+    try:
+        settings = Settings()
+        assert settings.test_database_url is None
+        assert settings.database_url
+        assert settings.database_url != "  "
+    finally:
+        get_settings.cache_clear()
+
+
 def test_settings_rewrites_railway_style_database_url(monkeypatch) -> None:
     get_settings.cache_clear()
     monkeypatch.setenv(

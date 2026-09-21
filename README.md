@@ -94,7 +94,7 @@ Nunca uses `create_all()` como sistema de producción.
 
 ## Tests
 
-Postgres y Redis deben estar arriba (el `docker compose up` alcanza; en este repo suelen correrse vía WSL).
+Postgres y Redis deben estar arriba (el `docker compose up` alcanza; en este repo suelen correrse vía WSL). Pytest usa **solo** `TEST_DATABASE_URL` (base `sin_linea_test`). Si falta o apunta a la base de la aplicación, la suite aborta; no hay fallback a `DATABASE_URL`.
 
 ```bash
 docker compose exec api pytest

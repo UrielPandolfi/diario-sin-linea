@@ -50,6 +50,8 @@ docker compose exec api alembic upgrade head
 docker compose exec api pytest
 ```
 
+`alembic` en el servicio `api` migra `DATABASE_URL` (`sin_linea`). Pytest exige `TEST_DATABASE_URL` (`sin_linea_test`) y aborta si falta o si es la base de la app.
+
 Frontend (`apps/web` o `docker compose exec web`): `npm run lint`, `npm run typecheck`, `npm run build`.
 
 Eval opcional: `docker compose exec api python scripts/run_editorial_eval.py --mode full-editorial`.

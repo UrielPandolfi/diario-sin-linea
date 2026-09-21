@@ -70,6 +70,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U sin_linea -d sin_linea"]
       interval: 5s
@@ -95,6 +96,7 @@ services:
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
     environment:
       <<: *app-environment
+      TEST_DATABASE_URL: postgresql+psycopg://sin_linea:sin_linea@postgres:5432/sin_linea_test
     volumes:
       - ./scripts:/app/scripts:ro
       - ./.editorial-evals:/app/.editorial-evals

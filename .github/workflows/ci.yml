@@ -35,6 +35,7 @@ jobs:
           --health-retries 10
     env:
       DATABASE_URL: postgresql+psycopg://sin_linea:sin_linea@localhost:5432/sin_linea
+      TEST_DATABASE_URL: postgresql+psycopg://sin_linea:sin_linea@localhost:5432/sin_linea_test
       REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
@@ -43,8 +44,21 @@ jobs:
           python-version: "3.12"
       - name: Install API
         run: pip install .
-      - name: Migrate
-        run: alembic upgrade head
+      - name: Create dedicated test database
+        run: |
+          python - <<'PY'
+          import psycopg
+          from psycopg.errors import DuplicateDatabase
+
+          with psycopg.connect(
+              "postgresql://sin_linea:sin_linea@localhost:5432/postgres",
+              autocommit=True,
+          ) as conn:
+              try:
+                  conn.execute("CREATE DATABASE sin_linea_test")
+              except DuplicateDatabase:
+                  pass
+          PY
       - name: Test
         run: pytest
 
