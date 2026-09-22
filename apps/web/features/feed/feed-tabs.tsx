@@ -29,8 +29,8 @@ export function FeedTabs() {
           <Link
             key={tab.id}
             href={tab.href}
-            className={`relative flex-1 py-3 text-center font-heading text-sm ${
-              active ? "text-primary" : "text-secondary hover:text-primary"
+            className={`relative flex-1 py-3 text-center font-sans text-sm ${
+              active ? "font-medium text-primary" : "text-secondary hover:text-primary"
             }`}
             aria-current={active ? "page" : undefined}
           >

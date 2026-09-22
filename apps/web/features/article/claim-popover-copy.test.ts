@@ -9,8 +9,13 @@ import {
   claimEvidenceCopy,
   claimPopoverCopy,
   documentsAvailability,
+  EVIDENCE_SIDE_MIN_WIDTH,
+  HOVER_CLOSE_MS,
+  HOVER_OPEN_MS,
   evidenceSurface,
+  hoverBridgeRect,
   placePopover,
+  placeSidePopover,
 } from "./claim-popover-copy";
 import { FIXTURE_CLAIMS } from "./claim-evidence-fixtures";
 
@@ -158,7 +163,14 @@ test("identified scopes are exposed without inventing the missing side", () => {
 test("evidence surface uses hover and width, not user-agent strings", () => {
   assert.equal(evidenceSurface({ hoverFine: true, viewportWidth: 1280 }), "popover");
   assert.equal(evidenceSurface({ hoverFine: true, viewportWidth: 390 }), "sheet");
+  assert.equal(evidenceSurface({ hoverFine: true, viewportWidth: 768 }), "sheet");
   assert.equal(evidenceSurface({ hoverFine: false, viewportWidth: 1280 }), "sheet");
+  assert.ok(EVIDENCE_SIDE_MIN_WIDTH >= 1200);
+});
+
+test("hover delays stay inside the requested band", () => {
+  assert.ok(HOVER_OPEN_MS >= 150 && HOVER_OPEN_MS <= 250);
+  assert.ok(HOVER_CLOSE_MS >= 180 && HOVER_CLOSE_MS <= 320);
 });
 
 test("popover placement stays inside the viewport", () => {
@@ -170,4 +182,28 @@ test("popover placement stays inside the viewport", () => {
   assert.ok(placed.left + 320 <= 1280 - 16);
   assert.ok(placed.top >= 16);
   assert.ok(placed.top + 240 <= 800 || placed.top < 700);
+});
+
+test("side popover anchors to the reserved column and keeps an arrow on the trigger", () => {
+  const placed = placeSidePopover(
+    { top: 120, left: 200, bottom: 160, right: 520, height: 40 },
+    { width: 360, height: 280 },
+    { width: 1440, height: 900 },
+    { left: 760, width: 360 },
+  );
+  assert.equal(placed.left, 760);
+  assert.ok(placed.top >= 16);
+  assert.ok(placed.top + 280 <= 900 - 16);
+  assert.ok(placed.arrow >= 22);
+});
+
+test("hover bridge covers the gap between trigger and panel", () => {
+  const bridge = hoverBridgeRect(
+    { top: 100, left: 40, bottom: 140, right: 400 },
+    { top: 80, left: 440, bottom: 360, right: 800 },
+  );
+  assert.ok(bridge);
+  assert.equal(bridge?.left, 400);
+  assert.equal(bridge?.width, 40);
+  assert.ok((bridge?.height ?? 0) >= 40);
 });

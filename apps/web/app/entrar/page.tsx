@@ -10,12 +10,12 @@ export default function EntrarPage() {
     <main className="min-h-screen bg-background">
       <div className="mx-auto grid min-h-screen max-w-[1100px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <section className="flex flex-col justify-between px-8 py-10 md:px-14 md:py-16">
-          <div className="flex items-center gap-2 text-accent-ochre">
+          <div className="flex items-center gap-2 text-primary">
             <BrandMark className="h-9 w-9" />
             <span className="font-heading text-sm font-medium uppercase tracking-[0.18em]">Sin Línea</span>
           </div>
           <div className="max-w-md py-16 lg:py-0">
-            <h1 className="font-heading text-4xl font-medium leading-[1.1] tracking-tight text-primary md:text-5xl">
+            <h1 className="font-heading text-4xl font-semibold leading-[1.08] tracking-tight text-primary md:text-5xl">
               Entendé qué está pasando.
             </h1>
             <p className="mt-5 max-w-sm font-sans text-base leading-relaxed text-secondary">
@@ -33,7 +33,7 @@ export default function EntrarPage() {
           </p>
           <Link
             href="/onboarding"
-            className="mt-8 inline-flex w-full max-w-sm items-center justify-center border border-border bg-hover px-4 py-3 font-sans text-sm text-primary transition-colors hover:bg-surface-secondary"
+            className="mt-8 inline-flex w-full max-w-sm items-center justify-center rounded-lg bg-action px-4 py-3 font-sans text-sm text-on-action transition-opacity hover:opacity-90"
           >
             Explorar Sin Línea
           </Link>

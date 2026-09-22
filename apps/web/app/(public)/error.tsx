@@ -12,7 +12,7 @@ export default function PublicError({
       <button
         type="button"
         onClick={reset}
-        className="mt-4 border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary"
+        className="mt-4 rounded-lg border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary"
       >
         Reintentar
       </button>

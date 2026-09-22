@@ -20,7 +20,7 @@ export function MobileNav() {
   return (
     <nav
       aria-label="Navegación inferior"
-      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background md:hidden"
+      className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-nav pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       <ul className="grid grid-cols-5">
         {items.map((item) => {
@@ -31,11 +31,11 @@ export function MobileNav() {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`flex flex-col items-center gap-1 py-2.5 font-sans text-[10px] ${
+                className={`flex min-h-11 flex-col items-center justify-center gap-1 py-2 font-sans text-[11px] ${
                   active ? "text-primary" : "text-secondary"
                 }`}
               >
-                {Icon ? <Icon className="h-5 w-5" strokeWidth={active ? 2.2 : 1.75} aria-hidden /> : null}
+                {Icon ? <Icon className="h-5 w-5" strokeWidth={active ? 2 : 1.7} aria-hidden /> : null}
                 <span>{item.label}</span>
               </Link>
             </li>

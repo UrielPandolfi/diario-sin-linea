@@ -86,8 +86,8 @@ export function CaseForm({
 
   if (done) {
     return (
-      <div className="mt-4 border border-border bg-surface px-4 py-4">
-        <p className="font-heading text-base text-primary">Recibimos tu consulta</p>
+      <div className="mt-4 rounded-xl border border-border bg-surface px-4 py-4">
+        <p className="font-heading text-xl font-semibold text-primary">Recibimos tu consulta</p>
         <p className="mt-2 font-sans text-sm text-secondary">
           Código <span className="text-primary">{done.public_code}</span>. Guardá este enlace para
           consultar el estado. No enviamos correos automáticos.
@@ -110,7 +110,7 @@ export function CaseForm({
         <select
           value={reason}
           onChange={(event) => setReason(event.target.value)}
-          className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+          className="sl-select mt-1"
           required
         >
           {CASE_REASONS.map((item) => (
@@ -129,7 +129,7 @@ export function CaseForm({
           maxLength={4000}
           rows={5}
           required
-          className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+          className="sl-textarea mt-1"
         />
       </label>
       <label className="block font-sans text-sm text-secondary">
@@ -138,7 +138,7 @@ export function CaseForm({
           type="url"
           value={linkUrl}
           onChange={(event) => setLinkUrl(event.target.value)}
-          className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+          className="sl-input mt-1"
         />
       </label>
       <label className="block font-sans text-sm text-secondary">
@@ -148,7 +148,7 @@ export function CaseForm({
           type="email"
           value={email}
           onChange={(event) => setEmail(event.target.value)}
-          className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+          className="sl-input mt-1"
         />
       </label>
       <div className="hidden" aria-hidden="true">
@@ -157,12 +157,8 @@ export function CaseForm({
           <input value={website} onChange={(event) => setWebsite(event.target.value)} tabIndex={-1} autoComplete="off" />
         </label>
       </div>
-      {error ? <p className="font-sans text-sm text-accent-ochre">{error}</p> : null}
-      <button
-        type="submit"
-        disabled={pending}
-        className="border border-border bg-hover px-3 py-2 font-sans text-sm text-primary disabled:opacity-60"
-      >
+      {error ? <p className="font-sans text-sm text-amber-fg">{error}</p> : null}
+      <button type="submit" disabled={pending} className="sl-btn-primary mt-2 max-w-xs">
         {pending ? "Enviando…" : "Enviar"}
       </button>
     </form>

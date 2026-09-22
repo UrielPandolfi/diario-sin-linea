@@ -46,7 +46,7 @@ export function SearchView() {
         <label className="sr-only" htmlFor="search-q">
           Buscar sucesos, lugares o personas
         </label>
-        <div className="flex items-center gap-2 border border-border bg-surface px-3 py-2">
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5">
           <Search className="h-4 w-4 shrink-0 text-muted" aria-hidden />
           <input
             id="search-q"

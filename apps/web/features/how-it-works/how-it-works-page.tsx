@@ -293,7 +293,7 @@ export function HowItWorksPage() {
               <div className="mt-9 flex flex-wrap items-center gap-3 md:mt-11">
                 <Link
                   href="/"
-                  className="bg-accent-petrol px-5 py-3 font-sans text-sm font-medium text-[#ece8df] transition-opacity hover:opacity-90"
+                  className="rounded-lg bg-action px-5 py-3 font-sans text-sm font-medium text-on-action transition-opacity hover:opacity-90"
                 >
                   Ver las noticias
                 </Link>

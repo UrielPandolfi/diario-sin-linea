@@ -97,8 +97,19 @@ export function documentsAvailability(copy: ClaimEvidenceCopy): "unknown" | "emp
   return copy.documents.length === 0 ? "empty" : "listed";
 }
 
+export const HOVER_OPEN_MS = 180;
+export const HOVER_CLOSE_MS = 240;
+export const EVIDENCE_SIDE_MIN_WIDTH = 1280;
+
+export function hoverDelayMs(kind: "open" | "close"): number {
+  if (typeof globalThis !== "undefined" && typeof (globalThis as { setEvidenceEnv?: unknown }).setEvidenceEnv === "function") {
+    return 0;
+  }
+  return kind === "open" ? HOVER_OPEN_MS : HOVER_CLOSE_MS;
+}
+
 export function evidenceSurface(input: { hoverFine: boolean; viewportWidth: number }): "popover" | "sheet" {
-  return input.hoverFine && input.viewportWidth >= 768 ? "popover" : "sheet";
+  return input.hoverFine && input.viewportWidth >= EVIDENCE_SIDE_MIN_WIDTH ? "popover" : "sheet";
 }
 
 export function placePopover(
@@ -118,6 +129,38 @@ export function placePopover(
   }
   if (left < margin) left = margin;
   return { top, left };
+}
+
+export function placeSidePopover(
+  trigger: { top: number; left: number; bottom: number; right: number; height?: number },
+  panel: { width: number; height: number },
+  viewport: { width: number; height: number },
+  slot?: { left: number; width: number } | null,
+): { top: number; left: number; arrow: number } {
+  const margin = 16;
+  const left =
+    slot && slot.width >= 240
+      ? slot.left
+      : Math.min(Math.max(trigger.right + 16, margin), viewport.width - panel.width - margin);
+  let top = trigger.top - 12;
+  top = Math.min(top, viewport.height - panel.height - margin);
+  top = Math.max(margin, top);
+  const triggerMid = trigger.top + (trigger.height ?? trigger.bottom - trigger.top) / 2;
+  const arrow = Math.min(Math.max(triggerMid - top, 22), Math.max(22, panel.height - 22));
+  return { top, left, arrow };
+}
+
+export function hoverBridgeRect(
+  trigger: { top: number; left: number; bottom: number; right: number },
+  panel: { top: number; left: number; bottom: number; right: number },
+): { top: number; left: number; width: number; height: number } | null {
+  const left = Math.min(trigger.right, panel.left);
+  const right = Math.max(trigger.right, panel.left);
+  const width = right - left;
+  if (width <= 0) return null;
+  const top = Math.min(trigger.top, panel.top);
+  const bottom = Math.max(trigger.bottom, panel.bottom);
+  return { top, left, width, height: Math.max(1, bottom - top) };
 }
 
 function identifiedScope(value: string | null | undefined): string | null {

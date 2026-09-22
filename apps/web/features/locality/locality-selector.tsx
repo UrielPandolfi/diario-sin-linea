@@ -48,7 +48,7 @@ export function LocalitySelector({
               setValue(event.target.value);
               apply(event.target.value);
             }}
-            className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 font-sans text-primary"
           >
             {!known && value ? <option value={value}>{value}</option> : null}
             {!known ? <option value="">Elegí una localidad</option> : null}
@@ -64,7 +64,7 @@ export function LocalitySelector({
             onChange={(event) => setCustom(event.target.value)}
             onBlur={() => apply(custom || value)}
             placeholder="Rosario"
-            className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 font-sans text-primary"
           />
         )}
       </label>

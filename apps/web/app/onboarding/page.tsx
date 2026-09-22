@@ -40,12 +40,12 @@ export default function OnboardingPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <div className="flex items-center gap-2 text-accent-ochre">
+      <div className="flex items-center gap-2 text-primary">
         <BrandMark className="h-8 w-8" />
         <span className="font-heading text-sm font-medium uppercase tracking-[0.18em]">Sin Línea</span>
       </div>
       <p className="mt-10 font-heading text-xs uppercase tracking-[0.16em] text-muted">Paso 1</p>
-      <h1 className="mt-2 font-heading text-3xl font-medium text-primary">Tu localidad</h1>
+      <h1 className="mt-2 font-heading text-3xl font-semibold text-primary">Tu localidad</h1>
       <p className="mt-2 font-sans text-sm text-secondary">¿Dónde querés recibir información local?</p>
 
       <form onSubmit={onSubmit} className="mt-8 space-y-4">
@@ -60,7 +60,7 @@ export default function OnboardingPage() {
                 setValue(event.target.value);
                 setError(null);
               }}
-              className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 font-sans text-primary"
             >
               <option value="">Elegí una localidad</option>
               {options.map((name) => (
@@ -77,15 +77,12 @@ export default function OnboardingPage() {
                 setError(null);
               }}
               placeholder="Rosario"
-              className="mt-1 w-full border border-border bg-background px-3 py-2 font-sans text-primary"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 font-sans text-primary"
             />
           )}
         </label>
-        {error ? <p className="font-sans text-sm text-accent-ochre">{error}</p> : null}
-        <button
-          type="submit"
-          className="w-full border border-border bg-hover px-3 py-2.5 font-sans text-sm text-primary hover:bg-surface-secondary"
-        >
+        {error ? <p className="font-sans text-sm text-amber-fg">{error}</p> : null}
+        <button type="submit" className="sl-btn-primary">
           Continuar
         </button>
       </form>

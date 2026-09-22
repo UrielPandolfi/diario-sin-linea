@@ -13,8 +13,8 @@ export function EventCard({ item }: { item: EventCardType }) {
   const updated = isMateriallyUpdated(item.published_at, item.updated_at);
 
   return (
-    <article className="border-b border-border px-4 py-4 md:px-5">
-      <p className="font-sans text-[11px] uppercase tracking-[0.14em] text-muted">
+    <article className="border-b border-border px-4 py-5 md:px-6">
+      <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-muted">
         {item.locality ? <span>{item.locality}</span> : null}
         {item.locality && item.published_at ? <span> · </span> : null}
         <RelativeTime iso={item.published_at} />
@@ -23,12 +23,12 @@ export function EventCard({ item }: { item: EventCardType }) {
         <PublicHero
           src={item.hero_image_url}
           href={href}
-          className="mt-3"
+          className="mt-3 overflow-hidden rounded-xl"
           sizes="(min-width: 768px) 672px, 100vw"
         />
       ) : null}
-      <h2 className="mt-1.5 font-heading text-lg font-medium leading-snug text-primary">
-        <Link href={href} className="text-primary hover:text-accent-blue">
+      <h2 className="mt-2 font-heading text-xl font-semibold leading-snug text-primary md:text-[1.35rem]">
+        <Link href={href} className="text-primary hover:text-accent">
           {item.headline}
         </Link>
       </h2>

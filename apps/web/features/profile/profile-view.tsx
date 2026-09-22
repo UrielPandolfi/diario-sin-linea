@@ -26,9 +26,9 @@ export function ProfileView() {
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-2xl border-x border-border px-4 py-8 md:px-6">
-      <p className="font-heading text-xs uppercase tracking-[0.16em] text-accent-ochre">Perfil</p>
-      <h1 className="mt-2 font-heading text-2xl text-primary">Tu espacio</h1>
+    <div className="mx-auto min-h-screen max-w-measure px-4 py-8 md:px-6">
+      <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-muted">Perfil</p>
+      <h1 className="mt-2 font-heading text-3xl font-semibold text-primary">Tu espacio</h1>
       <p className="mt-2 font-sans text-sm text-secondary">
         Todavía no hay cuentas. Guardamos solo tu localidad en este dispositivo.
       </p>
@@ -40,7 +40,7 @@ export function ProfileView() {
 
       <section className="mt-8 space-y-3 border-t border-border pt-6">
         <h2 className="font-heading text-sm text-primary">Apariencia</h2>
-        <ThemeToggle />
+        <ThemeToggle variant="labeled" />
       </section>
 
       <section className="mt-8 space-y-2 border-t border-border pt-6">
@@ -61,7 +61,7 @@ export function ProfileView() {
       <button
         type="button"
         onClick={leave}
-        className="mt-10 border border-border bg-hover px-3 py-2 font-sans text-sm text-primary hover:bg-surface-secondary"
+        className="mt-10 rounded-lg border border-border bg-hover px-3 py-2 font-sans text-sm text-primary hover:bg-surface-secondary"
       >
         Salir
       </button>

@@ -1,6 +1,7 @@
 "use client";
 
 import { BrandMark } from "@/features/shell/brand-mark";
+import { ThemeToggle } from "@/components/theme-toggle";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 
@@ -35,7 +36,7 @@ export function LandingHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-4 px-5 md:h-16 md:px-8">
-        <Link href="/" className="flex items-center gap-2.5 text-accent-ochre">
+        <Link href="/" className="flex items-center gap-2.5 text-primary">
           <BrandMark className="h-7 w-7 shrink-0" />
           <span className="font-heading text-[13px] font-medium uppercase tracking-[0.16em] text-primary">
             Sin Línea
@@ -54,12 +55,15 @@ export function LandingHeader() {
           ))}
         </nav>
 
-        <Link
-          href="/"
-          className="shrink-0 border border-border px-3.5 py-2 font-sans text-[13px] font-medium text-primary transition-colors hover:border-accent-petrol hover:text-accent-petrol md:px-4"
-        >
-          Ver las noticias
-        </Link>
+        <div className="flex items-center gap-1">
+          <ThemeToggle />
+          <Link
+            href="/"
+            className="shrink-0 rounded-lg border border-border px-3.5 py-2 font-sans text-[13px] font-medium text-primary transition-colors hover:border-accent hover:text-accent md:px-4"
+          >
+            Ver las noticias
+          </Link>
+        </div>
       </div>
       <span
         ref={barRef}

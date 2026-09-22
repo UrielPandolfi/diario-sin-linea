@@ -3,42 +3,74 @@
 @tailwind utilities;
 
 :root,
-[data-theme="dark"] {
-  color-scheme: dark;
-
-  --background: #111315;
-  --surface: #171a1d;
-  --surface-secondary: #1b1f23;
-  --border: #2a2e33;
-  --text-primary: #ece8df;
-  --text-secondary: #a0a6ac;
-
-  --accent-petrol: #4e6b66;
-  --accent-blue: #60748a;
-  --accent-ochre: #a8844f;
-
-  --hover: #1e2328;
-  --muted: #8b9298;
-  --focus: #4e6b66;
-}
-
 [data-theme="light"] {
   color-scheme: light;
 
-  --background: #f5f3ee;
-  --surface: #ffffff;
-  --surface-secondary: #eeece7;
-  --border: #d9dde0;
-  --text-primary: #202326;
-  --text-secondary: #747c83;
+  --background: #f7f5ee;
+  --nav: #efede6;
+  --surface: #fffcf6;
+  --surface-secondary: #f0ece3;
+  --border: #d9ddd3;
+  --text-primary: #252c29;
+  --text-secondary: #5e6862;
 
-  --accent-petrol: #4e6b66;
-  --accent-blue: #60748a;
-  --accent-ochre: #a8844f;
+  --accent: #28594d;
+  --accent-petrol: #28594d;
+  --accent-blue: #2f6a5c;
+  --accent-ochre: #ac773d;
+  --action: #28594d;
+  --on-action: #fffcf6;
 
-  --hover: #ebe8e2;
-  --muted: #8a9198;
-  --focus: #4e6b66;
+  --amber-bg: #f5ecd9;
+  --amber-fg: #795221;
+  --bronze: #ac773d;
+
+  --hover: #e7e4db;
+  --muted: #6b746e;
+  --focus: #28594d;
+  --shadow: color-mix(in srgb, #252c29 14%, transparent);
+
+  --status-limited-bg: var(--amber-bg);
+  --status-limited-fg: var(--amber-fg);
+  --status-neutral-bg: var(--surface-secondary);
+  --status-neutral-fg: var(--text-secondary);
+  --status-dispute-bg: color-mix(in srgb, var(--bronze) 16%, var(--surface));
+  --status-dispute-fg: var(--amber-fg);
+}
+
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --background: #141917;
+  --nav: #181f1c;
+  --surface: #202824;
+  --surface-secondary: #28312c;
+  --border: #3a483f;
+  --text-primary: #f0ede4;
+  --text-secondary: #aab6ae;
+
+  --accent: #8ebcad;
+  --accent-petrol: #8ebcad;
+  --accent-blue: #a3cbbb;
+  --accent-ochre: #d7b06c;
+  --action: #386956;
+  --on-action: #f5f5ed;
+
+  --amber-bg: #393121;
+  --amber-fg: #e5c487;
+  --bronze: #d7b06c;
+
+  --hover: #24302b;
+  --muted: #8e9a93;
+  --focus: #8ebcad;
+  --shadow: color-mix(in srgb, #000 42%, transparent);
+
+  --status-limited-bg: var(--amber-bg);
+  --status-limited-fg: var(--amber-fg);
+  --status-neutral-bg: var(--surface-secondary);
+  --status-neutral-fg: var(--text-secondary);
+  --status-dispute-bg: color-mix(in srgb, var(--bronze) 18%, var(--surface));
+  --status-dispute-fg: var(--amber-fg);
 }
 
 html,
@@ -49,7 +81,7 @@ body {
 body {
   background: var(--background);
   color: var(--text-primary);
-  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, sans-serif;
   font-feature-settings: "cv11", "ss01";
   transition:
     background-color 160ms ease,
@@ -60,13 +92,13 @@ h1,
 h2,
 h3,
 h4 {
-  font-family: var(--font-heading), ui-sans-serif, system-ui, sans-serif;
-  font-weight: 500;
-  letter-spacing: -0.02em;
+  font-family: var(--font-heading), Newsreader, Georgia, "Times New Roman", serif;
+  font-weight: 600;
+  letter-spacing: -0.018em;
 }
 
 a {
-  color: var(--accent-petrol);
+  color: var(--accent);
   text-underline-offset: 0.18em;
 }
 
@@ -75,7 +107,7 @@ a:hover {
 }
 
 ::selection {
-  background: color-mix(in srgb, var(--accent-petrol) 38%, transparent);
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
   color: var(--text-primary);
 }
 
@@ -88,7 +120,255 @@ summary::-webkit-details-marker {
   display: none;
 }
 
-/* Retícula de fondo del hero. */
+.sl-input,
+.sl-select,
+.sl-textarea {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-primary);
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.sl-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--surface-secondary);
+  color: var(--text-primary);
+  padding: 0.5rem 0.85rem;
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+}
+
+.sl-btn-primary {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.65rem;
+  border: 0;
+  background: var(--action);
+  color: var(--on-action);
+  padding: 0.7rem 1rem;
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.875rem;
+  font-weight: 550;
+}
+
+.sl-btn-primary:hover {
+  filter: brightness(1.06);
+}
+
+.sl-btn-primary:disabled {
+  opacity: 0.6;
+}
+
+.article-root {
+  --article-measure: 42.5rem;
+  --article-panel: 22.5rem;
+  --article-gap: 2rem;
+  --article-title-size: clamp(2rem, 3.6vw + 1rem, 3.5rem);
+  --article-dek-size: clamp(1.1875rem, 0.4vw + 1.1rem, 1.5rem);
+  --article-body-size: clamp(1.125rem, 0.25vw + 1.1rem, 1.375rem);
+  --article-kicker-size: clamp(1.5rem, 1vw + 1.2rem, 1.875rem);
+}
+
+.article-root[data-reading-size="sm"] {
+  --article-title-size: clamp(2rem, 3vw + 1rem, 3rem);
+  --article-dek-size: 1.1875rem;
+  --article-body-size: 1.125rem;
+}
+
+.article-root[data-reading-size="md"] {
+  --article-title-size: clamp(2.125rem, 3.4vw + 1rem, 3.5rem);
+  --article-dek-size: clamp(1.25rem, 0.4vw + 1.15rem, 1.4375rem);
+  --article-body-size: 1.3125rem;
+}
+
+.article-root[data-reading-size="lg"] {
+  --article-title-size: clamp(2.25rem, 3.8vw + 1rem, 3.75rem);
+  --article-dek-size: clamp(1.3125rem, 0.45vw + 1.2rem, 1.5625rem);
+  --article-body-size: 1.375rem;
+}
+
+.article-title {
+  font-family: var(--font-heading), Newsreader, Georgia, serif;
+  font-size: var(--article-title-size);
+  font-weight: 600;
+  line-height: 1.08;
+  letter-spacing: -0.022em;
+  color: var(--text-primary);
+}
+
+.article-dek {
+  font-family: var(--font-heading), Newsreader, Georgia, serif;
+  font-size: var(--article-dek-size);
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.article-body {
+  font-family: var(--font-heading), Newsreader, Georgia, serif;
+  font-size: var(--article-body-size);
+  font-weight: 400;
+  line-height: 1.68;
+  color: var(--text-primary);
+}
+
+.article-kicker {
+  font-family: var(--font-heading), Newsreader, Georgia, serif;
+  font-size: var(--article-kicker-size);
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--text-primary);
+}
+
+.claim-trigger {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  letter-spacing: inherit;
+  text-align: inherit;
+  text-decoration: underline;
+  text-decoration-style: solid;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--bronze) 55%, var(--border));
+  text-underline-offset: 0.22em;
+  cursor: pointer;
+  user-select: text;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  border-radius: 2px;
+}
+
+.claim-trigger:hover,
+.claim-trigger:focus-visible,
+.claim-trigger[data-open="true"] {
+  background: color-mix(in srgb, var(--amber-bg) 82%, transparent);
+  text-decoration-color: var(--bronze);
+  text-decoration-thickness: 1.15px;
+}
+
+.claim-info {
+  display: inline-flex;
+  width: 0.95em;
+  height: 0.95em;
+  margin-left: 0.16em;
+  color: var(--bronze);
+  vertical-align: -0.12em;
+  opacity: 0.78;
+}
+
+.claim-trigger:hover .claim-info,
+.claim-trigger:focus-visible .claim-info,
+.claim-trigger[data-open="true"] .claim-info {
+  opacity: 1;
+}
+
+.evidence-popover {
+  width: min(var(--article-panel, 22.5rem), calc(100vw - 2rem));
+  max-height: min(32rem, calc(100dvh - 2rem));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text-primary);
+  box-shadow: 0 12px 32px var(--shadow);
+  padding: 1.35rem 1.4rem 1.25rem;
+}
+
+.evidence-popover[data-side="right"]::before {
+  content: "";
+  position: absolute;
+  left: -6px;
+  top: var(--arrow-top, 1.5rem);
+  width: 12px;
+  height: 12px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
+  transform: rotate(45deg);
+}
+
+.evidence-sheet {
+  border-radius: 16px 16px 0 0;
+  background: var(--surface);
+  box-shadow: 0 -10px 32px var(--shadow);
+}
+
+.status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.22rem 0.65rem;
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  background: var(--status-neutral-bg);
+  color: var(--status-neutral-fg);
+}
+
+.status-chip[data-kind="limited_support"],
+.status-chip[data-kind="not_confirmed"] {
+  background: var(--status-limited-bg);
+  color: var(--status-limited-fg);
+}
+
+.status-chip[data-kind="disputed"],
+.status-chip[data-kind="disproven"] {
+  background: var(--status-dispute-bg);
+  color: var(--status-dispute-fg);
+}
+
+.status-chip[data-kind="confirmed"],
+.status-chip[data-kind="confirmed_utterance"] {
+  background: var(--status-neutral-bg);
+  color: var(--text-secondary);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .evidence-popover,
+  .evidence-sheet {
+    animation: sl-evidence 160ms ease both;
+  }
+}
+
+@keyframes sl-evidence {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .evidence-popover,
+  .evidence-sheet,
+  body {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* Retícula de fondo del hero de /como-funciona. */
 .sl-grid {
   background-image:
     linear-gradient(to right, var(--border) 1px, transparent 1px),

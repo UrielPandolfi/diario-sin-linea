@@ -50,7 +50,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
                 {item.label}
               </Link>
             ))}
-            <ThemeToggle />
+            <ThemeToggle variant="labeled" />
             <button type="button" onClick={() => void logout()} className="text-secondary">
               Salir
             </button>

@@ -17,13 +17,13 @@ export function UpcomingFeature({
         <UpcomingPreview />
       </div>
       <div className="absolute inset-0 flex flex-col items-center justify-center bg-background/55 px-6 text-center">
-        <p className="font-heading text-xs font-medium uppercase tracking-[0.18em] text-accent-ochre">
+        <p className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">
           Próximamente
         </p>
         {compact ? (
-          <p className="mt-3 font-heading text-xl font-medium text-primary">{title}</p>
+          <p className="mt-3 font-heading text-xl font-semibold text-primary">{title}</p>
         ) : (
-          <h1 className="mt-3 font-heading text-2xl font-medium text-primary">{title}</h1>
+          <h1 className="mt-3 font-heading text-3xl font-semibold text-primary">{title}</h1>
         )}
         <p className="mt-2 max-w-sm font-sans text-sm text-secondary">{description}</p>
       </div>

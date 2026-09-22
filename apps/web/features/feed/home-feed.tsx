@@ -46,9 +46,9 @@ export function HomeFeed() {
     <div className="flex min-h-screen">
       <div className="min-w-0 flex-1 border-r border-border">
         <HomeContextBar locality={locality} />
-        <header className="sticky top-0 z-10 border-b border-border bg-background">
-          <div className="px-4 py-3 md:px-5">
-            <h1 className="font-heading text-lg text-primary">Inicio</h1>
+        <header className="sticky top-0 z-10 border-b border-border bg-background/95">
+          <div className="px-4 py-3 md:px-6">
+            <h1 className="font-heading text-2xl font-semibold text-primary">Inicio</h1>
           </div>
           <FeedTabs />
         </header>

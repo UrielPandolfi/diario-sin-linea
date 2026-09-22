@@ -26,7 +26,7 @@ export function NowPanel() {
 
   return (
     <section className="px-4 py-4">
-      <h2 className="font-heading text-sm font-medium uppercase tracking-[0.16em] text-accent-ochre">Ahora</h2>
+      <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">Ahora</h2>
       {error ? (
         <div className="mt-3">
           <p className="font-sans text-sm text-secondary">No pudimos actualizar esta lista.</p>
@@ -45,7 +45,7 @@ export function NowPanel() {
                   {formatClock(item.occurred_at)}
                   {item.locality ? ` · ${item.locality}` : ""}
                 </p>
-                <p className="mt-1 font-heading text-sm leading-snug">{item.headline}</p>
+                <p className="mt-1 font-heading text-sm font-semibold leading-snug">{item.headline}</p>
               </Link>
             </li>
           ))}

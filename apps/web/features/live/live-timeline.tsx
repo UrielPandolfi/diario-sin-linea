@@ -86,17 +86,17 @@ export function LiveTimeline() {
         <Link
           key={item.public_id}
           href={`/noticias/${item.slug}`}
-          className="block border-b border-border px-4 py-4 text-primary hover:bg-hover md:px-5"
+          className="block border-b border-border px-4 py-5 text-primary hover:bg-hover md:px-6"
         >
-          <p className="font-sans text-[11px] uppercase tracking-[0.14em] text-muted">
+          <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-muted">
             {formatClock(item.updated_at || item.published_at)}
             {item.locality ? ` · ${item.locality}` : ""}
           </p>
-          <p className="mt-1 font-heading text-base leading-snug">{item.headline}</p>
+          <p className="mt-1.5 font-heading text-[1.15rem] font-semibold leading-snug">{item.headline}</p>
           {item.hero_image_url ? (
             <PublicHero
               src={item.hero_image_url}
-              className="mt-3"
+              className="mt-3 overflow-hidden rounded-xl"
               sizes="(min-width: 768px) 672px, 100vw"
             />
           ) : null}

@@ -1,6 +1,6 @@
 # Estado
 
-Revisión: 2026-09-21. Pendientes post-C11 (tope 50 del freeze público y visual Admin de trazabilidad) cerrados. Track C listo para revisión de merge; eso no equivale a despliegue validado.
+Revisión: 2026-09-22. Frontend público: rediseño light-first en rama `frontend/public-editorial-redesign` (tokens, Newsreader, panel C9 lateral). Track C en `main` sigue en `83c2fd8`; eso no equivale a merge ni despliegue.
 
 Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesión**.
 

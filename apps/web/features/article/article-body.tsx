@@ -2,10 +2,12 @@
 
 import { ClaimEvidenceList } from "./claim-evidence-panel";
 import { ClaimEvidenceOverlay } from "./claim-evidence-overlay";
+import { hoverDelayMs } from "./claim-popover-copy";
 import { claimsForIds } from "./claim-status";
 import { focusableElements } from "./evidence-focus";
 import { useEvidenceSurface } from "./use-evidence-surface";
 import type { ArticleBodyBlock, ArticleClaim } from "../../lib/api/types";
+import { Info } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
 function evidenceTriggerLabel(text: string): string {
@@ -51,23 +53,21 @@ export function ArticleBody({
     const paragraphs = splitPlainBody(body);
     if (paragraphs.length === 0) return null;
     return (
-      <div className="mt-6 space-y-4">
+      <div className="article-body mt-6 space-y-5">
         {paragraphs.map((paragraph, index) => (
-          <p key={index} className="font-sans text-[17px] leading-[1.65] text-primary">
-            {paragraph}
-          </p>
+          <p key={index}>{paragraph}</p>
         ))}
       </div>
     );
   }
 
   return (
-    <div className="mt-6 space-y-4" data-evidence-mode={surface ?? "pending"}>
+    <div className="article-body mt-6 space-y-5" data-evidence-mode={surface ?? "pending"}>
       {bodyBlocks.map((block, blockIndex) => {
         const hasClaims = (block.segments ?? []).some((segment) => (segment.claim_ids ?? []).length > 0);
         const Tag = hasClaims ? "div" : "p";
         return (
-          <Tag key={blockIndex} className="font-sans text-[17px] leading-[1.65] text-primary">
+          <Tag key={blockIndex}>
             {(block.segments ?? []).map((segment, segmentIndex) => {
               const key = `${blockIndex}-${segmentIndex}`;
               const matched = claimsForIds(segment.claim_ids ?? [], claims);
@@ -118,6 +118,7 @@ function ClaimSegment({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<number | null>(null);
+  const openTimer = useRef<number | null>(null);
   const restoreFocus = useRef(false);
   const ignoreFocusOpen = useRef(false);
   const [pinned, setPinned] = useState(false);
@@ -130,13 +131,42 @@ function ClaimSegment({
     }
   }
 
+  function clearOpenTimer() {
+    if (openTimer.current !== null) {
+      window.clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+  }
+
   function scheduleClose() {
     if (pinned) return;
+    clearOpenTimer();
     clearCloseTimer();
+    const delay = hoverDelayMs("close");
+    if (delay <= 0) {
+      restoreFocus.current = false;
+      onClose();
+      return;
+    }
     closeTimer.current = window.setTimeout(() => {
       restoreFocus.current = false;
       onClose();
-    }, 180);
+    }, delay);
+  }
+
+  function scheduleOpen() {
+    if (surface !== "popover") return;
+    clearCloseTimer();
+    if (open) return;
+    clearOpenTimer();
+    const delay = hoverDelayMs("open");
+    if (delay <= 0) {
+      onOpen();
+      return;
+    }
+    openTimer.current = window.setTimeout(() => {
+      onOpen();
+    }, delay);
   }
 
   function armIgnoreFocusOpen() {
@@ -148,6 +178,7 @@ function ClaimSegment({
 
   function close(options?: { restore?: boolean }) {
     clearCloseTimer();
+    clearOpenTimer();
     restoreFocus.current = options?.restore ?? false;
     if (restoreFocus.current) armIgnoreFocusOpen();
     setPinned(false);
@@ -155,7 +186,10 @@ function ClaimSegment({
     onClose();
   }
 
-  useEffect(() => () => clearCloseTimer(), []);
+  useEffect(() => () => {
+    clearCloseTimer();
+    clearOpenTimer();
+  }, []);
 
   useEffect(() => {
     if (!open) {
@@ -170,6 +204,8 @@ function ClaimSegment({
       const target = event.target as Node | null;
       if (!target) return;
       if (triggerRef.current?.contains(target) || panelRef.current?.contains(target)) return;
+      const bridge = document.querySelector("[data-evidence-bridge]");
+      if (bridge?.contains(target)) return;
       restoreFocus.current = false;
       setPinned(false);
       setOpenedByKeyboard(false);
@@ -179,14 +215,9 @@ function ClaimSegment({
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [open, surface, onClose]);
 
-  function openPreview() {
-    if (surface !== "popover") return;
-    clearCloseTimer();
-    onOpen();
-  }
-
   function activate(source: "keyboard" | "pointer") {
     clearCloseTimer();
+    clearOpenTimer();
     if (surface === "sheet") {
       if (open) {
         close({ restore: source === "keyboard" });
@@ -226,14 +257,18 @@ function ClaimSegment({
         aria-haspopup="dialog"
         aria-label={evidenceTriggerLabel(text)}
         data-claim-segment={segmentKey}
-        className="inline cursor-pointer rounded-[2px] border-0 bg-transparent p-0 text-left font-sans text-[17px] leading-[1.65] text-primary underline decoration-dotted decoration-border underline-offset-[0.28em] hover:bg-hover focus-visible:bg-hover motion-reduce:transition-none"
-        onMouseEnter={openPreview}
+        data-open={open ? "true" : "false"}
+        className="claim-trigger"
+        onMouseEnter={scheduleOpen}
         onMouseLeave={() => {
           if (surface === "popover") scheduleClose();
         }}
         onFocus={() => {
           if (ignoreFocusOpen.current) return;
-          openPreview();
+          if (surface === "popover") {
+            clearCloseTimer();
+            onOpen();
+          }
         }}
         onBlur={(event) => {
           if (surface !== "popover" || pinned) return;
@@ -263,6 +298,7 @@ function ClaimSegment({
         }}
       >
         {text}
+        <Info className="claim-info" strokeWidth={1.75} aria-hidden />
       </button>
       <ClaimEvidenceOverlay
         open={open}
@@ -275,7 +311,10 @@ function ClaimSegment({
         moveFocus={open && (surface === "sheet" || openedByKeyboard)}
         onClose={() => close({ restore: true })}
         onDismiss={() => close({ restore: surface === "sheet" })}
-        onContentEnter={clearCloseTimer}
+        onContentEnter={() => {
+          clearOpenTimer();
+          clearCloseTimer();
+        }}
         onContentLeave={() => {
           if (surface === "popover") scheduleClose();
         }}

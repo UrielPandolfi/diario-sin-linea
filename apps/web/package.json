@@ -7,7 +7,7 @@
     "start": "next start",
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --tsconfig tsconfig.test.json --import ./features/article/dom-setup.mjs --test lib/seo/seo.test.ts features/article/claim-popover-copy.test.ts features/article/article-body.test.tsx"
+    "test": "tsx --tsconfig tsconfig.test.json --import ./features/article/dom-setup.mjs --test lib/seo/seo.test.ts lib/theme.test.ts features/article/claim-popover-copy.test.ts features/article/article-body.test.tsx features/article/reading.test.ts"
   },
   "dependencies": {
     "lucide-react": "^1.37.0",

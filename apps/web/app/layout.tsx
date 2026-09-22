@@ -1,17 +1,23 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { Inter, Manrope } from "next/font/google";
+import { cookies } from "next/headers";
+import { Inter, Newsreader } from "next/font/google";
+import { InitialThemeProvider } from "@/components/theme-provider";
+import { ThemeScript } from "@/components/theme-script";
 import { JsonLd } from "@/lib/seo/json-ld-script";
 import { organizationJsonLd } from "@/lib/seo/json-ld";
 import { rootMetadata } from "@/lib/seo/metadata";
 import { getSiteUrl, isIndexableDeploy } from "@/lib/seo/site-url";
+import { THEME_COOKIE, resolveTheme } from "@/lib/theme";
 import "./globals.css";
 
-const manrope = Manrope({
+const newsreader = Newsreader({
   subsets: ["latin", "latin-ext"],
-  weight: ["500", "600"],
+  weight: ["400", "500", "600", "700"],
+  style: ["normal", "italic"],
   variable: "--font-heading",
   display: "swap",
+  adjustFontFallback: true,
 });
 
 const inter = Inter({
@@ -25,13 +31,23 @@ export function generateMetadata(): Metadata {
   return rootMetadata(getSiteUrl(), isIndexableDeploy());
 }
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default async function RootLayout({ children }: { children: ReactNode }) {
   const origin = getSiteUrl();
+  const cookieStore = await cookies();
+  const theme = resolveTheme(cookieStore.get(THEME_COOKIE)?.value);
   return (
-    <html lang="es-AR" data-theme="dark" className={`${manrope.variable} ${inter.variable}`}>
+    <html
+      lang="es-AR"
+      data-theme={theme}
+      className={`${newsreader.variable} ${inter.variable}`}
+      suppressHydrationWarning
+    >
+      <head>
+        <ThemeScript />
+      </head>
       <body className="min-h-screen bg-background font-sans text-primary antialiased">
         <JsonLd data={organizationJsonLd(origin)} />
-        {children}
+        <InitialThemeProvider theme={theme}>{children}</InitialThemeProvider>
       </body>
     </html>
   );

@@ -7,7 +7,7 @@ export const metadata = {
 
 export default function NotificationsPage() {
   return (
-    <div className="mx-auto min-h-screen max-w-2xl border-x border-border">
+    <div className="mx-auto min-h-screen max-w-measure">
       <UpcomingFeature
         title="Notificaciones"
         description="Recibí avisos cuando cambie algo importante."

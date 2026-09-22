@@ -225,23 +225,19 @@ test("several claims in one fragment keep separate copy", async () => {
 
 test("documents disclosure keeps counts out of the label and lists unknown vs empty", async () => {
   await render(<ClaimEvidenceList claims={[FIXTURE_CLAIMS.limited, FIXTURE_CLAIMS.unevaluated]} />);
-  const summaries = Array.from(document.querySelectorAll("summary"));
+  const buttons = Array.from(document.querySelectorAll("button")).filter((button) =>
+    /Ver evidencia y detalles/.test(button.textContent ?? ""),
+  );
+  assert.equal(buttons.length >= 2, true);
   assert.equal(
-    summaries.every((summary) => /Ver documentos/.test(summary.textContent ?? "")),
+    buttons.every((button) => !/3 documentos/.test(button.textContent ?? "")),
     true,
   );
-  assert.equal(
-    summaries.some((summary) => /3 documentos/.test(summary.textContent ?? "")),
-    false,
-  );
   await act(async () => {
-    for (const summary of summaries) {
-      const details = summary.parentElement;
-      if (details instanceof HTMLDetailsElement) details.open = true;
-    }
+    for (const button of buttons) button.click();
   });
   const text = document.body.textContent ?? "";
-  assert.match(text, /Ver documentos/);
+  assert.match(text, /Ver evidencia y detalles|Ocultar evidencia y detalles/);
   assert.match(text, /Se consultaron 3 documentos/);
   assert.match(text, /No hay un desglose documental utilizable/);
   assert.doesNotMatch(text, /3 fuentes = confirmado/i);
@@ -291,8 +287,8 @@ test("article text and surrounding copy stay intact", async () => {
   assert.match(text, /Pérez afirmó que el costo será de 40.000 millones/);
   const incendio = triggerByKey("0-1");
   assert.equal(incendio.tagName, "BUTTON");
-  assert.match(incendio.className, /underline/);
-  assert.match(incendio.className, /dotted/);
+  assert.match(incendio.className, /claim-trigger/);
+  assert.ok(incendio.querySelector("svg"));
   assert.equal(
     triggerByKey("2-0").getAttribute("aria-label"),
     "Un mismo pasaje cubre dos afirmaciones: incendio y denuncia. Consultar respaldo",
@@ -362,6 +358,20 @@ test("viewport mode change closes the overlay and does not leave two surfaces", 
   assert.equal(document.querySelector("[data-evidence-mode]")?.getAttribute("data-evidence-mode"), "sheet");
   await fire(triggerByKey("0-1"), "click");
   assert.ok(surfaceNode("sheet"));
+  assert.equal(document.querySelectorAll("[data-evidence-surface]").length, 1);
+});
+
+test("opening another claim replaces panel copy without mixing", async () => {
+  env()?.({ hoverFine: true, width: 1280 });
+  await render(
+    <ArticleBody body="" bodyBlocks={ARTICLE_FIXTURE_BLOCKS} claims={claims} sourceKey="fixture:1" />,
+  );
+  await fire(triggerByKey("0-1"), "click");
+  assert.match(surfaceNode()?.textContent ?? "", /Confirmado/);
+  await fire(triggerByKey("1-0"), "click");
+  const text = surfaceNode()?.textContent ?? "";
+  assert.match(text, /Respaldo limitado/);
+  assert.doesNotMatch(text, /Hubo un incendio/);
   assert.equal(document.querySelectorAll("[data-evidence-surface]").length, 1);
 });
 

@@ -55,7 +55,7 @@ export function ContextSheets({
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}
-            className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto border-t border-border bg-background pb-16"
+            className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t border-border bg-surface pb-16"
           >
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
               <h2 id={titleId} className="font-heading text-base text-primary">

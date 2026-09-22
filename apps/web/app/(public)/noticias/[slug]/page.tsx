@@ -39,7 +39,7 @@ export default async function ArticlePage({ params }: { params: Promise<Params> 
 
   const origin = getSiteUrl();
   return (
-    <div className="min-h-screen border-x border-border">
+    <div className="min-h-screen">
       <JsonLd data={newsArticleJsonLd(article, origin)} />
       <JsonLd data={breadcrumbJsonLd(article, origin)} />
       <ArticleView article={article} />

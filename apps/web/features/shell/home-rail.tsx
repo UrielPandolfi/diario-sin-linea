@@ -26,7 +26,7 @@ export function HomeContextBar({ locality }: { locality: string | null }) {
 
 export function HomeRail({ locality }: { locality: string | null }) {
   return (
-    <aside className="hidden min-h-screen w-[280px] shrink-0 overflow-y-auto lg:sticky lg:top-0 lg:block lg:h-screen lg:border-l lg:border-border">
+    <aside className="hidden min-h-screen w-[18rem] shrink-0 overflow-y-auto lg:sticky lg:top-0 lg:block lg:h-screen lg:border-l lg:border-border">
       <NowPanel />
       {locality ? <NearbyPanel locality={locality} /> : null}
       <div className="border-t border-border">

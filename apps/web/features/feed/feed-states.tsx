@@ -30,7 +30,7 @@ export function FeedError({ onRetry }: { onRetry: () => void }) {
       <button
         type="button"
         onClick={onRetry}
-        className="mt-4 border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary hover:bg-surface-secondary"
+        className="mt-4 rounded-lg border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary hover:bg-surface-secondary"
       >
         Reintentar
       </button>

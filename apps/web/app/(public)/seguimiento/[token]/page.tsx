@@ -44,9 +44,9 @@ export default async function SeguimientoPage({ params }: { params: Promise<Para
   }
 
   return (
-    <div className="mx-auto min-h-screen max-w-[42rem] border-x border-border px-4 py-8 md:px-6">
-      <p className="font-heading text-xs uppercase tracking-[0.16em] text-accent-ochre">Seguimiento</p>
-      <h1 className="mt-2 font-heading text-2xl text-primary">{payload.public_code}</h1>
+    <div className="mx-auto min-h-screen max-w-measure px-4 py-8 md:px-6">
+      <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-muted">Seguimiento</p>
+      <h1 className="mt-2 font-heading text-3xl font-semibold text-primary">{payload.public_code}</h1>
       <p className="mt-3 font-sans text-sm text-secondary">
         {statusLabel(payload.status)}
         {outcomeLabel(payload.outcome) ? ` · ${outcomeLabel(payload.outcome)}` : ""}
@@ -62,7 +62,7 @@ export default async function SeguimientoPage({ params }: { params: Promise<Para
         <p className="mt-2 font-sans text-sm text-secondary">Consulta general</p>
       )}
       {payload.public_resolution ? (
-        <div className="mt-6 border border-border bg-surface px-4 py-4">
+        <div className="mt-6 rounded-xl border border-border bg-surface px-4 py-4">
           <p className="font-heading text-sm text-primary">Respuesta</p>
           <p className="mt-2 whitespace-pre-wrap font-sans text-sm text-secondary">{payload.public_resolution}</p>
         </div>

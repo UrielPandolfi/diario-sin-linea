@@ -7,7 +7,7 @@ export const metadata = {
 
 export default function FollowingPage() {
   return (
-    <div className="mx-auto min-h-screen max-w-2xl border-x border-border">
+    <div className="mx-auto min-h-screen max-w-measure">
       <UpcomingFeature
         title="Seguidos"
         description="Seguí temas, lugares y protagonistas para encontrarlos más rápido."
