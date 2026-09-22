@@ -188,7 +188,7 @@ def test_search_skips_unpublished_and_finds_live_text(db_session: Session) -> No
     assert article.status_code == 200
     assert article.json()["headline"] == "Colectivos en Pellegrini"
     assert article.json()["public_id"] == str(pub_event.public_id)
-    assert article.json()["hero_image_url"]
+    assert "hero_image_url" in article.json()
     assert by_id.status_code == 200
     assert by_id.json()["slug"] == published.slug
     assert published.slug in {item["slug"] for item in live.json()["items"]}

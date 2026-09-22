@@ -2,20 +2,20 @@
 
 **Fecha:** 2026-09-22
 
-**Tarea:** Rediseño del frontend público (light por defecto, Newsreader, panel de respaldo lateral). Rama `frontend/public-editorial-redesign` desde `main`/`track-c` @ `83c2fd8`. Sin commit, sin deploy.
+**Tarea:** Portada automática con prompt DeepSeek (`IMAGE_PROMPT`) y FLUX Schnell en Replicate. Sin commit.
 
 ## Resultado
 
-El frontend público usa paleta marfil/verde, Newsreader + Inter, tema **claro por defecto** (cookie `sl_theme` + `localStorage` `sl-theme`), y el DTO C9 vigente en un popover lateral (≥1280 + puntero fino) o bottom sheet. No se tocó Verification/Claims/Writing/Audit/Publish.
+Se reemplazó la plantilla Pillow. Tras el commit de publish/revise, si `ARTICLE_IMAGE_ENABLED` y no hay `hero_image_url`, se pide un prompt con titular y bajada, se genera un WEBP y se guarda en `article_hero_images`. El fallo no despublica. `POST /api/v1/admin/articles/{id}/generate-hero?force=true` regenera a mano. El GET público no llama a Replicate.
 
-## Cómo abrir
+## Pendiente
 
-API en `:8000`. Web de este cambio: `cd apps/web && npx next dev -p 3002` (el Compose en `:3000` no incluye este árbol). QA de claims: `/dev/respaldo`.
+Falta `REPLICATE_API_TOKEN` en el entorno (queda vacío en `.env`). Sin eso no hay archivo nuevo ni se puede ver la portada en el frontend. Hay que reconstruir la imagen de `api`/`worker` para que el proceso en marcha tome el código y la dependencia `replicate`. No hay artículos `PUBLISHED` en la base local (6 `DRAFT`).
+
+Prompt real de DeepSeek para el borrador `b8343be8-904f-48b7-b71f-1d4d057fcbd5` (no se guardó imagen):
+
+> A serious editorial illustration in a semi-realistic style, depicting a courthouse interior with a judge's bench, legal documents, and a gavel, symbolizing a judicial investigation. The scene is neutral and muted in color, with no people or recognizable faces. The composition is clean and focused on the legal setting, avoiding any sensationalism. No text, logos, or watermarks. 16:9 aspect ratio.
 
 ## Validación
 
-`apps/web`: lint, typecheck, build y 53 tests (tema, hover/teclado/sheet, cambio de claim). Visual en `localhost:3002`: artículo 1440 light/dark con panel, sheet ~390, feed 768 y 1440, buscar persistiendo dark. Capturas en `e:\temp\cursor\screenshots\`: `article-desktop-1440-light.png`, `article-claim-panel-1440.png`, `article-dark-claim-panel.png`, `article-mobile-sheet.png`, `home-768.png`, `home-1440.png`, `buscar-1440-dark.png`.
-
-## Limitaciones
-
-No hay rubro editorial: kicker/breadcrumb usan localidad/provincia. Guardados/Seguidos/Notificaciones siguen siendo stubs. El admin comparte tokens y fuentes; no se rediseñó. El overlay «1 Issue» es de Next en el browser de Cursor. En Chromium, el `<button>` del claim no pinta el resalte línea por línea (`box-decoration-break`) y queda como bloque. 1920 no se capturó aparte: a 1440 el artículo ya usa el ancho máximo de lectura.
+`tests/test_hero_image.py`, `test_registry.py`, `test_public_api.py`, `test_publishing.py`: 38 passed. No se verificó el frontend ni el archivo servido por la API en marcha.

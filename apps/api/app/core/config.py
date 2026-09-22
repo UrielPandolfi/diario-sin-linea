@@ -89,6 +89,17 @@ class Settings(BaseSettings):
     embedding_provider: str | None = None
     embedding_model: str | None = None
     search_provider: str | None = None
+    image_prompt_provider: str | None = None
+    image_prompt_model: str | None = None
+    replicate_api_token: str | None = None
+    article_image_enabled: bool = True
+    article_image_model: str = "black-forest-labs/flux-schnell"
+    article_image_aspect_ratio: str = "16:9"
+    article_image_output_format: str = "webp"
+    article_image_output_quality: int = 80
+    article_image_num_inference_steps: int = 4
+    article_image_megapixels: str = "1"
+    article_image_go_fast: bool = True
 
     auto_publish: bool = False
     initial_research_queries: int = 2

@@ -385,6 +385,7 @@ export type AdminEventDetail = AdminEvent & {
     published_at: string | null;
     slug: string;
     editorial_hold?: boolean;
+    hero_image_url?: string | null;
     versions?: AdminArticleVersionSummary[];
   } | null;
   live: {

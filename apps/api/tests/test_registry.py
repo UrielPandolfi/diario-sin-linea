@@ -70,6 +70,25 @@ def test_writing_openai_receives_configured_reasoning_effort(monkeypatch) -> Non
     assert captured["reasoning_effort"] == "none"
 
 
+def test_image_prompt_uses_deepseek_adapter(monkeypatch) -> None:
+    settings = get_settings()
+    monkeypatch.setattr(settings, "image_prompt_provider", "deepseek")
+    monkeypatch.setattr(settings, "image_prompt_model", "deepseek-chat")
+    monkeypatch.setattr(settings, "deepseek_api_key", "sk-test")
+    captured: dict = {}
+
+    class Capturing:
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("app.providers.registry.OpenAIStructuredProvider", Capturing)
+    provider = get_structured_provider(ModelRole.IMAGE_PROMPT)
+    assert isinstance(provider, Capturing)
+    assert captured["provider_name"] == "deepseek"
+    assert captured["model"] == "deepseek-chat"
+    assert captured["base_url"] == "https://api.deepseek.com"
+
+
 def test_ambiguous_dedup_falls_back_to_claim_resolution_deepseek(monkeypatch) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "ambiguous_dedup_provider", None)

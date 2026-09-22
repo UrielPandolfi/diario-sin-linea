@@ -20,6 +20,8 @@ export default function AdminEventDetailPage() {
   const [auditing, setAuditing] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [generatingHero, setGeneratingHero] = useState(false);
+  const [heroUrl, setHeroUrl] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -208,6 +210,43 @@ export default function AdminEventDetailPage() {
     }
   }
 
+  async function onRegenerateHero() {
+    const articleId = event?.article?.id;
+    if (!articleId) {
+      setError("Todavía no hay artículo para generar la imagen.");
+      setNotice(null);
+      return;
+    }
+    setGeneratingHero(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await adminFetch(
+        `/api/v1/admin/articles/${articleId}/generate-hero?force=true`,
+        { method: "POST" },
+      );
+      const raw = await response.text();
+      if (!response.ok) {
+        let message = raw || `Error ${response.status}`;
+        try {
+          const body = JSON.parse(raw) as { detail?: string };
+          if (body.detail) message = body.detail;
+        } catch {
+          // El cuerpo no es JSON.
+        }
+        throw new Error(message);
+      }
+      const body = JSON.parse(raw) as { hero_image_url?: string };
+      if (body.hero_image_url) setHeroUrl(body.hero_image_url);
+      setNotice("Imagen regenerada.");
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "No se pudo regenerar la imagen.");
+    } finally {
+      setGeneratingHero(false);
+    }
+  }
+
   useEffect(() => {
     if (!params.id) return;
     void load().catch((err: unknown) => {
@@ -303,7 +342,23 @@ export default function AdminEventDetailPage() {
             >
               {archiving ? "Archivando…" : "Archivar"}
             </button>
+            <button
+              type="button"
+              disabled={generatingHero || !event.article}
+              onClick={() => void onRegenerateHero()}
+              className="border border-border bg-hover px-3 py-1.5 font-sans text-sm text-primary disabled:opacity-60"
+            >
+              {generatingHero ? "Regenerando…" : "Regenerar imagen"}
+            </button>
           </div>
+        ) : null}
+        {(heroUrl || event?.article?.hero_image_url) ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={heroUrl || event?.article?.hero_image_url || ""}
+            alt="Portada del artículo"
+            className="mt-4 max-w-xl border border-border"
+          />
         ) : null}
       </div>
 

@@ -21,6 +21,7 @@ class ModelRole(StrEnum):
     VERIFICATION = "verification"
     WRITING = "writing"
     AUDITING = "auditing"
+    IMAGE_PROMPT = "image_prompt"
     EMBEDDING = "embedding"
 
 
@@ -64,6 +65,7 @@ def _structured_role_config(role: ModelRole) -> tuple[str | None, str | None]:
         ),
         ModelRole.WRITING: (settings.writing_provider, settings.writing_model),
         ModelRole.AUDITING: (settings.auditing_provider, settings.auditing_model),
+        ModelRole.IMAGE_PROMPT: (settings.image_prompt_provider, settings.image_prompt_model),
     }
     if role not in mapping:
         raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")

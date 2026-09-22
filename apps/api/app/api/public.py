@@ -17,17 +17,26 @@ def _public_error(exc: ValueError) -> HTTPException:
     return HTTPException(status_code=code, detail=detail)
 
 
-@router.get("/media/heroes/{article_id}.png")
-def get_hero_image(article_id: UUID, db: DbSession, v: str | None = None) -> Response:
+def _hero_file(article_id: UUID, db: DbSession, v: str | None) -> Response:
     del v
     row = db.get(ArticleHeroImage, article_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagen no encontrada")
     return Response(
         content=bytes(row.png_bytes),
-        media_type="image/png",
+        media_type=row.content_type or "image/png",
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
+
+
+@router.get("/media/heroes/{article_id}.png")
+def get_hero_image_png(article_id: UUID, db: DbSession, v: str | None = None) -> Response:
+    return _hero_file(article_id, db, v)
+
+
+@router.get("/media/heroes/{article_id}.webp")
+def get_hero_image_webp(article_id: UUID, db: DbSession, v: str | None = None) -> Response:
+    return _hero_file(article_id, db, v)
 
 
 @router.get("/articles/{key}")

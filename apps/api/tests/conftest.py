@@ -51,6 +51,12 @@ def apply_migrations() -> None:
     command.upgrade(config, "head")
 
 
+@pytest.fixture(autouse=True)
+def disable_article_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La suite no llama a DeepSeek ni a Replicate. Cada test que los cubre los reactiva con fakes."""
+    monkeypatch.setattr(get_settings(), "article_image_enabled", False)
+
+
 @pytest.fixture()
 def db_session(apply_migrations: None) -> Generator[Session, None, None]:
     session = SessionLocal()

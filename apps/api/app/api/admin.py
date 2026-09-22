@@ -36,7 +36,8 @@ from app.services.publication_outcome import (
     writing_no_material_change,
 )
 from app.schemas import SourceCreate, SourceUpdate
-from app.services.hero_image_service import ensure_in_own_session
+from app.services.hero_image_error import HeroImageError
+from app.services.hero_image_service import HeroImageService, ensure_in_own_session
 from app.services.version_traceability import VersionTraceError, build_article_version_trace
 from app.services.publish_service import PublishService
 from app.services.source_service import SourceService
@@ -201,6 +202,7 @@ def _article_out(article) -> dict:
         "published_at": _iso(article.published_at),
         "slug": article.slug,
         "editorial_hold": bool(article.editorial_hold),
+        "hero_image_url": article.hero_image_url,
     }
 
 
@@ -221,6 +223,10 @@ def _article_version_summaries(db, article) -> list[dict]:
 
 def _trace_http(exc: VersionTraceError) -> HTTPException:
     return HTTPException(status_code=exc.http_status, detail=exc.code)
+
+
+def _hero_http(exc: HeroImageError) -> HTTPException:
+    return HTTPException(status_code=exc.http_status, detail=exc.detail)
 
 
 def _audit_out(runs) -> dict | None:
@@ -658,6 +664,19 @@ def get_article_version_trace(article_id: UUID, version_number: int, db: DbSessi
         return build_article_version_trace(db, article_id=article_id, version_number=version_number)
     except VersionTraceError as exc:
         raise _trace_http(exc) from exc
+
+
+@router.post("/articles/{article_id}/generate-hero", dependencies=[Depends(require_admin_origin)])
+def generate_article_hero(
+    article_id: UUID,
+    db: DbSession,
+    force: bool = False,
+) -> dict:
+    try:
+        url = HeroImageService(db).generate_hero_for_article(article_id, force=force)
+    except HeroImageError as exc:
+        raise _hero_http(exc) from exc
+    return {"article_id": str(article_id), "hero_image_url": url}
 
 
 @router.post(
