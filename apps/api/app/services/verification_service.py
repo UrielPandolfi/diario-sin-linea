@@ -4,6 +4,7 @@ from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
 from itertools import combinations
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -69,6 +70,7 @@ from app.schemas.editorial_evidence import (
     CONTRACT_VERSION,
     ClaimDecision,
     CoverageContract,
+    CoverageMatch,
     Demotion,
     EvaluationState,
     PrimaryAccess,
@@ -84,8 +86,14 @@ from app.services.claim_coverage import (
     evaluated_claims_payload,
     is_mixed_proposition,
     proposition_role_for,
+    propositions_equivalent,
 )
-from app.services.claim_service import CLAIM_STAGE, assertion_key_for, comparison_key_for
+from app.services.claim_service import (
+    CLAIM_STAGE,
+    assertion_key_for,
+    clamp_supported_status,
+    comparison_key_for,
+)
 from app.services.information_origin import (
     assess_origins,
     demotion_for,
@@ -310,6 +318,12 @@ class VerificationService:
             except Exception:
                 coverage = None
         centrals = central_claim_ids(coverage) if coverage is not None else set()
+        self._comparison_checks = []
+        readmitted: list[dict[str, Any]] = []
+        for claim in event.claims:
+            readmitted.extend(self._readmit_persisted_evidence(claim))
+        if readmitted:
+            self.session.flush()
         selected, skipped_policy = select_claims(
             list(event.claims),
             flagged_ids=flagged,
@@ -367,6 +381,7 @@ class VerificationService:
             "cited": 0,
             "verified": 0,
             "search_unavailable": False,
+            "readmitted_evidence": readmitted,
         }
         if coverage is not None:
             coverage.verification_incomplete = bool(budget.central_unverified)
@@ -857,6 +872,10 @@ class VerificationService:
         )
         found = claim_has_preferred_evidence(claim, preferred)
         authentic = self._utterance_primary_supports(claim)
+        if claim.status == ClaimStatus.SUPPORTED:
+            claim.status = apply_primary_requirement(
+                claim, ClaimStatus.SUPPORTED, plan, primary_supports=found or authentic
+            )
         return self._decision_after_policy(
             claim,
             plan,
@@ -867,6 +886,37 @@ class VerificationService:
             primary_supports=found or authentic,
             packet_size=len(claim.evidence),
         )
+
+    def _readmit_persisted_evidence(self, claim: Claim) -> list[dict[str, Any]]:
+        """Reapply C6 admission to stored SUPPORTS so cheap live cannot keep a stale Confirmado."""
+        changes: list[dict[str, Any]] = []
+        for ev in list(claim.evidence or []):
+            if ev.evidence_type != EvidenceType.SUPPORTS:
+                continue
+            excerpt = ev.excerpt or ""
+            row = SimpleNamespace(
+                excerpt=excerpt,
+                source_ref=None,
+                comparison=SimpleNamespace(claim_fragment=None, evidence_fragment=excerpt),
+            )
+            admitted, _valid = self._admit_relation(claim, None, row, EvidenceType.SUPPORTS)
+            if admitted == ev.evidence_type:
+                continue
+            changes.append(
+                {
+                    "claim_id": str(claim.id),
+                    "source_item_id": str(ev.source_item_id) if ev.source_item_id else None,
+                    "from": ev.evidence_type.value,
+                    "to": admitted.value,
+                    "reason": (self._comparison_checks[-1] or {}).get("reason")
+                    if self._comparison_checks
+                    else None,
+                }
+            )
+            ev.evidence_type = admitted
+        if changes and claim.status == ClaimStatus.SUPPORTED:
+            claim.status = clamp_supported_status(claim, ClaimStatus.SUPPORTED)
+        return changes
 
     def _record_skipped_decisions(
         self,
@@ -892,8 +942,22 @@ class VerificationService:
                 and cid not in decisions
                 and cheap_live_evaluation_eligible(claim, skip_reason=reason)
             ):
-                decisions[cid] = self._live_evidence_decision(claim, event).model_dump(mode="json")
-                cheap.append({"claim_id": cid, "reason": "live_evidence", "omitted_reason": reason})
+                decision = self._live_evidence_decision(claim, event)
+                dumped = decision.model_dump(mode="json")
+                decisions[cid] = dumped
+                basis = dumped.get("support_basis") if isinstance(dumped.get("support_basis"), dict) else {}
+                cheap.append(
+                    {
+                        "claim_id": cid,
+                        "reason": "live_evidence",
+                        "omitted_reason": reason,
+                        "information_origins": list(basis.get("information_origins") or []),
+                        "document_keys": list(basis.get("document_keys") or []),
+                        "reason_code": dumped.get("reason_code"),
+                        "support_kind": basis.get("kind"),
+                        "primary_access": basis.get("primary_access"),
+                    }
+                )
                 payload.setdefault("skipped_search", []).append(cid)
                 payload["verified"] = int(payload.get("verified") or 0) + 1
                 continue
@@ -1328,6 +1392,12 @@ class VerificationService:
                     supported, reason = False, "comparison_not_in_cited_excerpt"
                 if not supported:
                     relation = EvidenceType.QUALIFIES
+            if relation == EvidenceType.SUPPORTS and excerpt.strip():
+                match = propositions_equivalent(claim.canonical_text or "", excerpt)
+                if match is CoverageMatch.PARTIAL:
+                    relation, reason = EvidenceType.QUALIFIES, "excerpt_partial_scope"
+                elif match is CoverageMatch.NONE:
+                    relation, reason = EvidenceType.MENTIONS, "excerpt_does_not_establish"
         self._record_relation_check(row, requested=original, admitted=relation, valid=valid, reason=reason)
         return relation, valid
 

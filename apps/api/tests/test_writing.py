@@ -33,7 +33,7 @@ from app.services.material_change import detect_material_change
 from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_service import VERIFICATION_STAGE
-from app.services.writing_service import WRITING_STAGE, WritingService
+from app.services.writing_service import WRITING_STAGE, WritingService, confirmation_dropped
 
 
 def _source(session: Session, **overrides):
@@ -207,6 +207,16 @@ def test_detector_repetition_is_not_material() -> None:
     current = [_snapshot_row(cid, text="Hubo un choque", status="SUPPORTED")]
     change = detect_material_change(previous, current)
     assert change.is_material is False
+
+
+def test_supported_to_single_source_writes_via_confirmation_dropped() -> None:
+    cid = uuid4()
+    previous = [_snapshot_row(cid, text="Alan recibió un disparo durante el tiroteo.", status="SUPPORTED")]
+    current = [_snapshot_row(cid, text="Alan recibió un disparo durante el tiroteo.", status="SINGLE_SOURCE")]
+    change = detect_material_change(previous, current)
+    assert change.is_material is False
+    assert confirmation_dropped(previous, current) is True
+    assert confirmation_dropped(previous, previous) is False
 
 
 def test_detector_new_high_and_confirmation_and_conflict_resolved() -> None:

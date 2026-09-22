@@ -6,7 +6,7 @@ from app.core.source_content import has_extracted_body
 from app.core.urls import canonicalize_url, url_domain
 from app.domain.enums import ClaimImportance, ClaimStatus, PipelineStatus
 from app.models import Claim, Entity, Event, EventEntity, PipelineRun
-from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state
+from app.schemas.editorial_evidence import CoverageContract, EvaluationState, read_evaluation_state
 from app.schemas.writing import (
     ArticleContext,
     ContextClaim,
@@ -22,6 +22,7 @@ from app.schemas.writing import (
     ContextVerification,
     ContextVerificationSol,
 )
+from app.services.claim_coverage import build_coverage_contract
 from app.services.claim_service import comparison_key_for
 from app.services.evidence_snapshot import is_unaudited_candidate
 from app.services.verification_outcome import pair_from_runs
@@ -87,6 +88,7 @@ def compact_verification(
     coverage_gap: bool = False,
     stale: bool = False,
     claim_run: PipelineRun | None = None,
+    live_coverage: CoverageContract | None = None,
 ) -> ContextVerification:
     claim_meta = (claim_run.metadata_json if claim_run is not None else None) or {}
     verify_meta = (run.metadata_json if run is not None and run.status == PipelineStatus.SUCCESS else None) or {}
@@ -107,6 +109,26 @@ def compact_verification(
                 match_claim_id=str(row["match_claim_id"]) if row.get("match_claim_id") else None,
             )
         )
+    if live_coverage is not None:
+        gap = gap or bool(live_coverage.coverage_gap)
+        live_rows: list[ContextExpectedCentral] = []
+        for row in live_coverage.expected_central:
+            proposition = (row.proposition or "").strip()
+            if not proposition:
+                continue
+            match = row.match.value if hasattr(row.match, "value") else row.match
+            role = row.role.value if hasattr(row.role, "value") else row.role
+            live_rows.append(
+                ContextExpectedCentral(
+                    proposition=proposition,
+                    role=role,
+                    match=match,
+                    gap_reason=row.gap_reason,
+                    match_claim_id=str(row.match_claim_id) if row.match_claim_id else None,
+                )
+            )
+        if live_rows:
+            expected_rows = live_rows
     budget = verify_meta.get("verification_budget") if isinstance(verify_meta.get("verification_budget"), dict) else {}
     central_unverified = [str(item) for item in (budget.get("central_unverified") or [])]
     incomplete = bool(
@@ -396,9 +418,20 @@ def build_article_context(
     claim_run, verify_run = pair_from_runs(list(pipeline_runs))
     coverage = ((claim_run.metadata_json if claim_run is not None else None) or {}).get("coverage") or {}
     coverage_gap = bool(isinstance(coverage, dict) and coverage.get("coverage_gap"))
+    live_coverage = None
+    try:
+        live_coverage = build_coverage_contract(event=event, claims=list(event.claims), dropped=[])
+        if live_coverage.coverage_gap:
+            coverage_gap = True
+    except Exception:
+        live_coverage = None
     stale = verify_run is None and claim_run is not None and bool((claim_run.metadata_json or {}).get("claims_fingerprint"))
     verification = compact_verification(
-        verify_run, coverage_gap=coverage_gap, stale=stale, claim_run=claim_run
+        verify_run,
+        coverage_gap=coverage_gap,
+        stale=stale,
+        claim_run=claim_run,
+        live_coverage=live_coverage,
     )
 
     pool = list(event.claims)

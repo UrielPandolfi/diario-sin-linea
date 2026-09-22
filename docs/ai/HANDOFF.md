@@ -1,18 +1,20 @@
 # Handoff
 
-**Fecha:** 2026-09-21
+**Fecha:** 2026-09-22
 
-**Tarea:** Restaurar `test_published_update_keeps_live_until_passed_audit` frente a C5, sin debilitar el contrato.
+**Tarea:** Comprobar La Tablada y Esteche con el código post-fixes, sin commit y sin publicación automática.
 
 ## Resultado
 
-El fallo no era un bug de Audit/C5. Tras el update material, Writing emitía V2 con titular `Nuevo titular con heridos` y snapshot del par viejo (solo el claim del choque). C5 marcaba HIGH `headline_uncovered` y `structural_block` en el primer audit (`audit_count=1`), antes del tope de rewrites.
+Sin commit. API/worker reconstruidos; `AUTO_PUBLISH=false`; Beat no corre; `auto_poll_enabled=false`. Backup `.editorial-evals/backups/sin_linea-two-case-precheck-20260922T0321Z.dump`. Informe `.editorial-evals/two-case-check.json`.
 
-El fixture ahora persiste un par claim↔verify del set nuevo y redacta/reescribe titulares equivalentes al claim de heridos, con `public_rendering` completo. Se conservan las aserciones de que la versión publicada no cambia hasta Audit passed + publish.
+La Tablada (`58759b17`, artículo `fa0fa66a`): V3 candidata, live V2. Claim `37f7556a` («disparo durante el tiroteo») ya no es Confirmado: `SINGLE_SOURCE`, ficha **Respaldo limitado**. Audit V3 bloqueó por C5 de bajada, no por ese claim.
 
-Worker y Beat siguen detenidos. No se reingirió ni se tocó `sin_linea`.
+Esteche (`bb76b7a6`, artículo `b8343be8`): V3 candidata, live V2. `coverage_gap` + `central_uncovered`. Audit `passed=false`. Bloqueo correcto.
 
 ## Pendiente
 
-- Recuperar el contenido editorial local (sin backup utilizable).
-- No arrancar worker/Beat ni polling hasta esa recuperación.
+- Merge Track C: decisión con estos dos casos; no hace falta otro lote RSS.
+- Si se quiere reemplazar el live de Tablada, hay que resolver el `structural_block` C5 de la V3 (bajada categórica/sin atribución).
+- Recuperar Esteche como publicable exige extraer y evaluar la conspiración del titular; no re-verificar secundarios.
+- Duplicación Formosa (`a614745e` / `45d3c314`): trabajo separado.

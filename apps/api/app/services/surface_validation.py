@@ -188,6 +188,17 @@ def _content_tokens(text: str) -> set[str]:
     return token_set(text) - _CLAIM_STOP
 
 
+def _same_fact_texts(left: str, right: str) -> bool:
+    """Misma proposición, no solo overlap temático. C5 no cambia este umbral de C8."""
+    if propositions_equivalent(left, right) is not CoverageMatch.EQUIVALENT:
+        return False
+    left_toks = _content_tokens(left)
+    right_toks = _content_tokens(right)
+    if not left_toks or not right_toks:
+        return False
+    return len(left_toks & right_toks) / len(left_toks | right_toks) >= 0.55
+
+
 def _distinctive_numbers(text: str) -> set[str]:
     found: set[str] = set()
     for raw in _DISTINCTIVE_NUM.findall(text or ""):
@@ -363,11 +374,6 @@ def _headline_nucleus(headline: str) -> str:
     return text
 
 
-def _weak_overlap(surface: str, claim: dict[str, Any]) -> bool:
-    shared = _content_tokens(surface) & _content_tokens(_claim_text(claim))
-    return bool(shared)
-
-
 def _surface_rule_findings(
     *,
     name: str,
@@ -418,6 +424,57 @@ def _surface_rule_findings(
             continue
         equivalent.append((claim, decision, rendering, mode))
 
+    conflict_ids: set[str] = set()
+
+    def _flag_conflict(claim_a, decision_a, rendering_a, claim_b, decision_b, rendering_b) -> None:
+        statuses = {(decision_a or {}).get("status"), (decision_b or {}).get("status")}
+        statuses.discard(None)
+        statuses.discard("")
+        if (
+            len(statuses) <= 1
+            and rendering_a.categorical_allowed == rendering_b.categorical_allowed
+            and rendering_a.attribution_required == rendering_b.attribution_required
+        ):
+            return
+        cid = _claim_id(claim_a)
+        issues.append(
+            _issue(
+                reason=AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE,
+                surface=name,
+                text=text,
+                explanation=(
+                    f"El {name} equivale a claims del snapshot con contratos incompatibles "
+                    "para el mismo hecho. No se elige el permiso más favorable ni el más restrictivo."
+                ),
+                claim_id=cid,
+            )
+        )
+        if cid:
+            conflict_ids.add(cid)
+        other = _claim_id(claim_b)
+        if other:
+            conflict_ids.add(other)
+
+    for index, (claim_a, decision_a, rendering_a, _mode_a) in enumerate(equivalent):
+        for claim_b, decision_b, rendering_b, _mode_b in equivalent[index + 1 :]:
+            if _same_fact_texts(_claim_text(claim_a), _claim_text(claim_b)):
+                _flag_conflict(claim_a, decision_a, rendering_a, claim_b, decision_b, rendering_b)
+
+    matched_ids = {_claim_id(row[0]) for row in equivalent if _claim_id(row[0])}
+    for claim in claims:
+        cid = _claim_id(claim)
+        if not cid or cid in matched_ids:
+            continue
+        decision = decisions.get(cid)
+        rendering, mode = _usable_rendering(decision)
+        if mode == "incomplete" or rendering is None:
+            continue
+        for matched, decision_m, rendering_m, _mode_m in equivalent:
+            if not _same_fact_texts(_claim_text(matched), _claim_text(claim)):
+                continue
+            _flag_conflict(matched, decision_m, rendering_m, claim, decision, rendering)
+            break
+
     if not equivalent and not weak:
         return issues
 
@@ -430,7 +487,8 @@ def _surface_rule_findings(
     targets = [
         row
         for row in equivalent
-        if not has_fact_equivalent or not _utterance_role_or_type(row[0], row[1])
+        if _claim_id(row[0]) not in conflict_ids
+        and (not has_fact_equivalent or not _utterance_role_or_type(row[0], row[1]))
     ]
 
     for claim, decision, rendering, _mode in targets:
@@ -529,7 +587,7 @@ def _coverage_findings(headline: str, claims: list[dict[str, Any]], decisions: d
         row
         for row in material
         if classify_link(nucleus, row, decisions.get(_claim_id(row) or "")) in {"partial", "mention"}
-        or _weak_overlap(nucleus, row)
+        or bool(_content_tokens(nucleus) & _content_tokens(_claim_text(row)))
     ]
     if eq_accessory:
         return [

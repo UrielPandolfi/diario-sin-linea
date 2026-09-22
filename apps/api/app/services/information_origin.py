@@ -66,7 +66,30 @@ _CONSTITUTIVE_HOSTS = (
 )
 _VIDEO_ID_RE = re.compile(r"(?:v=|/embed/|/shorts/|/watch/)?([A-Za-z0-9_-]{11})")
 _YOUTUBE_HOSTS = ("youtube.com", "youtu.be")
-_AUTHORITATIVE_PREFIXES = ("cited:", "constitutive:", "youtube:", "vimeo:")
+_AUTHORITATIVE_PREFIXES = ("constitutive:", "youtube:", "vimeo:")
+_NON_DOCUMENTARY_CITE_HOSTS = (
+    "t.co",
+    "bit.ly",
+    "tinyurl.com",
+    "ow.ly",
+    "goo.gl",
+    "rb.gy",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "instagram.com",
+    "tiktok.com",
+)
+_REPUBLICATION_HOST_RE = re.compile(
+    r"(?:leer(?: la)? nota en|nota original en|fuente original(?: en)?|"
+    r"visita(?:r)?(?: la)?(?: nota| fuente)? en)\s+"
+    r"(?:https?://(?:www\.)?)?([a-z0-9.-]+\.[a-z]{2,})",
+    re.I,
+)
+_REPUBLICATION_SUMMARY_RE = re.compile(
+    r"este es un resumen(?: de la nota(?: original)?)?",
+    re.I,
+)
 _WIRE_AGENCIES = (
     ("telam", "telam"),
     ("reuters", "reuters"),
@@ -118,6 +141,31 @@ def _is_weak_independent_host(domain: str) -> bool:
     from app.services.verification_policy import _is_weak_independent_host as _weak
 
     return _weak(domain)
+
+
+def _is_non_documentary_cite_host(domain: str) -> bool:
+    token = (domain or "").strip().lower()
+    if token.startswith("www."):
+        token = token[4:]
+    return any(token == host or token.endswith("." + host) for host in _NON_DOCUMENTARY_CITE_HOSTS)
+
+
+def _republication_host(blobs: tuple[str | None, ...]) -> str | None:
+    blob = " ".join(part for part in blobs if part)
+    if not blob.strip():
+        return None
+    match = _REPUBLICATION_HOST_RE.search(blob)
+    if match:
+        host = (match.group(1) or "").strip().lower().rstrip("/")
+        if host.startswith("www."):
+            host = host[4:]
+        return host or None
+    if _REPUBLICATION_SUMMARY_RE.search(blob):
+        folded = normalize_name(blob)
+        for marker, host in (("infobae", "infobae.com"), ("clarin", "clarin.com"), ("lanacion", "lanacion.com.ar")):
+            if marker in folded:
+                return host
+    return None
 
 
 def document_key(row) -> str | None:
@@ -227,8 +275,9 @@ def information_origin_for_row(claim: Claim, row) -> str | None:
         if key and canonicalize_url(url) == key:
             continue
         host = _host(url)
-        if host and not _is_weak_independent_host(host):
-            return f"cited:{canonicalize_url(url)}"
+        if not host or _is_weak_independent_host(host) or _is_non_documentary_cite_host(host):
+            continue
+        return f"cited:{canonicalize_url(url)}"
     host = _host(key or "")
     item = getattr(row, "source_item", None)
     body_source = usable_body_source(item)
@@ -308,6 +357,9 @@ def _reporting_origin(row) -> str | None:
         host = _host(getattr(src, "feed_url", None) or "") or _host(getattr(src, "homepage_url", None) or "")
     if host and _is_weak_independent_host(host):
         return None
+    reprint_host = _republication_host(_blobs(row))
+    if reprint_host:
+        return f"reporting:{reprint_host}"
     if host:
         return f"reporting:{host}"
     source_id = getattr(src, "id", None) if src is not None else None

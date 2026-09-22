@@ -771,7 +771,7 @@ def test_primary_required_blocks_supported_without_primary() -> None:
     )
     assert (
         apply_primary_requirement(already, ClaimStatus.SUPPORTED, plan, primary_supports=False)
-        == ClaimStatus.SUPPORTED
+        == ClaimStatus.SINGLE_SOURCE
     )
 
 

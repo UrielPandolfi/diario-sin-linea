@@ -878,7 +878,7 @@ def test_cheap_assessment_can_skip_sol_when_primary_supports(db_session: Session
                     CheapEvidenceJudgement(
                         source_ref=2,
                         relation=EvidenceJudgementType.SUPPORTS,
-                        excerpt="Dase por designada",
+                        excerpt="Dase por designada en el Ministerio de Seguridad.",
                         reason="el boletín nombra el cargo",
                     )
                 ],
@@ -2030,10 +2030,7 @@ def test_well_supported_high_hecho_gets_live_evidence_contract_without_paid_slot
         "Javier Milei viajará a Estados Unidos por decimonovena vez según la agenda "
         "oficial de la gira presidencial prevista para esta semana en Nueva York."
     )
-    excerpt_b = (
-        "El presidente concretará su visita número 19 a Estados Unidos y permanecerá "
-        "tres días en Nueva York antes de volver el viernes, según otra redacción."
-    )
+    excerpt_b = "Javier Milei viajará a Estados Unidos por decimonovena vez."
     item_a = _extracted_item(
         db_session,
         source_a.id,

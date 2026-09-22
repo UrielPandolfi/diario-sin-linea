@@ -99,6 +99,23 @@ def capture_evidence_snapshot(
 ) -> dict[str, Any]:
     snap = writing_evidence_snapshot(claim_run, verify_run, version=version)
     snap["article_context"] = json.loads(article_context.model_dump_json())
+    verification = article_context.verification
+    if verification is not None and (verification.coverage_gap or verification.expected_central):
+        coverage = dict(snap["coverage"]) if isinstance(snap.get("coverage"), dict) else {}
+        if verification.coverage_gap:
+            coverage["coverage_gap"] = True
+        if verification.expected_central:
+            coverage["expected_central"] = [
+                {
+                    "proposition": row.proposition,
+                    "role": row.role,
+                    "match": row.match,
+                    "gap_reason": row.gap_reason,
+                    "match_claim_id": row.match_claim_id,
+                }
+                for row in verification.expected_central
+            ]
+        snap["coverage"] = coverage
     return snap
 
 

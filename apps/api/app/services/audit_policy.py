@@ -293,6 +293,8 @@ def merge_audit_result(
     llm_issues = list(llm_result.issues) if llm_result is not None else []
     if article is not None:
         llm_issues = drop_attributed_single_as_corroborated(llm_issues, article)
+    if snapshot is not None:
+        llm_issues = drop_mismatched_llm_claim_links(llm_issues, snapshot)
     certainty = certainty_findings(article, snapshot) if article is not None else []
     issues = _dedupe_issues(list(structural or []) + certainty + llm_issues)
     blocking = blocking_issues(issues)
@@ -452,6 +454,31 @@ def drop_attributed_single_as_corroborated(issues: list[AuditIssue], article: Ar
                 break
         if not attributed_surface:
             kept.append(issue)
+    return kept
+
+
+def drop_mismatched_llm_claim_links(issues: list[AuditIssue], snapshot: dict[str, Any] | None) -> list[AuditIssue]:
+    """Descarta findings del modelo que citan un claim de otro hecho, tiempo o alcance."""
+    if snapshot is None:
+        return issues
+    from app.services.surface_validation import _decisions, _snapshot_claims, classify_link
+
+    claims = {_claim_id(row): row for row in _snapshot_claims(snapshot) if _claim_id(row)}
+    decisions = _decisions(snapshot)
+    kept: list[AuditIssue] = []
+    for issue in issues:
+        cid = issue.claim_id
+        if not cid:
+            kept.append(issue)
+            continue
+        claim = claims.get(str(cid))
+        if claim is None:
+            kept.append(issue)
+            continue
+        kind = classify_link(issue.text or "", claim, decisions.get(str(cid)))
+        if kind in {"equivalent", "partial"}:
+            kept.append(issue)
+            continue
     return kept
 
 

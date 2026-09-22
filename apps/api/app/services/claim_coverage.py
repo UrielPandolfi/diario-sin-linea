@@ -108,6 +108,16 @@ _FRAME_SKIP = (
 )
 _MENORES = "menor"
 _DESDE = "desde"
+_ROLE_QUALIFIERS = (
+    "autor mediato",
+    "autores mediatos",
+    "complice necesario",
+    "complices necesarios",
+)
+_CIRCUMSTANCE_RE = re.compile(
+    r"\bdurante (?:el|la|los|las) ([a-z0-9 ]{3,40}?)(?=\s*(?:,|\.|$| y | que | segun | según ))",
+    re.IGNORECASE,
+)
 _REACTION_NOUN = (
     r"(?:pol[eé]mica|revuelo|reacci[oó]n(?:es)?|tormenta|esc[aá]ndalo|malestar|"
     r"indignaci[oó]n|cr[ií]ticas?)"
@@ -572,6 +582,20 @@ def _negated(text: str) -> bool:
     return any(token in folded for token in (" no ", " nunca ", " no fue ", " no es ", " no estan ", " no están "))
 
 
+def _is_question(text: str) -> bool:
+    stripped = (text or "").strip()
+    return stripped.startswith("¿") or stripped.endswith("?")
+
+
+def _circumstances(text: str) -> set[str]:
+    return {match.group(1).strip() for match in _CIRCUMSTANCE_RE.finditer(normalize_name(text or "")) if match.group(1).strip()}
+
+
+def _role_qualifiers(text: str) -> set[str]:
+    folded = normalize_name(text or "")
+    return {marker for marker in _ROLE_QUALIFIERS if marker in folded}
+
+
 def _qualifier_mismatch(left: str, right: str) -> bool:
     a = normalize_name(left)
     b = normalize_name(right)
@@ -582,6 +606,14 @@ def _qualifier_mismatch(left: str, right: str) -> bool:
         if (_MENORES in a and _DESDE in b) or (_MENORES in b and _DESDE in a):
             return True
     if _negated(left) != _negated(right):
+        return True
+    circ_a, circ_b = _circumstances(left), _circumstances(right)
+    if circ_a - circ_b:
+        return True
+    if circ_a and circ_b and circ_a != circ_b:
+        return True
+    roles_a, roles_b = _role_qualifiers(left), _role_qualifiers(right)
+    if roles_a != roles_b:
         return True
     return False
 
@@ -648,6 +680,8 @@ def _atomic_propositions(text: str) -> list[str]:
 
 
 def propositions_equivalent(expected: str, claim_text: str, *, expected_role: PropositionRole | None = None) -> CoverageMatch:
+    if _is_question(expected) != _is_question(claim_text):
+        return CoverageMatch.NONE
     if _qualifier_mismatch(expected, claim_text):
         return CoverageMatch.PARTIAL
     exp_bucket = _act_bucket(expected)
@@ -685,8 +719,12 @@ def expected_centrals_from_event(event: Event) -> list[ExpectedCentral]:
             return
         seen.add(key)
         role = proposition_role_for(cleaned)
-        if role == PropositionRole.OTHER and _act_bucket(cleaned) == "other":
-            return
+        act = _act_bucket(cleaned)
+        if role == PropositionRole.OTHER and act == "other":
+            # El núcleo de un titular factual no queda fuera del contrato C8
+            # solo porque no encaje en un acto tipificado (utterance/judicial/…).
+            if signal != CoverageSignal.TITLE or len(token_set(cleaned)) < 6:
+                return
         rows.append(
             ExpectedCentral(
                 proposition=cleaned,

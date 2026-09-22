@@ -480,3 +480,73 @@ def test_editorial_fixture_propositions_keep_authoritative_ceilings() -> None:
     assert requires_authoritative_source(filing) is False
     assert heuristic_plan(filing).primary_source_required is False
     assert heuristic_plan(filing).verification_target == VerificationTarget.JUDICIAL_RECORD
+
+
+def test_flipr_explicit_republication_collapses_to_original_outlet() -> None:
+    infobae = (
+        "Alan Gabriel Chazarreta recibió un único disparo e ingresó al hospital. "
+        "La cobertura de Infobae relata el ingreso y no afirma un vínculo con el tiroteo."
+    )
+    flipr = (
+        infobae
+        + " Este es un resumen de la nota original. Leer nota en infobae.com"
+    )
+    claim = _claim(
+        text="Alan Gabriel Chazarreta recibió un único disparo",
+        evidence=[
+            _row(
+                url="https://www.infobae.com/politica/tablada/",
+                excerpt=infobae,
+                body=infobae,
+                domain="infobae.com",
+            ),
+            _row(
+                url="https://flipr.com.ar/tablada/",
+                excerpt=flipr,
+                body=flipr,
+                domain="flipr.com.ar",
+            ),
+        ],
+    )
+    assessment = assess_origins(claim)
+    assert assessment.information_origins == ["reporting:infobae.com"]
+    assert assessment.known_independent == 1
+    assert "reporting:flipr.com.ar" not in assessment.information_origins
+
+
+def test_shortener_citation_is_not_documentary_primary() -> None:
+    body_a = (
+        "Milei ofrecerá una conferencia el miércoles a las 16:00. "
+        "La agenda se difundió en https://t.co/xYXJQDwEIr según esa redacción."
+    )
+    body_b = (
+        "El presidente tiene previsto hablar el miércoles a las 16:00 en Nueva York "
+        "según la cobertura propia de Perfil sobre la asamblea."
+    )
+    claim = _claim(
+        text="Milei ofrecerá una conferencia el miércoles a las 16:00",
+        evidence=[
+            _row(
+                url="https://derechadiario.com.ar/politica/agenda",
+                excerpt=body_a,
+                body=body_a,
+                domain="derechadiario.com.ar",
+            ),
+            _row(
+                url="https://www.perfil.com/noticias/politica/agenda",
+                excerpt=body_b,
+                body=body_b,
+                domain="perfil.com",
+            ),
+        ],
+    )
+    assessment = assess_origins(claim)
+    assert not any(item.startswith("cited:") for item in assessment.information_origins)
+    assert assessment.authoritative_independent == 0
+    kind = support_kind_for(status="SUPPORTED", assessment=assessment, primary_access="not_found")
+    assert kind == SupportKind.INDEPENDENT_REPORTING
+    assert (
+        _reason_code(claim, assessment, status="SUPPORTED", desired="SUPPORTED")
+        is ReasonCode.INDEPENDENT_CORROBORATION
+    )
+

@@ -13,7 +13,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.usage_context import bind_model_role, usage_scope
-from app.domain.enums import ArticleStatus, PipelineStatus
+from app.domain.enums import ArticleStatus, ClaimStatus, PipelineStatus
 from app.models import Article, Claim, ClaimEvidence, Event, EventSource, PipelineRun, SourceItem
 from app.providers.base import ProviderNotConfiguredError, StructuredLLMProvider
 from app.providers.registry import ModelRole, get_structured_provider
@@ -26,6 +26,7 @@ from app.services.article_context import (
     last_written_run,
 )
 from app.services.article_service import ArticleService
+from app.services.claim_coverage import build_coverage_contract
 from app.services.claim_service import comparison_key_for
 from app.services.evidence_snapshot import (
     capture_evidence_snapshot,
@@ -39,6 +40,38 @@ from app.services.pipeline_lock import AUDITING_STAGE, WRITING_STAGE, is_write_a
 from app.services.verification_outcome import pair_from_runs
 
 WRITING_ROLE = "writing"
+
+
+def confirmation_dropped(previous: list | None, current: list) -> bool:
+    """True when a previously corroborated claim is no longer SUPPORTED."""
+    if not previous:
+        return False
+    prev = {
+        str(row.get("id")): row
+        for row in previous
+        if isinstance(row, dict) and row.get("id")
+    }
+    for row in current:
+        if not isinstance(row, dict) or not row.get("id"):
+            continue
+        before = prev.get(str(row["id"]))
+        if before is None:
+            continue
+        if (
+            str(before.get("status") or "") == ClaimStatus.SUPPORTED.value
+            and str(row.get("status") or "") != ClaimStatus.SUPPORTED.value
+        ):
+            return True
+    return False
+
+
+def live_coverage_gap(event: Event) -> bool:
+    try:
+        return bool(
+            build_coverage_contract(event=event, claims=list(event.claims), dropped=[]).coverage_gap
+        )
+    except Exception:
+        return False
 
 _UPDATE_INSTRUCTIONS = (
     "El artículo publicado anterior es una base editorial, no una fuente factual. "
@@ -203,11 +236,23 @@ class WritingService:
             and verify_run is not None
             and pair_completes_skipped_claims(current_snap, verify_run)
         )
+        dropped_confirmation = confirmation_dropped(previous, claims_snapshot)
+        published_gap = (
+            article is not None
+            and article.status == ArticleStatus.PUBLISHED
+            and article.published_version is not None
+            and int(article.current_version) == int(article.published_version)
+            and live_coverage_gap(event)
+        )
         if article is not None and not change.is_material:
             if unpaired_now_paired:
                 base["material_reasons"] = list(change.reasons) + ["verification_now_paired"]
             elif skipped_now_complete:
                 base["material_reasons"] = list(change.reasons) + ["verification_contract_completed"]
+            elif dropped_confirmation:
+                base["material_reasons"] = list(change.reasons) + ["confirmation_dropped"]
+            elif published_gap:
+                base["material_reasons"] = list(change.reasons) + ["coverage_gap_now_open"]
             elif has_unaudited_candidate(article, pipeline_runs):
                 base["article_id"] = str(article.id)
                 base["version"] = article.current_version
@@ -280,6 +325,10 @@ class WritingService:
             change_reason = "verification_now_paired"
         elif "verification_contract_completed" in (base.get("material_reasons") or []):
             change_reason = "verification_contract_completed"
+        elif "confirmation_dropped" in (base.get("material_reasons") or []):
+            change_reason = "confirmation_dropped"
+        elif "coverage_gap_now_open" in (base.get("material_reasons") or []):
+            change_reason = "coverage_gap_now_open"
         else:
             change_reason = "initial" if article is None else ",".join(change.reasons) or "material_change"
         if article is None:
@@ -523,6 +572,17 @@ def should_enqueue_write(session: Session, event_id: UUID) -> bool:
         previous = ((previous_run.metadata_json if previous_run is not None else None) or {}).get("claims_snapshot")
         decisions = ((verify_run.metadata_json if verify_run is not None else None) or {}).get("decision_by_claim_id") or {}
         current = snapshot_claims(claims, decisions=decisions)
-        return detect_material_change(previous, current).is_material
+        if detect_material_change(previous, current).is_material:
+            return True
+        if confirmation_dropped(previous, current):
+            return True
+        if (
+            article.status == ArticleStatus.PUBLISHED
+            and article.published_version is not None
+            and int(article.current_version) == int(article.published_version)
+            and live_coverage_gap(event)
+        ):
+            return True
+        return False
     except Exception:
         return True
