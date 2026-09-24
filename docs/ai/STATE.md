@@ -18,7 +18,7 @@ Admin Track A: `/admin/publications` (estado actual vs ejecuciones de período),
 
 Casos de lectores y revisión editorial: routers en `main.py`, migración `0013_reader_cases`, UI `/contacto`, `/seguimiento/[token]`, `/admin/cases`. **No** pasan por Celery. `EditorialService.revise` no usa el gate de audit/publish.
 
-Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `support_basis`, `verification_incomplete`, `central_unverified`) **antes** del LLM y lo ata a la versión. Audit lee ese snapshot (`evidence_snapshot_for_version`) para invariantes estructurales; el LLM de Sol no lo recibe (solo el texto de la versión). Publish usa `latest_completed` de auditing y exige snapshot + `version_after` de **esa** versión. Un 429 `rate_limit_exceeded` se reintenta en `OpenAIStructuredProvider` (`max_retries=0` en el SDK; tope `JOB_MAX_RETRIES` y presupuesto de espera derivado). `insufficient_quota` no se reintenta. Agotar deja `FAILED` técnico (`audited=false`); el historial de runs se conserva.
+Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `support_basis`, `verification_incomplete`, `central_unverified`) **antes** del LLM y lo ata a la versión. Audit lee ese snapshot (`evidence_snapshot_for_version`) para invariantes estructurales. El LLM de Sol recibe el texto y un posture compacto (`evaluation_state`, `public_rendering`, `verified_scope`, `unsupported_scope` si están en el snapshot); no recibe el snapshot crudo ni Verification live. `merge_audit_result` normaliza atribución, correspondencia de `claim_id`/`claim_ref` y la excepción de omisión en el titular antes de `passed` y de `structural_blocks_rewrite`. Publish sigue exigiendo snapshot + `version_after` de **esa** versión y revalida los estructurales con `normalized_structural_issues`. Un 429 `rate_limit_exceeded` se reintenta en `OpenAIStructuredProvider` (`max_retries=0` en el SDK; tope `JOB_MAX_RETRIES` y presupuesto de espera derivado). `insufficient_quota` no se reintenta. Agotar deja `FAILED` técnico (`audited=false`); el historial de runs se conserva.
 
 ## Tests que existen (no = pasados ahora)
 
@@ -30,6 +30,8 @@ Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence
 2. **`AUTO_PUBLISH` se lee** en `audit_event_article`. true + passed + no hold → enqueue publish (V1 y V2). false + passed → `READY_FOR_REVIEW`.
 3. **`Event.status` READY_FOR_REVIEW / UPDATING** siguen sin usarse. La candidata se representa con `Event=PUBLISHED` + `Article=READY_FOR_REVIEW`.
 4. **`DATABASE_URL` de Railway/Heroku** (`postgres://` o `postgresql://`) SQLAlchemy la trata como psycopg2. El runtime es `psycopg[binary]` v3; `Settings` reescribe a `postgresql+psycopg://`.
+5. **Publish revalida estructurales ya normalizados** (`normalized_structural_issues` en `PublishService._audit_passed_for_current`). Sigue exigiendo Audit `passed` de esa versión. La omisión de titular tolerada no vuelve a bloquear; integridad, cobertura y correspondencia sí.
+6. **Pendiente fuera de este ajuste de Audit:** recorrido `DISPROVEN` hasta Writing y frontend (no hay caso real en el export); Formosa en conjunto; cobertura Esteche/Interpol; contratos equivalentes de Rafecas; selección de Verification; posibles duplicados de sucesos. `propositions_equivalent` no se tocó.
 
 ## Track B — 2026-09-16
 

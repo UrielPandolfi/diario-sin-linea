@@ -699,18 +699,17 @@ def test_audit_prompt_covers_language_bias_not_verification() -> None:
     folded = prompt.casefold()
     assert "UNATTRIBUTED_CHARACTERIZATION" in prompt
     assert "voz de Sin Línea" in prompt or "voz de sin línea" in folded
-    assert "citas y declaraciones claramente atribuidas" in folded
-    assert "no las neutralices" in folded
+    assert "las citas pueden contener opiniones" in folded
     assert "no verifiques hechos" in folded
-    assert "no apliques una lista ciega" in folded
-    assert "una muerte" in folded and "condena" in folded
+    assert "una muerte" in folded and "cuántos disparos" in folded
+    assert "excepción" in folded
     assert "supported no significa" not in folded
     assert "coverage_gap" not in folded
     assert "decision_by_claim_id" not in folded
     assert "si el draft lo afirma como hecho de sin línea, reportá attribution" not in folded
     assert "$98,08 millones" not in prompt
-    assert "Nunca uses un type OTHER" in prompt
-    assert "NUMBER" in prompt and "No uses NUMBER" in prompt
+    assert "No uses OTHER" in prompt
+    assert "NUMBER" in prompt and "No uses OTHER, NUMBER, NAME o DATE." in prompt
 
 
 def test_writing_prompt_covers_characterization_and_causality() -> None:
@@ -846,7 +845,7 @@ def test_audit_respects_attributed_quote_without_verification_objections(db_sess
     prompt = load_prompt("article_audit.md").casefold()
     user = llm.user_prompts[0]
     assert "según la jueza" in user.casefold()
-    assert "no las neutralices" in prompt
+    assert "no las conviertas en opiniones del medio" in prompt
     assert result["passed"] is True
     assert not any(issue["severity"] in {"HIGH", "MEDIUM"} for issue in result["issues"])
     assert result["rewrite_count"] == 0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.core.article_body import block_plain_text, split_body_paragraphs
@@ -82,6 +83,15 @@ _ATTRIBUTION_MARKERS = (
     "atribu",
     "un informe",
     "el informe",
+    "un reporte",
+    "el reporte",
+    "dos informes",
+    "reportes periodísticos",
+    "reportes periodisticos",
+    "informes periodísticos",
+    "informes periodisticos",
+    "sostienen que",
+    "sostienen ",
     "la cobertura",
     "habría ",
     "habria ",
@@ -297,6 +307,7 @@ def merge_audit_result(
         llm_issues = drop_mismatched_llm_claim_links(llm_issues, snapshot)
     certainty = certainty_findings(article, snapshot) if article is not None else []
     issues = _dedupe_issues(list(structural or []) + certainty + llm_issues)
+    issues = apply_headline_attribution_tolerance(issues, article, snapshot)
     blocking = blocking_issues(issues)
     passed = not blocking
     return ArticleAuditResult(passed=passed, issues=issues, editorial_passed=passed)
@@ -435,81 +446,290 @@ def _surface_mentions_claim(surface: str, claim: dict[str, Any]) -> bool:
 
 
 def drop_attributed_single_as_corroborated(issues: list[AuditIssue], article: Article) -> list[AuditIssue]:
+    from app.services.surface_validation import assertions_are_attributed
+
+    _ = article
     kept: list[AuditIssue] = []
-    surfaces = _article_surfaces(article)
     for issue in issues:
         if issue.reason != AuditIssueReason.SINGLE_AS_CORROBORATED:
             kept.append(issue)
             continue
         fragment = (issue.text or "").strip()
-        if passage_is_attributed(fragment):
+        if fragment and assertions_are_attributed(fragment):
             continue
-        attributed_surface = False
-        for surface in surfaces:
-            if fragment and fragment in surface and passage_is_attributed(surface):
-                attributed_surface = True
-                break
-            if surface.strip() == fragment and passage_is_attributed(surface):
-                attributed_surface = True
-                break
-        if not attributed_surface:
-            kept.append(issue)
+        kept.append(issue)
     return kept
 
 
-def drop_mismatched_llm_claim_links(issues: list[AuditIssue], snapshot: dict[str, Any] | None) -> list[AuditIssue]:
-    """Descarta findings del modelo que citan un claim de otro hecho, tiempo o alcance."""
-    if snapshot is None:
-        return issues
-    from app.services.surface_validation import _decisions, _snapshot_claims, classify_link
+_SURFACE_LABELS = {"headline", "summary", "lead", "bajada"}
+_DIGIT_RE = re.compile(r"\b\d{2,}\b")
+_CULPABILITY_RE = re.compile(
+    r"\b(asesin[oó]s?|asesinada|asesinado|culpables?|femicidas?|homicidas?)\b",
+    re.IGNORECASE,
+)
+_HEADLINE_BOOSTERS = (
+    "confirmado",
+    "comprobado",
+    "verificado",
+    "fuentes independientes",
+    "corroborad",
+)
+_HEADLINE_OMISSION_REASONS = {
+    AuditIssueReason.SINGLE_AS_CORROBORATED,
+    AuditIssueReason.SURFACE_ATTRIBUTION,
+    AuditIssueReason.SURFACE_CATEGORICAL,
+}
+HEADLINE_TOLERANCE_NOTE = (
+    "Omisión de atribución solo en el titular, tolerada por la política editorial. "
+    "La bajada o el primer párrafo atribuyen la misma proposición SINGLE_SOURCE. "
+    "No cambia el status ni los permisos de evidencia."
+)
+
+
+def _snapshot_claim_index(snapshot: dict[str, Any]) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]], dict[str, str]]:
+    from app.services.surface_validation import _decisions, _snapshot_claims
 
     claims = {_claim_id(row): row for row in _snapshot_claims(snapshot) if _claim_id(row)}
     decisions = _decisions(snapshot)
+    context = snapshot.get("article_context") if isinstance(snapshot.get("article_context"), dict) else {}
+    raw_refs = context.get("claim_refs") if isinstance(context.get("claim_refs"), dict) else {}
+    refs = {str(key): str(value) for key, value in raw_refs.items()}
+    return claims, decisions, refs
+
+
+def resolve_issue_claim(
+    issue: AuditIssue,
+    snapshot: dict[str, Any] | None,
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None, str | None]:
+    """Resuelve claim_id o claim_ref. None, None, token significa referencia no resoluble."""
+    if snapshot is None:
+        return None, None, None
+    claims, decisions, refs = _snapshot_claim_index(snapshot)
+    cid = str(issue.claim_id) if issue.claim_id else ""
+    ref = str(issue.claim_ref or "").strip()
+    if cid and (cid in claims or cid in decisions):
+        return claims.get(cid), decisions.get(cid), None
+    if ref.casefold() in _SURFACE_LABELS:
+        return None, None, None
+    mapped = refs.get(ref) if ref else ""
+    if mapped and (mapped in claims or mapped in decisions):
+        return claims.get(mapped), decisions.get(mapped), None
+    if ref and (ref in claims or ref in decisions):
+        return claims.get(ref), decisions.get(ref), None
+    token = cid or ref
+    if token:
+        return None, None, token
+    return None, None, None
+
+
+def _digit_numbers(text: str) -> set[str]:
+    return set(_DIGIT_RE.findall(text or ""))
+
+
+def _negation_mismatch(surface: str, claim: dict[str, Any]) -> bool:
+    from app.services.surface_validation import _claim_text, _content_tokens
+
+    claim_text = _claim_text(claim).casefold()
+    folded = (surface or "").casefold()
+    claim_neg = any(prefix in claim_text for prefix in _NEGATION_PREFIXES)
+    surface_neg = any(prefix in folded for prefix in _NEGATION_PREFIXES)
+    if claim_neg == surface_neg:
+        return False
+    return bool(_content_tokens(claim_text) & _content_tokens(folded))
+
+
+def _number_mismatch(surface: str, claim: dict[str, Any]) -> bool:
+    from app.services.surface_validation import _claim_text, _content_tokens
+
+    claim_text = _claim_text(claim)
+    claim_nums = _digit_numbers(claim_text)
+    surface_nums = _digit_numbers(surface)
+    if not claim_nums or not surface_nums:
+        return False
+    if not (claim_nums - surface_nums and surface_nums - claim_nums):
+        return False
+    return bool(_content_tokens(claim_text) & _content_tokens(surface))
+
+
+def drop_mismatched_llm_claim_links(issues: list[AuditIssue], snapshot: dict[str, Any] | None) -> list[AuditIssue]:
+    """Descarta un issue cuyo claim resuelto no es la proposición del fragmento.
+
+    Conserva una diferencia de cifra del mismo hecho y las referencias que no se pueden resolver.
+    headline/summary/lead no son IDs.
+    """
+    if snapshot is None:
+        return issues
+    from app.services.surface_validation import asserted_link
+
     kept: list[AuditIssue] = []
     for issue in issues:
-        cid = issue.claim_id
-        if not cid:
+        claim, decision, unresolved = resolve_issue_claim(issue, snapshot)
+        if unresolved or claim is None:
             kept.append(issue)
             continue
-        claim = claims.get(str(cid))
-        if claim is None:
+        fragment = issue.text or ""
+        kind = asserted_link(fragment, claim, decision)
+        same_fact_shift = issue.reason in {
+            AuditIssueReason.SEMANTIC_SHIFT,
+            AuditIssueReason.PARTIAL_AS_TOTAL,
+        }
+        if (
+            kind == "equivalent"
+            or same_fact_shift
+            or _number_mismatch(fragment, claim)
+            or _negation_mismatch(fragment, claim)
+        ):
             kept.append(issue)
-            continue
-        kind = classify_link(issue.text or "", claim, decisions.get(str(cid)))
-        if kind in {"equivalent", "partial"}:
-            kept.append(issue)
-            continue
     return kept
 
 
 def certainty_findings(article: Article | None, snapshot: dict[str, Any] | None) -> list[AuditIssue]:
     if article is None or snapshot is None:
         return []
+    from app.services.surface_validation import _assertion_attributed, _claim_text, asserted_link
+
     claims = _single_source_rows(snapshot)
     if not claims:
         return []
+    _, decisions, _refs = _snapshot_claim_index(snapshot)
     issues: list[AuditIssue] = []
-    for surface in _article_surfaces(article):
-        if passage_is_attributed(surface):
-            continue
-        from app.services.surface_validation import classify_link
+    seen: set[tuple[str, str]] = set()
+    for surface_name, surface in article_surface_map(article).items():
+        for claim in claims:
+            cid = _claim_id(claim) or ""
+            decision = decisions.get(cid)
+            if asserted_link(surface, claim, decision) != "equivalent":
+                continue
+            if _assertion_attributed(surface, _claim_text(claim)):
+                continue
+            key = (surface_name, cid or _claim_text(claim))
+            if key in seen:
+                continue
+            seen.add(key)
+            issues.append(
+                _issue(
+                    issue_type=AuditIssueType.UNSUPPORTED_CLAIM,
+                    reason=AuditIssueReason.SINGLE_AS_CORROBORATED,
+                    text=surface,
+                    explanation=(
+                        "Proposición SINGLE_SOURCE presentada como hecho categórico, sin atribución explícita."
+                    ),
+                    action=AuditIssueAction.ATTRIBUTE,
+                    claim_id=cid or None,
+                    claim_ref=surface_name,
+                )
+            )
+    return issues
 
-        matched = next((claim for claim in claims if classify_link(surface, claim) == "equivalent"), None)
-        if matched is None:
+
+def _issue_targets_headline(issue: AuditIssue, headline: str) -> bool:
+    if issue.reason not in _HEADLINE_OMISSION_REASONS:
+        return False
+    if str(issue.claim_ref or "").casefold() == "headline":
+        return True
+    text = " ".join((issue.text or "").split())
+    head = " ".join((headline or "").split())
+    if not text or not head:
+        return False
+    return text == head or text in head or head in text
+
+
+def _attributed_surface_has_numbers(surface: str, numbers: set[str]) -> bool:
+    from app.services.surface_validation import _assertion_spans, _sentence_spans
+
+    if not numbers or not numbers <= _digit_numbers(surface):
+        return False
+    folded = surface.casefold()
+    covered: set[str] = set()
+    for sent_start, sent_end in _sentence_spans(folded):
+        sentence = folded[sent_start:sent_end]
+        for ass_start, ass_end in _assertion_spans(sentence):
+            clause = sentence[ass_start:ass_end]
+            if not any(marker in clause for marker in _ATTRIBUTION_MARKERS):
+                continue
+            covered |= _digit_numbers(clause) & numbers
+    return numbers <= covered
+
+
+def headline_omission_is_tolerated(issue: AuditIssue, article: Article, snapshot: dict[str, Any] | None) -> bool:
+    headline = article.headline or ""
+    if snapshot is None or not _issue_targets_headline(issue, headline):
+        return False
+    if _CULPABILITY_RE.search(headline) or any(token in headline.casefold() for token in _HEADLINE_BOOSTERS):
+        return False
+    numbers = _digit_numbers(headline)
+    if not numbers:
+        return False
+    claim, decision, unresolved = resolve_issue_claim(issue, snapshot)
+    if unresolved or not isinstance(decision, dict):
+        return False
+    status = _status_value(decision.get("status") or (claim or {}).get("status"))
+    if status != "SINGLE_SOURCE":
+        return False
+    if str(decision.get("evaluation_state") or "").casefold() != "complete":
+        return False
+    basis = decision.get("support_basis") if isinstance(decision.get("support_basis"), dict) else None
+    claim_basis = (claim or {}).get("support_basis") if isinstance((claim or {}).get("support_basis"), dict) else None
+    support = basis or claim_basis
+    if not support and not str(decision.get("verified_scope") or "").strip():
+        return False
+    claim_text = " ".join(
+        str(part or "")
+        for part in (
+            (claim or {}).get("canonical_text"),
+            decision.get("verified_scope"),
+        )
+    )
+    if not numbers <= _digit_numbers(claim_text):
+        return False
+    surfaces = article_surface_map(article)
+    attributed = _attributed_surface_has_numbers(surfaces.get("summary") or "", numbers) or _attributed_surface_has_numbers(
+        surfaces.get("lead") or "", numbers
+    )
+    return attributed
+
+
+def normalized_structural_issues(
+    snapshot: dict[str, Any] | None,
+    article: Article | None,
+) -> list[AuditIssue]:
+    """Los mismos estructurales que Audit, ya normalizados.
+
+    Publish revalida integridad, cobertura y correspondencia. La excepción de
+    omisión en el titular usa esta función, no una regla aparte.
+    """
+    if article is None:
+        return []
+    return apply_headline_attribution_tolerance(
+        structural_findings(snapshot, article),
+        article,
+        snapshot if isinstance(snapshot, dict) else None,
+    )
+
+
+def apply_headline_attribution_tolerance(
+    issues: list[AuditIssue],
+    article: Article | None,
+    snapshot: dict[str, Any] | None,
+) -> list[AuditIssue]:
+    if article is None:
+        return issues
+    out: list[AuditIssue] = []
+    for issue in issues:
+        if issue.severity not in _BLOCKING or not headline_omission_is_tolerated(issue, article, snapshot):
+            out.append(issue)
             continue
-        issues.append(
-            _issue(
-                issue_type=AuditIssueType.UNSUPPORTED_CLAIM,
-                reason=AuditIssueReason.SINGLE_AS_CORROBORATED,
-                text=surface,
-                explanation=(
-                    "Proposición SINGLE_SOURCE presentada como hecho categórico, sin atribución explícita."
-                ),
-                action=AuditIssueAction.ATTRIBUTE,
-                claim_id=_claim_id(matched),
+        out.append(
+            issue.model_copy(
+                update={
+                    "severity": AuditIssueSeverity.LOW,
+                    "action": AuditIssueAction.ATTRIBUTE,
+                    "suggested_fix": None,
+                    "explanation": f"{HEADLINE_TOLERANCE_NOTE} {issue.explanation or ''}".strip(),
+                }
             )
         )
-    return issues
+    return out
 
 
 def _dedupe_issues(issues: list[AuditIssue]) -> list[AuditIssue]:

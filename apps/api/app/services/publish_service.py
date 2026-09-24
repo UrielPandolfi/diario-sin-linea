@@ -10,7 +10,7 @@ from app.core.clock import utc_now
 from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType, PipelineStatus
 from app.models import Article, Event, EventUpdate, PipelineRun
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
-from app.services.audit_policy import blocking_issues, structural_findings
+from app.services.audit_policy import blocking_issues, normalized_structural_issues
 from app.services.hero_image_service import schedule_after_commit
 from app.services.pipeline_lock import PUBLISHING_STAGE, is_write_audit_publish_busy
 
@@ -251,6 +251,6 @@ class PublishService:
         bound = snapshot.get("version")
         if bound is None or int(bound) != int(article.current_version):
             return False
-        if blocking_issues(structural_findings(snapshot, article)):
+        if blocking_issues(normalized_structural_issues(snapshot, article)):
             return False
         return True

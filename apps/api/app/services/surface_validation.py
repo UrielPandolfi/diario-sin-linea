@@ -250,7 +250,29 @@ def classify_link(surface: str, claim: dict[str, Any], decision: dict[str, Any] 
     return "none"
 
 
+_ABBREVIATIONS = {
+    "dr",
+    "dra",
+    "sr",
+    "sra",
+    "lic",
+    "ing",
+    "art",
+    "nro",
+    "ee",
+    "uu",
+    "aprox",
+}
+
+
+def _word_before_period(text: str, pos: int) -> str:
+    chunk = text[:pos].rstrip()
+    match = re.search(r"([A-Za-zÁÉÍÓÚÜÑáéíóúüñ]+)$", chunk)
+    return match.group(1) if match else ""
+
+
 def _sentence_spans(text: str) -> list[tuple[int, int]]:
+    """Corta en puntos de oración. No corta en espacios, decimales ni iniciales."""
     spans: list[tuple[int, int]] = []
     start = 0
     for match in re.finditer(r"\.(?:\s+|$)", text):
@@ -258,6 +280,9 @@ def _sentence_spans(text: str) -> list[tuple[int, int]]:
         prev = text[pos - 1] if pos > 0 else ""
         nxt = text[pos + 1] if pos + 1 < len(text) else ""
         if prev.isdigit() and nxt.isdigit():
+            continue
+        word = _word_before_period(text, pos)
+        if len(word) == 1 or word.casefold() in _ABBREVIATIONS:
             continue
         spans.append((start, pos + 1))
         start = match.end()
@@ -289,24 +314,95 @@ def _span_containing(index: int, spans: list[tuple[int, int]], length: int) -> t
 
 
 def _assertion_attributed(surface: str, claim_text: str) -> bool:
+    """El marcador tiene que estar en la cláusula donde cae el claim, no en otra."""
     folded = (surface or "").casefold()
     if not folded.strip():
         return False
-    tokens = [tok for tok in sorted(_content_tokens(claim_text), key=len, reverse=True) if len(tok) >= 4]
-    index = -1
-    for tok in tokens[:4]:
-        pos = folded.find(tok)
-        if pos >= 0:
-            index = pos
-            break
-    if index < 0:
+    tokens = [tok for tok in _content_tokens(claim_text) if len(tok) >= 4]
+    if not tokens:
         return False
-    sent_start, sent_end = _span_containing(index, _sentence_spans(folded), len(folded))
-    sentence = folded[sent_start:sent_end]
-    local = index - sent_start
-    ass_start, ass_end = _span_containing(local, _assertion_spans(sentence), len(sentence))
-    assertion = sentence[ass_start:ass_end]
-    return any(marker in assertion for marker in _ATTRIBUTION_MARKERS)
+    best = ""
+    best_score = 0
+    for sent_start, sent_end in _sentence_spans(folded):
+        sentence = folded[sent_start:sent_end]
+        for ass_start, ass_end in _assertion_spans(sentence):
+            clause = sentence[ass_start:ass_end]
+            score = sum(1 for tok in tokens if tok in clause)
+            if score > best_score:
+                best_score = score
+                best = clause
+    if best_score == 0:
+        return False
+    return any(marker in best for marker in _ATTRIBUTION_MARKERS)
+
+
+def assertions_are_attributed(text: str) -> bool:
+    """True solo si cada cláusula con contenido del fragmento trae su propio marcador."""
+    folded = (text or "").casefold().strip()
+    if not folded:
+        return False
+    saw = False
+    for sent_start, sent_end in _sentence_spans(folded):
+        sentence = folded[sent_start:sent_end]
+        for ass_start, ass_end in _assertion_spans(sentence):
+            clause = sentence[ass_start:ass_end].strip(" ,;:")
+            if len(_content_tokens(clause)) < 2:
+                continue
+            saw = True
+            if not any(marker in clause for marker in _ATTRIBUTION_MARKERS):
+                return False
+    return saw
+
+
+_FRAME_PREFIXES = (
+    "afirm",
+    "dijo",
+    "sostu",
+    "señal",
+    "senal",
+    "asegur",
+    "anunc",
+    "indic",
+    "inform",
+    "report",
+    "period",
+    "segun",
+    "según",
+    "acuerd",
+    "cobertur",
+    "fuente",
+)
+
+
+def _frame_token(token: str) -> bool:
+    return any(token.startswith(prefix) for prefix in _FRAME_PREFIXES)
+
+
+def asserted_link(surface: str, claim: dict[str, Any], decision: dict[str, Any] | None = None) -> LinkKind:
+    """Equivalencia de Audit. No cambia propositions_equivalent.
+
+    Un claim corto deja de ser equivalente si a la superficie le falta un token
+    informativo del claim (un disparo, un regreso). Quitar el hablante no alcanza
+    para tratar la proposición como otra.
+    """
+    kind = classify_link(surface, claim, decision)
+    if kind != "equivalent":
+        return kind
+    claim_toks = _content_tokens(_claim_text(claim))
+    surface_toks = _content_tokens(surface)
+    if not claim_toks or not surface_toks:
+        return kind
+    coverage = len(claim_toks & surface_toks) / len(claim_toks)
+    if coverage < 0.34:
+        return "partial"
+    missing = {
+        token
+        for token in (claim_toks - surface_toks)
+        if len(token) >= 6 and not _frame_token(token)
+    }
+    if len(claim_toks) <= 12 and missing and coverage < 0.7:
+        return "partial"
+    return "equivalent"
 
 
 def _is_modal(surface: str) -> bool:
@@ -387,7 +483,7 @@ def _surface_rule_findings(
     for claim in claims:
         cid = _claim_id(claim)
         decision = decisions.get(cid) if cid else None
-        kind = classify_link(text, claim, decision)
+        kind = asserted_link(text, claim, decision)
         if kind in {"partial", "mention"}:
             weak = True
             issues.append(

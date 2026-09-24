@@ -219,7 +219,7 @@ class AuditService:
         while True:
             bind_model_role(ModelRole.AUDITING.value, provider=self.settings.auditing_provider)
             structural = structural_findings(snapshot, article)
-            user_prompt = self._audit_user_prompt(article, article_context)
+            user_prompt = self._audit_user_prompt(article, article_context, snapshot)
             self.session.commit()
             llm_result = auditor.generate_structured(
                 system_prompt=load_prompt("article_audit.md"),
@@ -261,6 +261,16 @@ class AuditService:
             run.metadata_json = {**(run.metadata_json or {}), **base}
             self.session.flush()
 
+            tolerance = [
+                issue
+                for issue in result.issues
+                if "tolerada por la política editorial" in (issue.explanation or "")
+            ]
+            if tolerance:
+                base["headline_attribution_tolerance"] = True
+                base["headline_attribution_tolerance_claim_ids"] = [
+                    issue.claim_id for issue in tolerance if issue.claim_id
+                ]
             if result.passed:
                 base["reason"] = "passed"
                 base["cap_exhausted"] = False
@@ -268,7 +278,7 @@ class AuditService:
                 self.session.flush()
                 return base
 
-            if structural_blocks_rewrite(structural):
+            if structural_blocks_rewrite(result.issues):
                 base["reason"] = "structural_block"
                 base["cap_exhausted"] = False
                 base["passed"] = False
@@ -327,7 +337,12 @@ class AuditService:
 
         raise RuntimeError("audit_loop_escaped")
 
-    def _audit_user_prompt(self, article: Article, article_context: ArticleContext | None = None) -> str:
+    def _audit_user_prompt(
+        self,
+        article: Article,
+        article_context: ArticleContext | None = None,
+        snapshot: dict[str, Any] | None = None,
+    ) -> str:
         payload = {
             "headline": article.headline,
             "summary": article.summary,
@@ -341,13 +356,25 @@ class AuditService:
                        article_context.conflicting_claims, article_context.uncertain_claims,
                        article_context.disproven_claims, article_context.outdated_claims) for claim in bucket]
             related = {cid for claim in claims if claim.id in used for cid in claim.related_claim_ids}
+            decisions = (snapshot or {}).get("decision_by_claim_id") if isinstance(snapshot, dict) else {}
+            if not isinstance(decisions, dict):
+                decisions = {}
+
             def compact(claim):
+                decision = decisions.get(claim.id) if isinstance(decisions.get(claim.id), dict) else {}
+                basis = claim.support_basis.model_dump(
+                    exclude={"document_keys", "information_origins", "evaluated_canonical_text"}
+                ) if claim.support_basis else None
                 return {
                     "claim_id": claim.id, "claim_ref": claim.ref, "canonical_text": claim.canonical_text,
                     "claim_type": claim.claim_type, "importance": claim.importance.value,
                     "status": claim.status.value, "proposition_role": claim.proposition_role,
                     "final_reason": claim.final_reason, "related_claim_ids": claim.related_claim_ids,
-                    "support_basis": claim.support_basis.model_dump(exclude={"document_keys", "information_origins", "evaluated_canonical_text"}) if claim.support_basis else None,
+                    "support_basis": basis,
+                    "evaluation_state": decision.get("evaluation_state"),
+                    "public_rendering": decision.get("public_rendering"),
+                    "verified_scope": decision.get("verified_scope"),
+                    "unsupported_scope": decision.get("unsupported_scope"),
                 }
             payload["evidence_posture"] = [compact(c) for c in claims if c.id in used | related]
             # Headline/summary have no claim_refs in the current contract. These
@@ -357,18 +384,18 @@ class AuditService:
         extra = ""
         if article.published_version is not None:
             extra = (
-                "Esta es una candidata de actualización. Validala contra evidence_posture actual, "
-                "no contra el artículo live anterior. Marcá si Writing conservó una afirmación "
-                "DISPROVEN u OUTDATED, ocultó un conflicto, agregó algo no respaldado o eliminó "
-                "una atribución necesaria.\n"
+                "Esta es una candidata de actualización. Validala contra evidence_posture de esta versión, "
+                "no contra el artículo live anterior. La excepción de omisión en el titular solo aplica "
+                "si se cumplen todas sus condiciones. No trates un claim DISPROVEN como error por el solo "
+                "hecho de aparecer, si el texto lo atribuye y explica la refutación.\n"
             )
         return (
             extra
-            + "Auditá el lenguaje y que el nivel de certeza respete evidence_posture de esta versión. "
-            "Juzgá titular, bajada y lead por sí mismos: un cuerpo bien atribuido no sana un titular categórico. "
-            "No verifiques hechos ni reevalúes la evidencia o cobertura. "
-            "No reescribas el artículo; devolvé passed e issues. "
-            "Los candidatos adicionales solo sirven si se usan en titular/bajada; no exijas incluirlos.\n"
+            + "Aplicá las reglas del sistema. No verifiques hechos. No reescribas el artículo; devolvé passed e issues. "
+            "Una atribución en el cuerpo no cubre otra afirmación del titular, la bajada o el lead. "
+            "La excepción de omisión en el titular solo aplica si se cumplen todas sus condiciones. "
+            "Los candidatos adicionales solo sirven si se usan en titular o bajada; no exijas incluirlos. "
+            "No inventes evaluation_state, public_rendering ni scopes ausentes.\n"
             + json.dumps(payload, ensure_ascii=False)
         )
 

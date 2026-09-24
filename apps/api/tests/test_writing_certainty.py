@@ -122,10 +122,9 @@ def test_prompts_require_attribution_not_deletion() -> None:
     assert "dos o más claims SINGLE_SOURCE no autorizan" in writing
     assert "militante" in writing and "dirigente" in writing
     assert "no borres el dato" in writing.casefold()
-    assert "headline, summary o lead" in audit.casefold()
-    assert "la composición no eleva certeza" in audit
+    assert "bajada o el lead" in audit.casefold()
     assert "semantic_shift" in audit
-    assert "un cuerpo correctamente atribuido no sana" in audit.casefold()
+    assert "no cubre omisiones en la bajada o el lead" in audit.casefold()
 
 
 def test_writing_user_prompt_lists_single_source_and_forbids_synthesis(db_session: Session) -> None:
@@ -296,7 +295,7 @@ def test_case_g_semantic_elevation_fails(db_session: Session) -> None:
         issues=[_issue(issue_type=AuditIssueType.INFERENCE, reason=AuditIssueReason.SEMANTIC_SHIFT, text=text, claim_id=str(rows[0].id), claim_ref="C1")],
     )
     result, llm = _audit(db_session, event, result=fail)
-    assert "un cuerpo bien atribuido no sana un titular categórico" in llm.user_prompts[0]
+    assert "La excepción de omisión en el titular solo aplica si se cumplen todas sus condiciones." in llm.user_prompts[0]
     assert result["passed"] is False
     reasons = {issue["reason"] for issue in result["issues"]}
     assert "semantic_shift" in reasons or reasons & {"surface_categorical", "surface_attribution", "headline_uncovered"}
