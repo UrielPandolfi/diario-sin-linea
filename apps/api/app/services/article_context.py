@@ -6,7 +6,15 @@ from app.core.source_content import has_extracted_body
 from app.core.urls import canonicalize_url, url_domain
 from app.domain.enums import ClaimImportance, ClaimStatus, PipelineStatus
 from app.models import Claim, Entity, Event, EventEntity, PipelineRun
-from app.schemas.editorial_evidence import CoverageContract, EvaluationState, read_evaluation_state
+from app.schemas.editorial_evidence import (
+    CoverageContract,
+    EvaluationState,
+    evaluation_is_complete,
+    read_evaluation_state,
+    read_public_rendering,
+    read_reason_code,
+)
+from app.services.editorial_reason import public_resolution_fields
 from app.schemas.writing import (
     ArticleContext,
     ContextClaim,
@@ -43,6 +51,80 @@ _STATUS_BUCKET = {
 }
 
 VERIFICATION_STAGE = "verification"
+
+
+def _scope_text(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+def claim_contract_fields(row: dict | None) -> dict:
+    """Copy the paired decision's contract. Does not derive permissions from status.
+
+    Scopes and reason_code follow public_resolution_fields: only a complete
+    evaluation exposes them. skipped/pending/failed/absent stay non-granting.
+    """
+    if not isinstance(row, dict):
+        return {
+            "evaluation_state": None,
+            "reason_code": None,
+            "verified_scope": None,
+            "unsupported_scope": None,
+            "public_rendering": None,
+        }
+    public = public_resolution_fields(row)
+    complete = evaluation_is_complete(row)
+    return {
+        "evaluation_state": read_evaluation_state(row),
+        "reason_code": read_reason_code(row) if complete else None,
+        "verified_scope": _scope_text(public.get("verified_scope")),
+        "unsupported_scope": _scope_text(public.get("unsupported_scope")),
+        "public_rendering": read_public_rendering(row),
+    }
+
+
+def project_snapshot_contracts(context: ArticleContext, decisions: dict | None) -> None:
+    """Fill missing claim-contract fields from this snapshot's decisions.
+
+    In-memory only. A missing decision field stays unknown and is not granted.
+    """
+    if not isinstance(decisions, dict):
+        return
+    buckets = (
+        context.confirmed_claims,
+        context.single_source_claims,
+        context.conflicting_claims,
+        context.uncertain_claims,
+        context.disproven_claims,
+        context.outdated_claims,
+    )
+    for bucket in buckets:
+        for claim in bucket:
+            row = decisions.get(claim.id)
+            if not isinstance(row, dict):
+                continue
+            fields = claim_contract_fields(row)
+            if claim.evaluation_state is None and fields["evaluation_state"] is not None:
+                claim.evaluation_state = fields["evaluation_state"]
+            if claim.reason_code is None and fields["reason_code"] is not None:
+                claim.reason_code = fields["reason_code"]
+            if claim.verified_scope is None and fields["verified_scope"] is not None:
+                claim.verified_scope = fields["verified_scope"]
+            if claim.unsupported_scope is None and fields["unsupported_scope"] is not None:
+                claim.unsupported_scope = fields["unsupported_scope"]
+            if claim.public_rendering is None and fields["public_rendering"] is not None:
+                claim.public_rendering = fields["public_rendering"]
+
+
+def _raw_decision_map(verify_run: PipelineRun | None) -> dict[str, dict]:
+    if verify_run is None or verify_run.status != PipelineStatus.SUCCESS:
+        return {}
+    raw = (verify_run.metadata_json or {}).get("decision_by_claim_id") or {}
+    if not isinstance(raw, dict):
+        return {}
+    return {str(key): row for key, row in raw.items() if isinstance(row, dict)}
 
 
 def _truncate(value: str | None, limit: int) -> str | None:
@@ -237,6 +319,7 @@ def _to_context_claim(
     url_to_ref: dict[str, int],
     decision: ContextClaimDecision | None = None,
     related_claim_ids: list[str] | None = None,
+    contract: dict | None = None,
 ) -> ContextClaim:
     evidence = []
     for row in claim.evidence:
@@ -275,6 +358,11 @@ def _to_context_claim(
         final_reason=decision.final_reason if decision is not None else None,
         support_basis=decision.support_basis if decision is not None else None,
         related_claim_ids=related_claim_ids or [],
+        evaluation_state=(contract or {}).get("evaluation_state"),
+        reason_code=(contract or {}).get("reason_code"),
+        verified_scope=(contract or {}).get("verified_scope"),
+        unsupported_scope=(contract or {}).get("unsupported_scope"),
+        public_rendering=(contract or {}).get("public_rendering"),
     )
 
 
@@ -433,6 +521,7 @@ def build_article_context(
         claim_run=claim_run,
         live_coverage=live_coverage,
     )
+    raw_decisions = _raw_decision_map(verify_run)
 
     pool = list(event.claims)
     if claim_ids is not None:
@@ -480,6 +569,7 @@ def build_article_context(
                 url_to_ref=url_to_ref,
                 decision=decision,
                 related_claim_ids=related.get(str(claim.id)),
+                contract=claim_contract_fields(raw_decisions.get(str(claim.id))),
             )
         )
     return ArticleContext(

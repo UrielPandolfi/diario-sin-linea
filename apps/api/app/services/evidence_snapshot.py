@@ -291,9 +291,15 @@ def article_context_from_snapshot(snapshot: dict[str, Any] | None) -> ArticleCon
     if not isinstance(raw, dict):
         return None
     try:
-        return ArticleContext.model_validate(raw)
+        context = ArticleContext.model_validate(raw)
     except Exception:
         return None
+    decisions = snapshot.get("decision_by_claim_id")
+    if isinstance(decisions, dict):
+        from app.services.article_context import project_snapshot_contracts
+
+        project_snapshot_contracts(context, decisions)
+    return context
 
 
 def persist_snapshot_fields(snapshot: dict[str, Any]) -> dict[str, Any]:

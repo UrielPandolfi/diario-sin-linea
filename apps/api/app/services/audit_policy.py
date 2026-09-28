@@ -285,8 +285,421 @@ def structural_findings(snapshot: dict[str, Any] | None, article: Article) -> li
     return issues
 
 
-def structural_blocks_rewrite(issues: list[AuditIssue]) -> bool:
-    return any(issue.reason in _STRUCTURAL_REASONS and issue.severity in _BLOCKING for issue in issues)
+_ATTRIBUTION_REPAIR_REASONS = {
+    AuditIssueReason.SURFACE_ATTRIBUTION,
+    AuditIssueReason.SURFACE_CATEGORICAL,
+}
+_CONTEXT_CLAIM_KEYS = (
+    "confirmed_claims",
+    "single_source_claims",
+    "conflicting_claims",
+    "uncertain_claims",
+    "disproven_claims",
+    "outdated_claims",
+)
+_CONTRADICTION_STATUSES = {"CONFLICTING", "DISPROVEN"}
+_UNEVALUATED_STATES = {"skipped", "pending", "failed"}
+
+
+def structural_blocks_rewrite(
+    issues: list[AuditIssue],
+    article: Article | None = None,
+    snapshot: dict[str, Any] | None = None,
+) -> bool:
+    """True si algún estructural bloqueante no es una reparación de redacción.
+
+    Sin artículo o sin snapshot se cierra en bloqueo: no se infiere elegibilidad.
+    La atribución omitida y el recorte de un detalle accesorio pueden entrar al
+    ciclo existente. Un bloqueo de cobertura, contrato o centrales lo impide
+    aunque haya otro hallazgo reparable. No cambia passed ni el tope de reescrituras.
+    """
+    return any(_issue_blocks_rewrite(issue, article, snapshot) for issue in issues)
+
+
+def structural_issue_is_repairable(
+    issue: AuditIssue,
+    article: Article | None,
+    snapshot: dict[str, Any] | None,
+) -> bool:
+    if issue.reason not in _STRUCTURAL_REASONS or issue.severity not in _BLOCKING:
+        return False
+    return not _issue_blocks_rewrite(issue, article, snapshot)
+
+
+def rewrite_targets(
+    issues: list[AuditIssue],
+    article: Article | None,
+    snapshot: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Fragmento, issue y contrato de esta versión para la reescritura."""
+    rows: list[dict[str, Any]] = []
+    for issue in issues:
+        claim, decision, _unresolved = resolve_issue_claim(issue, snapshot)
+        if structural_issue_is_repairable(issue, article, snapshot) and issue.reason in _ATTRIBUTION_REPAIR_REASONS:
+            repair = "attribution"
+        elif (
+            structural_issue_is_repairable(issue, article, snapshot)
+            and issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE
+        ):
+            repair = "accessory_trim"
+        else:
+            repair = "other"
+        reason = issue.reason.value if issue.reason is not None else None
+        severity = issue.severity.value if issue.severity is not None else None
+        contract = _rewrite_contract(claim, decision)
+        if isinstance(contract, dict) and isinstance(snapshot, dict):
+            claim_id = str(contract.get("claim_id") or issue.claim_id or "")
+            contract["named_sources"] = _linked_source_names(snapshot, claim_id)
+        rows.append(
+            {
+                "fragment": issue.text,
+                "surface": issue.claim_ref,
+                "reason": reason,
+                "severity": severity,
+                "claim_id": issue.claim_id,
+                "repair": repair,
+                "contract": contract,
+            }
+        )
+    return rows
+
+
+def _issue_blocks_rewrite(
+    issue: AuditIssue,
+    article: Article | None,
+    snapshot: dict[str, Any] | None,
+) -> bool:
+    if issue.reason not in _STRUCTURAL_REASONS or issue.severity not in _BLOCKING:
+        return False
+    if article is None or not isinstance(snapshot, dict):
+        return True
+    if issue.reason in _ATTRIBUTION_REPAIR_REASONS and _attribution_repair_eligible(issue, snapshot):
+        return False
+    if issue.reason == AuditIssueReason.SURFACE_CONTRACT_INCOMPLETE and _accessory_trim_eligible(issue, article, snapshot):
+        return False
+    return True
+
+
+def _attribution_repair_eligible(issue: AuditIssue, snapshot: dict[str, Any]) -> bool:
+    claim, decision, unresolved = resolve_issue_claim(issue, snapshot)
+    if unresolved or not isinstance(decision, dict):
+        return False
+    from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state, read_public_rendering
+
+    if read_evaluation_state(decision) != EvaluationState.COMPLETE:
+        return False
+    rendering = read_public_rendering(decision)
+    if rendering is None or rendering.attribution_required is not True:
+        return False
+    claim_id = str(issue.claim_id or "") or _claim_id(claim or {}) or ""
+    return _provenance_identifiable(snapshot, claim_id, decision, claim)
+
+
+def _accessory_trim_eligible(issue: AuditIssue, article: Article, snapshot: dict[str, Any]) -> bool:
+    if not (issue.text or "").strip():
+        return False
+    claim, decision, unresolved = resolve_issue_claim(issue, snapshot)
+    if unresolved or not isinstance(decision, dict):
+        return False
+    from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state, read_public_rendering
+
+    state = read_evaluation_state(decision)
+    if state is None or state == EvaluationState.COMPLETE:
+        return False
+    if state.value not in _UNEVALUATED_STATES:
+        return False
+    if read_public_rendering(decision) is not None:
+        return False
+    if _material_contradiction(decision, claim):
+        return False
+    established, central_ids, central_rows = _core_coverage_established(snapshot)
+    if not established:
+        return False
+    claim_id = str(issue.claim_id or "") or _claim_id(claim or {}) or ""
+    if not claim_id or claim_id in central_ids:
+        return False
+    if not _centrals_remain_outside_fragment(article, snapshot, issue.text or "", central_rows):
+        return False
+    if _fragment_is_only_material_caveat(article, snapshot, issue.text or ""):
+        return False
+    return True
+
+
+def _provenance_identifiable(
+    snapshot: dict[str, Any],
+    claim_id: str,
+    decision: dict[str, Any],
+    claim: dict[str, Any] | None,
+) -> bool:
+    basis = _support_basis(decision, claim)
+    if _information_origins(basis):
+        return True
+    if _positive_int(basis.get("documents_supporting")) and _linked_source_names(snapshot, claim_id):
+        return True
+    return False
+
+
+def _support_basis(decision: dict[str, Any] | None, claim: dict[str, Any] | None) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for row in (decision, claim):
+        if not isinstance(row, dict):
+            continue
+        basis = row.get("support_basis")
+        if isinstance(basis, dict):
+            candidates.append(basis)
+    for basis in candidates:
+        if _information_origins(basis) or _positive_int(basis.get("documents_supporting")):
+            return basis
+    return candidates[0] if candidates else {}
+
+
+def _information_origins(basis: dict[str, Any]) -> list[str]:
+    raw = basis.get("information_origins")
+    if not isinstance(raw, list):
+        return []
+    return [str(item).strip() for item in raw if str(item).strip()]
+
+
+def _positive_int(value: Any) -> bool:
+    try:
+        return int(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _material_contradiction(decision: dict[str, Any], claim: dict[str, Any] | None) -> bool:
+    status = str(decision.get("status") or "")
+    if status in _CONTRADICTION_STATUSES:
+        return True
+    basis = _support_basis(decision, claim)
+    for key in ("documents_qualifying", "documents_contradicting"):
+        raw = basis.get(key)
+        if raw is None:
+            continue
+        try:
+            if int(raw) > 0:
+                return True
+        except (TypeError, ValueError):
+            return True
+    return False
+
+
+def _coverage_maps(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    coverage = snapshot.get("coverage")
+    if isinstance(coverage, dict):
+        rows.append(coverage)
+    verification = snapshot.get("verification")
+    if isinstance(verification, dict):
+        rows.append(verification)
+    context = snapshot.get("article_context")
+    if isinstance(context, dict) and isinstance(context.get("verification"), dict):
+        rows.append(context["verification"])
+    return rows
+
+
+def _flag_true(snapshot: dict[str, Any], key: str) -> bool:
+    if snapshot.get(key) is True:
+        return True
+    return any(row.get(key) is True for row in _coverage_maps(snapshot))
+
+
+def _has_central_unverified(snapshot: dict[str, Any]) -> bool:
+    raw = snapshot.get("central_unverified")
+    if isinstance(raw, list) and raw:
+        return True
+    for row in _coverage_maps(snapshot):
+        nested = row.get("central_unverified")
+        if isinstance(nested, list) and nested:
+            return True
+    return False
+
+
+def _expected_central_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]] | None:
+    found: list[list[Any]] = []
+    for row in _coverage_maps(snapshot):
+        if "expected_central" not in row:
+            continue
+        value = row.get("expected_central")
+        if not isinstance(value, list):
+            return None
+        found.append(value)
+    if not found:
+        return None
+    first = found[0]
+    if any(other != first for other in found[1:]):
+        return None
+    if not all(isinstance(item, dict) for item in first):
+        return None
+    return first
+
+
+def _core_coverage_established(
+    snapshot: dict[str, Any],
+) -> tuple[bool, list[str], list[dict[str, Any]]]:
+    """Cobertura central ya registrada. expected_central vacío no alcanza."""
+    if (
+        _flag_true(snapshot, "coverage_gap")
+        or _flag_true(snapshot, "verification_incomplete")
+        or _flag_true(snapshot, "stale_verification")
+        or _has_central_unverified(snapshot)
+    ):
+        return False, [], []
+    rows = _expected_central_rows(snapshot)
+    if not rows:
+        return False, [], []
+    _claims, decisions, _refs = _snapshot_claim_index(snapshot)
+    from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state, read_public_rendering
+
+    ids: list[str] = []
+    for row in rows:
+        match = str(row.get("match") or "")
+        if match != _EQUIVALENT:
+            return False, [], []
+        cid = str(row.get("match_claim_id") or "")
+        if not cid:
+            return False, [], []
+        decision = decisions.get(cid)
+        if not isinstance(decision, dict) or read_evaluation_state(decision) != EvaluationState.COMPLETE:
+            return False, [], []
+        if read_public_rendering(decision) is None:
+            return False, [], []
+        if str(decision.get("status") or "") in _CONTRADICTION_STATUSES:
+            return False, [], []
+        ids.append(cid)
+    return True, ids, rows
+
+
+def _article_texts(article: Article) -> list[str]:
+    texts: list[str] = []
+    for value in article_surface_map(article).values():
+        if value.strip():
+            texts.append(value.strip())
+    for part in split_body_paragraphs(article.body or ""):
+        if part.strip():
+            texts.append(part.strip())
+    blocks = article.body_blocks if isinstance(getattr(article, "body_blocks", None), list) else []
+    for block in blocks:
+        plain = (block_plain_text(block) or "").strip()
+        if plain:
+            texts.append(plain)
+    return texts
+
+
+def _normalized(text: str) -> str:
+    return " ".join((text or "").split())
+
+
+def _claim_for_match(snapshot: dict[str, Any], claim_id: str, row: dict[str, Any]) -> dict[str, Any]:
+    claims, _decisions, _refs = _snapshot_claim_index(snapshot)
+    claim = claims.get(claim_id)
+    if isinstance(claim, dict) and (claim.get("canonical_text") or claim.get("text")):
+        return claim
+    proposition = str(row.get("proposition") or "").strip()
+    if proposition:
+        return {"id": claim_id, "canonical_text": proposition}
+    return claim or {"id": claim_id}
+
+
+def _texts_state_claim(texts: list[str], claim: dict[str, Any], decision: dict[str, Any] | None) -> bool:
+    from app.services.surface_validation import asserted_link
+
+    return any(asserted_link(text, claim, decision) == "equivalent" for text in texts)
+
+
+def _centrals_remain_outside_fragment(
+    article: Article,
+    snapshot: dict[str, Any],
+    fragment: str,
+    central_rows: list[dict[str, Any]],
+) -> bool:
+    remaining = [text for text in _article_texts(article) if _normalized(text) != _normalized(fragment)]
+    _claims, decisions, _refs = _snapshot_claim_index(snapshot)
+    for row in central_rows:
+        cid = str(row.get("match_claim_id") or "")
+        claim = _claim_for_match(snapshot, cid, row)
+        if not _texts_state_claim(remaining, claim, decisions.get(cid)):
+            return False
+    return True
+
+
+def _fragment_is_only_material_caveat(article: Article, snapshot: dict[str, Any], fragment: str) -> bool:
+    """La salvedad atribuida solo vive en el fragmento que se recortaría."""
+    from app.schemas.editorial_evidence import EvaluationState, read_evaluation_state, read_public_rendering
+
+    claims, decisions, _refs = _snapshot_claim_index(snapshot)
+    others = [text for text in _article_texts(article) if _normalized(text) != _normalized(fragment)]
+    for cid, decision in decisions.items():
+        if not isinstance(decision, dict) or read_evaluation_state(decision) != EvaluationState.COMPLETE:
+            continue
+        rendering = read_public_rendering(decision)
+        if rendering is None or rendering.attribution_required is not True:
+            continue
+        claim = claims.get(cid) or {"id": cid}
+        if not _texts_state_claim([fragment], claim, decision):
+            continue
+        if not _texts_state_claim(others, claim, decision):
+            return True
+    return False
+
+
+def _linked_source_names(snapshot: dict[str, Any], claim_id: str) -> list[str]:
+    context = snapshot.get("article_context") if isinstance(snapshot.get("article_context"), dict) else {}
+    names_by_ref: dict[int, str] = {}
+    for source in context.get("sources") or []:
+        if not isinstance(source, dict) or source.get("ref") is None:
+            continue
+        name = str(source.get("name") or "").strip()
+        if not name:
+            continue
+        try:
+            names_by_ref[int(source["ref"])] = name
+        except (TypeError, ValueError):
+            continue
+    found: list[str] = []
+    for key in _CONTEXT_CLAIM_KEYS:
+        for claim in context.get(key) or []:
+            if not isinstance(claim, dict) or str(claim.get("id") or "") != claim_id:
+                continue
+            for evidence in claim.get("evidence") or []:
+                if not isinstance(evidence, dict) or evidence.get("source_ref") is None:
+                    continue
+                try:
+                    name = names_by_ref.get(int(evidence["source_ref"]))
+                except (TypeError, ValueError):
+                    name = None
+                if name and name not in found:
+                    found.append(name)
+    return found
+
+
+def _rewrite_contract(claim: dict[str, Any] | None, decision: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not isinstance(decision, dict) and not isinstance(claim, dict):
+        return None
+    from app.schemas.editorial_evidence import read_evaluation_state, read_public_rendering
+    from app.services.editorial_reason import public_resolution_fields
+
+    source = decision if isinstance(decision, dict) else {}
+    fields = public_resolution_fields(source)
+    state = read_evaluation_state(source)
+    rendering = read_public_rendering(source)
+    basis = _support_basis(source, claim if isinstance(claim, dict) else None)
+    claim_id = ""
+    if isinstance(claim, dict):
+        claim_id = _claim_id(claim) or ""
+    if not claim_id:
+        claim_id = str(source.get("claim_id") or "")
+    return {
+        "claim_id": claim_id or None,
+        "status": source.get("status"),
+        "evaluation_state": state.value if state is not None else None,
+        "reason_code": fields.get("reason_code"),
+        "verified_scope": fields.get("verified_scope"),
+        "unsupported_scope": fields.get("unsupported_scope"),
+        "public_rendering": rendering.model_dump() if rendering is not None else None,
+        "information_origins": _information_origins(basis),
+        "named_sources": [],
+    }
 
 
 def blocking_issues(issues: list[AuditIssue]) -> list[AuditIssue]:

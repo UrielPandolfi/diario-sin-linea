@@ -145,8 +145,12 @@ def test_writing_user_prompt_lists_single_source_and_forbids_synthesis(db_sessio
     prompt = WritingService(db_session)._user_prompt(build_article_context(event))
     assert "Recalde posee 1° A." in prompt
     assert "Calle adquirió 1° B." in prompt
-    assert "síntesis categórica" in prompt
-    assert "titular, bajada y primer párrafo" in prompt
+    assert "unsupported_scope" in prompt
+    assert "categorical_allowed" in prompt
+    assert "event.working_title no obliga" in prompt
+    writing = load_prompt("article_writing.md")
+    assert "síntesis categórica" in writing
+    assert "titular, bajada y primer párrafo" in writing.casefold()
 
 
 def test_case_a_categorical_headline_fails(db_session: Session) -> None:

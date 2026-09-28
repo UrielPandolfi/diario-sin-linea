@@ -1,17 +1,15 @@
 # Handoff
 
-**Fecha:** 2026-09-24
+**Fecha:** 2026-09-28
 
-**Tarea:** PublishService usa la misma normalización de Audit para la omisión de titular. Sin commit ni publicación operativa.
+**Tarea:** Validar en base de test la reescritura acotada y, sobre la base operativa, auditar la candidata vigente de cada artículo. Publicar solo lo que aprueba. Sin commit. Beat no se arrancó. `AUTO_PUBLISH` sigue en `false`.
 
 ## Resultado
 
-`_audit_passed_for_current` sigue exigiendo Audit `passed` de esa versión y un snapshot atado. Los estructurales se revalidan con `normalized_structural_issues`. La omisión tolerada del titular no vuelve a bloquear. Integridad, cobertura y correspondencia sí.
+Pytest en la imagen de API, contra `sin_linea_test`: 100 pruebas de audit, publish, superficies, certeza y trazabilidad. Las dos que leen el export pasan si el archivo está montado. La política no relaja el tope ni `published_version`.
+
+Corrida real por el worker, una candidata por artículo. Publicados: Formosa `fe26e42b` v2 (1 reescritura), triple crimen `88184369` v1, Esteche `78638d2c` v1, La Tablada `fa0fa66a` v3. Siguen en la versión pública anterior: resolución AMIA `b8343be8` v2 y Rafecas `a3dc7124` v2. Sin publicar: Milei por cobertura y vigencia, Cristina por contrato incompleto junto con atribución, Formosa Gran Guardia `ab70f815` por central sin verificar.
 
 ## Pendiente
 
-Recorrido `DISPROVEN` hasta Writing y el frontend. Formosa en conjunto, cobertura Esteche/Interpol, contratos equivalentes de Rafecas, selección de Verification y duplicados de sucesos quedan fuera.
-
-## Validación
-
-Prueba de integración en Postgres descartable: Florencio Varela V1, un caso sintético equivalente, y los negativos de excepción e integridad.
+Beat no está en marcha; su configuración no se cambió. No hay artículos ya publicados sin candidata pendiente.

@@ -4,7 +4,12 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.domain.enums import ClaimImportance, ClaimStatus, EntityType, EventSourceRelation, EvidenceType
-from app.schemas.editorial_evidence import SupportBasis
+from app.schemas.editorial_evidence import (
+    OptionalEvaluationState,
+    OptionalPublicRendering,
+    OptionalReasonCode,
+    SupportBasis,
+)
 
 
 class ArticleDraftSegment(BaseModel):
@@ -99,6 +104,12 @@ class ContextClaim(BaseModel):
     final_reason: str | None = None
     support_basis: ContextSupportBasis | None = None
     related_claim_ids: list[str] = Field(default_factory=list)
+    # Copiados de la decisión pareada. Ausentes = desconocidos; no conceden permisos.
+    evaluation_state: OptionalEvaluationState = None
+    reason_code: OptionalReasonCode = None
+    verified_scope: str | None = None
+    unsupported_scope: str | None = None
+    public_rendering: OptionalPublicRendering = None
 
 
 class ContextEntity(BaseModel):

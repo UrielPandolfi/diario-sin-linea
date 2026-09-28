@@ -405,20 +405,15 @@ class WritingService:
         )
 
     def _user_prompt(self, article_context) -> str:
-        weak = [
-            f"{claim.ref} ({claim.status.value}): {claim.canonical_text}"
-            for claim in (*article_context.single_source_claims, *article_context.uncertain_claims)
-        ]
-        reminder = ""
-        if weak:
-            reminder = (
-                "Claims SINGLE_SOURCE o UNCERTAIN: pueden incluirse, pero no los escribas como "
-                "hecho categórico de Sin Línea. En titular, bajada y primer párrafo la atribución "
-                "o el lenguaje epistémico es obligatorio. Combinar dos SINGLE_SOURCE no autoriza "
-                "una síntesis categórica ni eleva la certeza.\n"
-                + "\n".join(weak)
-                + "\n\n"
-            )
+        reminder = (
+            "En cada claim leé evaluation_state, reason_code, verified_scope, unsupported_scope "
+            "y public_rendering junto con status y support_basis. Esos permisos limitan la narración; "
+            "no son evidencia nueva. Un campo ausente no autoriza voz propia ni amplía el alcance. "
+            "No afirmes unsupported_scope: «según» o un condicional no lo respaldan. "
+            "Si attribution_required es true, identificá la procedencia en la misma cláusula. "
+            "Si categorical_allowed es true, podés usar voz propia dentro de verified_scope. "
+            "event.working_title no obliga a repetir detalles fuera de esos alcances.\n\n"
+        )
         coverage_gap = bool(getattr(article_context.verification, "coverage_gap", False))
         if coverage_gap:
             reminder += (

@@ -25,6 +25,7 @@ from app.schemas.writing import ArticleContext, ArticleDraft
 from app.services.article_service import ArticleService
 from app.services.audit_policy import (
     merge_audit_result,
+    rewrite_targets,
     structural_blocks_rewrite,
     structural_findings,
 )
@@ -237,7 +238,10 @@ class AuditService:
                 issue
                 for issue in result.issues
                 if issue.severity in (AuditIssueSeverity.HIGH, AuditIssueSeverity.MEDIUM)
-                and not (issue.reason and structural_blocks_rewrite([issue]))
+                and not (
+                    issue.reason
+                    and structural_blocks_rewrite([issue], article=article, snapshot=snapshot)
+                )
             ]
             issues = [issue.model_dump(mode="json") for issue in result.issues]
             bound_snapshot = bind_snapshot_to_version(snapshot, article.current_version) if snapshot else None
@@ -278,7 +282,7 @@ class AuditService:
                 self.session.flush()
                 return base
 
-            if structural_blocks_rewrite(result.issues):
+            if structural_blocks_rewrite(result.issues, article=article, snapshot=snapshot):
                 base["reason"] = "structural_block"
                 base["cap_exhausted"] = False
                 base["passed"] = False
@@ -299,7 +303,9 @@ class AuditService:
             bind_model_role(ModelRole.WRITING.value, provider=self.settings.writing_provider)
             if article_context is None:
                 raise RuntimeError("article_context_missing_for_rewrite")
-            rewrite_prompt = self._rewrite_user_prompt(article_context, article, rewrite_issues)
+            rewrite_prompt = self._rewrite_user_prompt(
+                article_context, article, rewrite_issues, snapshot=snapshot
+            )
             self.session.commit()
             draft = writer.generate_structured(
                 system_prompt=load_prompt("article_writing.md"),
@@ -399,7 +405,13 @@ class AuditService:
             + json.dumps(payload, ensure_ascii=False)
         )
 
-    def _rewrite_user_prompt(self, article_context: ArticleContext, article: Article, issues: list[AuditIssue]) -> str:
+    def _rewrite_user_prompt(
+        self,
+        article_context: ArticleContext,
+        article: Article,
+        issues: list[AuditIssue],
+        snapshot: dict[str, Any] | None = None,
+    ) -> str:
         payload = {
             "context": json.loads(article_context.model_dump_json()),
             "draft": {
@@ -409,11 +421,21 @@ class AuditService:
                 "body_blocks": article.body_blocks,
             },
             "issues": [issue.model_dump(mode="json") for issue in issues],
+            "reparaciones": rewrite_targets(issues, article, snapshot),
         }
         return (
-            "Corregí el sesgo o el exceso de certeza señalado, respetando el support_basis del snapshot. "
-            "Si el exceso está en titular, bajada o lead, atribuí o calificá ahí; no borres el dato. "
-            "Preservá datos, citas literales y atribuciones. "
+            "Corregí solo los fragmentos de reparaciones, con cambios mínimos. "
+            "Conservá el foco del suceso, los datos respaldados y las salvedades materiales. "
+            "Respetá evaluation_state, verified_scope, unsupported_scope y public_rendering del context "
+            "junto con support_basis; un campo ausente no autoriza voz propia ni unsupported_scope. "
+            "Si repair es attribution, conservá el dato y atribuilo en la misma cláusula "
+            "con la procedencia ya registrada en information_origins o named_sources. "
+            "No inventes emisores ni antepongas «según» si no identifica esa procedencia. "
+            "Si repair es accessory_trim, recortá solo ese detalle fuera de alcance. "
+            "No borres el hecho central ni una salvedad material de atribución, límite o refutación. "
+            "Un contrato incompleto no autoriza a borrar el núcleo. "
+            "Si el exceso de certeza está en titular, bajada o lead, atribuí o calificá ahí; no borres el dato. "
+            "Preservá citas literales y atribuciones. "
             "No neutralices declaraciones claramente atribuidas. "
             "No inventes hechos ni uses el context para reabrir verificación factual. "
             "Devolvé body_blocks con claim_refs C1/C2, nunca UUIDs.\n\n"
