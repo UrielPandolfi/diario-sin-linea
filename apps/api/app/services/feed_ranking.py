@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import UUID
 
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, aliased, selectinload
 
 from app.core.article_body import claim_ids_in_body_blocks
 from app.core.clock import utc_now
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 from app.domain.enums import ArticleStatus, ClaimImportance, ClaimStatus, CorrectionKind, EventStatus, EventUpdateType, EvidenceType
 from app.models import (
     Article,
@@ -39,7 +39,20 @@ from app.services.evidence_snapshot import (
     snapshot_evaluated_texts,
     snapshot_sources_by_ref,
 )
+from app.services.feed_score import (
+    PrincipalWeights,
+    base_score,
+    build_profile,
+    empty_profile,
+    freshness_unit,
+    principal_reference,
+    principal_score,
+    proximity,
+    relevance_unit,
+    resolve_place,
+)
 from app.services.hero_image_service import fill_missing_hero
+from app.services.reader_engagement import signal_ids
 from app.services.verification_outcome import verification_view_for_event, view_from_evidence_snapshot
 
 PUBLIC_CANDIDATE_CAP = 200
@@ -430,7 +443,24 @@ class FeedRankingService:
         self.articles = ArticleRepository(session)
         self.events = EventRepository(session)
 
-    def feed(self, *, scope: str, locality: str | None, limit: int, cursor: str | None) -> dict:
+    def feed(
+        self,
+        *,
+        scope: str,
+        locality: str | None,
+        limit: int,
+        cursor: str | None,
+        sort: str | None = None,
+        reader_id: UUID | None = None,
+    ) -> dict:
+        if sort is not None and str(sort).strip():
+            return self._sorted_feed(
+                sort=str(sort),
+                locality=locality,
+                limit=limit,
+                cursor=cursor,
+                reader_id=reader_id,
+            )
         scope = (scope or "main").casefold().strip()
         if scope not in {"main", "local", "argentina"}:
             raise ValueError("invalid_scope")
@@ -563,26 +593,35 @@ class FeedRankingService:
         return {"items": items}
 
     def get_article(self, key: str) -> dict | None:
-        article = None
-        event = None
-        try:
-            public_id = UUID(key)
-            event = self.events.get_by_public_id(public_id)
-            if event is not None:
-                article = self.articles.get_by_event_id(event.id)
-        except ValueError:
-            article = self.articles.get_by_slug(key)
-            if article is not None:
-                event = self.events.get(article.event_id)
-        if article is None or event is None:
-            return None
-        if not self._is_public(event, article):
+        article, event = self._lookup(key)
+        if article is None or event is None or not self._is_public(event, article):
             return None
         live = live_content(self.session, article)
         if live is None:
             return None
         event = self._event_with_sources(event.id) or event
         return article_payload(event, article, live, session=self.session)
+
+    def public_event_id(self, key: str) -> UUID | None:
+        article, event = self._lookup(key)
+        if article is None or event is None or not self._is_public(event, article):
+            return None
+        if live_content(self.session, article) is None:
+            return None
+        return event.id
+
+    def _lookup(self, key: str) -> tuple[Article | None, Event | None]:
+        try:
+            public_id = UUID(key)
+        except ValueError:
+            article = self.articles.get_by_slug(key)
+            if article is None:
+                return None, None
+            return article, self.events.get(article.event_id)
+        event = self.events.get_by_public_id(public_id)
+        if event is None:
+            return None, None
+        return self.articles.get_by_event_id(event.id), event
 
     def _is_public(self, event: Event, article: Article) -> bool:
         if article.published_at is None or article.published_version is None:
@@ -607,7 +646,7 @@ class FeedRankingService:
         )
         return self.session.scalars(stmt).first()
 
-    def _load_public(self) -> list[tuple[Event, Article, ArticleVersion]]:
+    def _load_public(self, *, cap: int | None = PUBLIC_CANDIDATE_CAP) -> list[tuple[Event, Article, ArticleVersion]]:
         live = aliased(ArticleVersion)
         stmt: Select = (
             select(Event, Article, live)
@@ -623,9 +662,98 @@ class FeedRankingService:
             )
             .where(*public_filters())
             .order_by(Article.published_at.desc())
-            .limit(PUBLIC_CANDIDATE_CAP)
         )
+        if cap is not None:
+            stmt = stmt.limit(cap)
         return [(event, article, live_row) for event, article, live_row in self.session.execute(stmt)]
+
+    def _sorted_feed(
+        self,
+        *,
+        sort: str,
+        locality: str | None,
+        limit: int,
+        cursor: str | None,
+        reader_id: UUID | None,
+    ) -> dict:
+        mode = sort.casefold().strip()
+        if mode not in {"principal", "latest"}:
+            raise ValueError("invalid_sort")
+        now = utc_now()
+        if cursor:
+            as_of, after_id = _decode_home_cursor(
+                cursor,
+                now=now,
+                max_age=self.settings.feed_cursor_max_age_seconds,
+            )
+        else:
+            as_of, after_id = now, None
+        rows = self._load_public(cap=None)
+        if mode == "latest":
+            ordered = sorted(rows, key=lambda row: (-_timestamp(row[1].published_at), str(row[1].id)))
+        else:
+            ordered = self._rank_principal(rows, locality=locality, reader_id=reader_id, as_of=as_of)
+        start = 0
+        if after_id is not None:
+            found = next((index + 1 for index, row in enumerate(ordered) if row[1].id == after_id), None)
+            if found is None:
+                raise ValueError("invalid_cursor")
+            start = found
+        window = ordered[start : start + limit]
+        items = [card_payload(event, article, live, session=self.session) for event, article, live in window]
+        next_cursor = (
+            _encode_home_cursor(as_of, window[-1][1].id)
+            if len(window) == limit and start + limit < len(ordered)
+            else None
+        )
+        return {"items": items, "next_cursor": next_cursor}
+
+    def _rank_principal(
+        self,
+        rows: list[tuple[Event, Article, ArticleVersion]],
+        *,
+        locality: str | None,
+        reader_id: UUID | None,
+        as_of: datetime,
+    ) -> list[tuple[Event, Article, ArticleVersion]]:
+        weights = _principal_weights(self.settings)
+        locality_selected = bool((locality or "").strip())
+        place = (
+            resolve_place([(event.country_code, event.province, event.locality) for event, _article, _live in rows], locality)
+            if locality_selected
+            else None
+        )
+        profile = empty_profile()
+        if reader_id is not None:
+            reads, likes = signal_ids(
+                self.session,
+                reader_id,
+                since=as_of - timedelta(days=self.settings.feed_signal_window_days),
+            )
+            public_ids = {event.id for event, _article, _live in rows}
+            event_types = {
+                event.id: event.event_type
+                for event, _article, _live in rows
+                if event.id in reads or event.id in likes
+            }
+            profile = build_profile(event_types, reads & public_ids, likes & public_ids, weights=weights)
+        scored: list[tuple[float, datetime, Event, Article, ArticleVersion]] = []
+        for event, article, live in rows:
+            reference = principal_reference(event.last_material_update_at, article.published_at)
+            unit = relevance_unit(event.relevance_score, missing=weights.missing_relevance)
+            fresh = freshness_unit(reference, as_of, halflife_hours=weights.freshness_halflife_hours)
+            near = proximity(event.country_code, event.province, event.locality, place)
+            base = base_score(
+                relevance=unit,
+                freshness=fresh,
+                proximity_value=near,
+                locality_selected=locality_selected,
+                weights=weights,
+            )
+            score = principal_score(base, profile, event.event_type, weights=weights)
+            scored.append((score, reference or article.published_at or as_of, event, article, live))
+        scored.sort(key=lambda row: (-row[0], -_timestamp(row[1]), str(row[3].id)))
+        return [(event, article, live) for _score, _tie, event, article, live in scored]
 
     def _rank_row(
         self,
@@ -692,3 +820,42 @@ def _decode_id_cursor(cursor: str) -> UUID:
         return UUID(cursor)
     except ValueError as exc:
         raise ValueError("invalid_cursor") from exc
+
+
+def _timestamp(value: datetime | None) -> float:
+    if value is None:
+        return 0.0
+    return value.timestamp()
+
+
+def _principal_weights(settings: Settings) -> PrincipalWeights:
+    return PrincipalWeights(
+        relevance=settings.feed_principal_relevance_weight,
+        freshness=settings.feed_principal_freshness_weight,
+        locality=settings.feed_principal_locality_weight,
+        affinity_boost=settings.feed_affinity_boost,
+        confidence_events=settings.feed_affinity_confidence_events,
+        read_weight=settings.feed_read_weight,
+        like_weight=settings.feed_like_weight,
+        freshness_halflife_hours=settings.feed_freshness_halflife_hours,
+        missing_relevance=settings.feed_missing_relevance,
+    )
+
+
+def _encode_home_cursor(as_of: datetime, article_id: UUID) -> str:
+    return f"h1.{int(as_of.timestamp())}.{article_id}"
+
+
+def _decode_home_cursor(cursor: str, *, now: datetime, max_age: int) -> tuple[datetime, UUID]:
+    parts = cursor.split(".")
+    if len(parts) != 3 or parts[0] != "h1":
+        raise ValueError("invalid_cursor")
+    try:
+        stamp = int(parts[1])
+        article_id = UUID(parts[2])
+    except ValueError as exc:
+        raise ValueError("invalid_cursor") from exc
+    as_of = datetime.fromtimestamp(stamp, tz=timezone.utc)
+    if as_of > now + timedelta(seconds=60) or (now - as_of).total_seconds() > max_age:
+        raise ValueError("invalid_cursor")
+    return as_of, article_id

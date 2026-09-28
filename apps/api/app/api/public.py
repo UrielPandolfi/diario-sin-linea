@@ -1,3 +1,4 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -5,6 +6,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.api.deps import DbSession, require_reader
 from app.models import ArticleHeroImage
+from app.models.reader import Reader
 from app.services.feed_ranking import DEFAULT_LIMIT, FeedRankingService, clamp_limit
 from app.services.search_service import SearchService
 
@@ -47,16 +49,25 @@ def get_article(key: str, db: DbSession) -> dict:
     return payload
 
 
-@router.get("/feed", dependencies=[Depends(require_reader)])
+@router.get("/feed")
 def feed(
     db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
     scope: str = "main",
+    sort: str | None = None,
     locality: str | None = None,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
 ) -> JSONResponse:
     try:
-        payload = FeedRankingService(db).feed(scope=scope, locality=locality, limit=clamp_limit(limit), cursor=cursor)
+        payload = FeedRankingService(db).feed(
+            scope=scope,
+            locality=locality,
+            limit=clamp_limit(limit),
+            cursor=cursor,
+            sort=sort,
+            reader_id=reader.id,
+        )
     except ValueError as exc:
         raise _public_error(exc) from exc
     return JSONResponse(payload, headers={"Cache-Control": "private, no-store"})

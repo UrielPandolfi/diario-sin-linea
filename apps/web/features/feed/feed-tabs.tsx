@@ -1,20 +1,16 @@
 "use client";
 
+import { parseVista, type HomeVista } from "@/lib/feed/vista";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 
 const TABS = [
-  { id: "para-vos", label: "Para vos", href: "/" },
-  { id: "local", label: "Local", href: "/?vista=local" },
-  { id: "argentina", label: "Argentina", href: "/?vista=argentina" },
+  { id: "principal", label: "Principal", href: "/" },
+  { id: "ultimas", label: "Últimas", href: "/?vista=ultimas" },
 ] as const;
 
-export type HomeVista = "para-vos" | "local" | "argentina";
-
-export function parseVista(value: string | null): HomeVista {
-  if (value === "local" || value === "argentina") return value;
-  return "para-vos";
-}
+export type { HomeVista };
+export { parseVista };
 
 export function FeedTabs() {
   const pathname = usePathname();

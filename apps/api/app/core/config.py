@@ -138,6 +138,18 @@ class Settings(BaseSettings):
     feed_relevance_weight: float = 1.0
     feed_freshness_weight: float = 1.0
     feed_locality_weight: float = 1.0
+    # Principal. The three weights above stay on the legacy scope ranking used by /local.
+    feed_principal_relevance_weight: float = 0.45
+    feed_principal_freshness_weight: float = 0.35
+    feed_principal_locality_weight: float = 0.20
+    feed_affinity_boost: float = 0.15
+    feed_affinity_confidence_events: int = 5
+    feed_signal_window_days: int = 30
+    feed_read_weight: float = 1.0
+    feed_like_weight: float = 3.0
+    feed_freshness_halflife_hours: float = 24.0
+    feed_missing_relevance: float = 0.5
+    feed_cursor_max_age_seconds: int = 3600
     nearby_window_hours: int = 12
     trusted_proxies: str = ""
 

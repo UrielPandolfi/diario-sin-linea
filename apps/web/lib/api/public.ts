@@ -59,13 +59,15 @@ export async function publicGet<T>(path: string, params?: Record<string, string 
 }
 
 export function fetchFeed(options: {
-  scope: FeedScope;
+  scope?: FeedScope;
+  sort?: "principal" | "latest";
   locality?: string;
   cursor?: string | null;
   limit?: number;
 }): Promise<CursorPage> {
   return publicGet<CursorPage>("/api/v1/feed", {
-    scope: options.scope,
+    scope: options.sort ? undefined : options.scope,
+    sort: options.sort,
     locality: options.locality,
     cursor: options.cursor ?? undefined,
     limit: options.limit,

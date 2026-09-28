@@ -1,23 +1,11 @@
 "use client";
 
 import { FeedList } from "@/features/feed/feed-list";
-import { FeedTabs, parseVista, type HomeVista } from "@/features/feed/feed-tabs";
+import { FeedTabs, parseVista } from "@/features/feed/feed-tabs";
 import { HomeContextBar, HomeRail } from "@/features/shell/home-rail";
-import type { FeedScope } from "@/lib/api/types";
 import { readLocalityCookie } from "@/lib/locality";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
-
-const SCOPE: Record<HomeVista, FeedScope> = {
-  "para-vos": "main",
-  local: "local",
-  argentina: "argentina",
-};
-
-function feedKind(vista: HomeVista, locality: string | null): FeedScope {
-  if (!locality) return "argentina";
-  return SCOPE[vista];
-}
 
 export function HomeFeed() {
   const searchParams = useSearchParams();
@@ -34,13 +22,7 @@ export function HomeFeed() {
     return <div className="h-40 animate-pulse bg-surface" />;
   }
 
-  const kind = feedKind(vista, locality);
-  const emptyTitle =
-    vista === "local" && locality ? `No hay sucesos recientes en ${locality}.` : "Todavía no hay sucesos publicados.";
-  const emptyDescription =
-    vista === "local" && locality
-      ? "Cuando ocurra algo relevante aparecerá acá."
-      : "En cuanto se publique algo, lo vas a ver en este feed.";
+  const sort = vista === "ultimas" ? "latest" : "principal";
 
   return (
     <div className="flex min-h-screen">
@@ -53,10 +35,11 @@ export function HomeFeed() {
           <FeedTabs />
         </header>
         <FeedList
-          kind={kind}
+          key={`${sort}:${locality ?? ""}`}
+          kind={sort}
           locality={locality ?? undefined}
-          emptyTitle={emptyTitle}
-          emptyDescription={emptyDescription}
+          emptyTitle="Todavía no hay sucesos publicados."
+          emptyDescription="En cuanto se publique algo, lo vas a ver en este feed."
         />
       </div>
       <HomeRail locality={locality} />
