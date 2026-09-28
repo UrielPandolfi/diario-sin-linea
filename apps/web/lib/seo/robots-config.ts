@@ -17,7 +17,7 @@ export function sitemapAbsoluteUrl(origin: string): string {
 
 export function staticSitemapUrls(origin: string): { url: string }[] {
   return SITEMAP_STATIC_PATHS.map((path) => ({
-    url: path === "/" ? origin : `${origin}${path}`,
+    url: `${origin}${path}`,
   }));
 }
 

@@ -2,7 +2,8 @@
 
 import { EventCard } from "@/features/feed/event-card";
 import { FeedEmpty, FeedError, FeedSkeleton } from "@/features/feed/feed-states";
-import { fetchFeed, fetchLive, fetchLocal } from "@/lib/api/public";
+import { safeReturnTo } from "@/lib/auth/return-to";
+import { PublicApiError, fetchFeed, fetchLive, fetchLocal } from "@/lib/api/public";
 import type { EventCard as EventCardType, FeedScope } from "@/lib/api/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -43,15 +44,23 @@ export function FeedList({
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(false);
+    const gated = kind !== "live" && kind !== "local";
+    let redirecting = false;
     try {
       const page = await loadPage(kind, locality, null);
       setItems(page.items);
       setCursor(page.next_cursor);
-    } catch {
+    } catch (error) {
+      if (gated && error instanceof PublicApiError && error.status === 401) {
+        redirecting = true;
+        const next = safeReturnTo(`${window.location.pathname}${window.location.search}`, "/");
+        window.location.assign(`/entrar?next=${encodeURIComponent(next)}`);
+        return;
+      }
       setError(true);
       setItems([]);
     } finally {
-      setLoading(false);
+      if (!redirecting) setLoading(false);
     }
   }, [kind, locality]);
 

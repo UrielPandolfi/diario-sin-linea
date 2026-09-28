@@ -7,6 +7,7 @@ Solo políticas con evidencia de intención (spec, test que las fija, comentario
 - La unidad es el **suceso** (`Event`); el artículo es la representación actual. Varias publicaciones pueden ser evidencia del mismo hecho (modelos `Event` / `EventSource` / `SourceItem`).
 - Monolito modular + workers Celery; no microservicios.
 - Código determinista para gates, locks, identidad e índices; LLM para extraer, comparar, clasificar, redactar o auditar (`editorial_gate.py`, `pipeline_lock.py`, `providers/`).
+- El inicio (`/`, con sus pestañas) y las áreas personales (`/perfil`, `/guardados`, `/seguidos`, `/notificaciones`) exigen sesión de lector. Una noticia publicada, sus fuentes, evidencias y correcciones siguen siendo públicas, sin mirar el referer. `GET /api/v1/feed` exige esa sesión y no se cachea en público; el artículo por slug o `public_id` no. La sesión es email y contraseña (`readers`, cookie `sl_reader`), distinta de la cookie de admin. No hay proveedor social, verificación por email ni recuperación de acceso. Tests: `test_reader_auth.py`, `lib/auth/*.test.ts`.
 - Pytest no comparte la base de la aplicación. `TEST_DATABASE_URL` es obligatoria, el nombre debe terminar en `_test` y no puede ser `sin_linea` ni la misma identidad que `DATABASE_URL`. Si falta, la suite aborta; no hay fallback. Antes de migrar o `TRUNCATE`, se comprueba `current_database()`. Tests: `test_db_isolation.py`.
 
 ## Publicación

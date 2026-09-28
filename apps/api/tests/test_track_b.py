@@ -37,6 +37,7 @@ from app.services.source_service import SourceService
 from app.services.verification_service import VerificationService
 from app.services.writing_service import WritingService, should_enqueue_write
 from tests.test_claims import _attach, _event, _extracted, _item, _llm, _service, _source
+from tests.reader_session import authenticate_reader
 
 WHEN = datetime(2026, 9, 16, 12, 0, tzinfo=timezone.utc)
 
@@ -367,6 +368,7 @@ def test_track_b_material_keeps_v1_live_until_manual_publish(db_session: Session
     ) == updates_after_v1
 
     with TestClient(app) as client:
+        authenticate_reader(client)
         payload = client.get(f"/api/v1/articles/{article.slug}").json()
         feed = client.get("/api/v1/feed").json()
         live = client.get("/api/v1/live").json()

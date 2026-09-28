@@ -5,21 +5,21 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 export const metadata: Metadata = {
-  title: "Ingresar",
+  title: "Crear cuenta",
   robots: { index: false, follow: false },
 };
 
 type Search = { next?: string | string[] };
 
-export default async function EntrarPage({ searchParams }: { searchParams: Promise<Search> }) {
+export default async function RegistroPage({ searchParams }: { searchParams: Promise<Search> }) {
   const params = await searchParams;
   const raw = typeof params.next === "string" ? params.next : null;
   const next = raw ? safeReturnTo(raw, "/") : null;
   if (raw && raw !== next) {
-    redirect(`/entrar?next=${encodeURIComponent(next ?? "/")}`);
+    redirect(`/registro?next=${encodeURIComponent(next ?? "/")}`);
   }
   if (await readerFromCookie()) {
     redirect(next ?? "/");
   }
-  return <AuthFrame mode="login" next={next} />;
+  return <AuthFrame mode="register" next={next} />;
 }

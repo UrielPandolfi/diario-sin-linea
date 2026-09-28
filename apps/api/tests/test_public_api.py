@@ -21,6 +21,7 @@ from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.domain.enums import EntityType
 from tests.editorial_snapshot import persist_version_snapshot
+from tests.reader_session import authenticate_reader
 
 
 def _source(session: Session, **overrides):
@@ -108,6 +109,7 @@ def test_draft_and_ready_draft_absent_from_public_apis(db_session: Session) -> N
     event, article = _seed(db_session, locality="Rosario", headline="Borrador Pellegrini", hash_key="draft")
     db_session.commit()
     with TestClient(app) as client:
+        authenticate_reader(client)
         by_slug = client.get(f"/api/v1/articles/{article.slug}")
         feed = client.get("/api/v1/feed")
         live = client.get("/api/v1/live")
@@ -125,6 +127,7 @@ def test_draft_and_ready_draft_absent_from_public_apis(db_session: Session) -> N
     db_session.refresh(article)
     db_session.commit()
     with TestClient(app) as client:
+        authenticate_reader(client)
         still = client.get(f"/api/v1/articles/{article.slug}")
         feed_after = client.get("/api/v1/feed")
     assert still.status_code == 404
@@ -139,6 +142,7 @@ def test_local_scope_filters_strictly_by_locality(db_session: Session) -> None:
     db_session.refresh(_article_r)
     db_session.refresh(_article_c)
     with TestClient(app) as client:
+        authenticate_reader(client)
         missing = client.get("/api/v1/feed", params={"scope": "local"})
         local_ros = client.get("/api/v1/local", params={"locality": "Rosario"})
         feed_local = client.get("/api/v1/feed", params={"scope": "local", "locality": "rosario"})
@@ -207,6 +211,7 @@ def test_nearby_respects_window(db_session: Session, monkeypatch) -> None:
     settings = get_settings()
     monkeypatch.setattr(settings, "nearby_window_hours", 12)
     with TestClient(app) as client:
+        authenticate_reader(client)
         nearby = client.get("/api/v1/nearby", params={"locality": "Rosario"})
         feed = client.get("/api/v1/feed", params={"scope": "local", "locality": "Rosario"})
     assert article.slug not in {item["slug"] for item in nearby.json()["items"]}
@@ -261,6 +266,7 @@ def test_public_article_claims_follow_published_snapshot_not_live_verify(db_sess
     _later_live_supported(db_session, event, claim)
     db_session.commit()
     with TestClient(app) as client:
+        authenticate_reader(client)
         payload = client.get(f"/api/v1/articles/{article.slug}").json()
         feed = client.get("/api/v1/feed").json()
     assert payload["published_version"] == 1

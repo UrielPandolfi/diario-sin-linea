@@ -1,5 +1,6 @@
 "use client";
 
+import { SignOutButton } from "@/features/auth/sign-out-button";
 import { BrandMark } from "@/features/shell/brand-mark";
 import { navIsActive, NAV_ITEMS, type NavItem } from "@/lib/nav";
 import {
@@ -55,7 +56,7 @@ function NavLink({
   );
 }
 
-export function Sidebar() {
+export function Sidebar({ authenticated = false }: { authenticated?: boolean }) {
   const pathname = usePathname();
 
   return (
@@ -91,6 +92,7 @@ export function Sidebar() {
             icon={CircleHelp}
             active={navIsActive("/como-funciona", pathname)}
           />
+          {authenticated ? <SignOutButton className="mt-1 w-full" /> : null}
         </nav>
       </div>
     </aside>

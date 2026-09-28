@@ -6,6 +6,7 @@ from app.models.event import Event, EventEmbedding, EventEntity, EventSource, Ev
 from app.models.llm_price import LlmPriceBook, LlmPriceRate
 from app.models.llm_usage import LlmUsage
 from app.models.pipeline import PipelineRun
+from app.models.reader import Reader
 from app.models.reader_case import ReaderCase, ReaderCaseAction
 from app.models.source import Source, SourceItem
 
@@ -28,6 +29,7 @@ __all__ = [
     "LlmPriceRate",
     "LlmUsage",
     "PipelineRun",
+    "Reader",
     "ReaderCase",
     "ReaderCaseAction",
     "Source",

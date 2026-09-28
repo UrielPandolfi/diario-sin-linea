@@ -7,10 +7,11 @@ export const DEFAULT_OG_IMAGE_PATH = "/og-default.png";
 export const OG_IMAGE_WIDTH = 1200;
 export const OG_IMAGE_HEIGHT = 630;
 export const FALLBACK_SITE_URL = "http://localhost:3000";
-export const SITEMAP_STATIC_PATHS = ["/", "/en-vivo", "/local", "/contacto", "/como-funciona"] as const;
+export const SITEMAP_STATIC_PATHS = ["/en-vivo", "/local", "/contacto", "/como-funciona"] as const;
 export const ROBOTS_DISALLOW = [
   "/admin",
   "/entrar",
+  "/registro",
   "/onboarding",
   "/seguimiento",
   "/seguidos",

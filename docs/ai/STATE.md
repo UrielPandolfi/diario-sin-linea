@@ -8,7 +8,7 @@ Separar: **en código** ≠ **cubierto por tests** ≠ **verificado en esta sesi
 
 Pipeline Celery: poll → detect → (create: research | link nuevo: claims incremental) → verify → material editorial → write → audit → publish si `AUTO_PUBLISH` y Audit passed y no hold (`workers/tasks.py`). Admin puede re-disparar stages. API pública: feed, live, now, local, nearby, search, artículo por slug/`public_id`, portada `GET /api/v1/media/heroes/{id}.webp` (el `.png` sigue sirviendo filas viejas), inventario SEO `GET /api/v1/sitemap-articles` (`api/public.py`). Claims del GET de artículo (status, presentation, labels, `reason_code`, scopes) salen del snapshot de `published_version`; el feed no serializa claims.
 
-Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open Graph/Twitter, JSON-LD `NewsArticle`, `sitemap.xml`, `robots.txt`. El middleware ya no exige cookie de localidad para rastrear `/`, `/en-vivo` o `/buscar`. `/admin`, `/entrar` y `/onboarding` van `noindex`. `/buscar` es `noindex, follow`. Preview con `VERCEL_ENV` no production envía `X-Robots-Tag: noindex, nofollow`.
+Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open Graph/Twitter, JSON-LD `NewsArticle`, `sitemap.xml`, `robots.txt`. El inicio y `/perfil`, `/guardados`, `/seguidos`, `/notificaciones` redirigen a `/entrar` si no hay sesión de lector. `/noticias/[slug]`, `/buscar`, `/local`, `/en-vivo`, `/contacto` y `/como-funciona` siguen abiertos. `/admin`, `/entrar`, `/registro` y `/onboarding` van `noindex`. El sitemap estático ya no lista `/`. `/buscar` es `noindex, follow`. Preview con `VERCEL_ENV` no production envía `X-Robots-Tag: noindex, nofollow`.
 
 Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService` intenta una portada si `ARTICLE_IMAGE_ENABLED` y `hero_image_url` está vacío. El prompt sale de DeepSeek (`IMAGE_PROMPT`, titular y bajada) y la imagen de `black-forest-labs/flux-schnell` en Replicate; los bytes se guardan en `article_hero_images.png_bytes` (WEBP por defecto, `content_type` real) y la URL pública es `/api/v1/media/heroes/{id}.webp`. No entra a detection, research, claims, verification, writing ni audit. Un fallo deja la URL null y no deshace la publicación. El GET público no genera. La plantilla Pillow ya no corre.
 
@@ -225,7 +225,7 @@ Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en ti
 
 ## Parcial / stub / posible defecto
 
-- UI “Próximamente”: `/seguidos`, `/notificaciones`, `/guardados`; mapa en local/home; login social en `/entrar`; cuentas en perfil.
+- UI “Próximamente”: `/seguidos`, `/notificaciones`, `/guardados` (la ruta ya pide sesión; no hay Me gusta, Guardados ni Poneme al día). Mapa en local/home. No hay login social ni recuperación de acceso.
 - `editorial_hold` se pone `True` en revise UPDATE/CORRECTION; el override de publish no lo pone en `False`.
 - Helpers Rosario / `OUTSIDE_TARGET_LOCALITY` en el gate **no** se usan en `evaluate_editorial_gate`.
 - Filas `LlmUsage` anteriores a A2: USD unknown; atribución inferida de FKs; backfill vs query de embeddings no se parte.

@@ -1,5 +1,6 @@
 "use client";
 
+import { GuestSignupBanner } from "@/features/auth/guest-signup-banner";
 import { ArticleBody } from "@/features/article/article-body";
 import { PublicHero } from "@/features/article/public-hero";
 import { ReadingSizeToggle, useReadingSize } from "@/features/article/reading-controls";
@@ -63,7 +64,15 @@ function placeKicker(article: Article): string | null {
   return locality || province;
 }
 
-export function ArticleView({ article }: { article: Article }) {
+export function ArticleView({
+  article,
+  guest = false,
+  returnTo,
+}: {
+  article: Article;
+  guest?: boolean;
+  returnTo?: string;
+}) {
   const href = `/noticias/${article.slug}`;
   const updated = isMateriallyUpdated(article.published_at, article.updated_at);
   const [formOpen, setFormOpen] = useState(false);
@@ -76,6 +85,7 @@ export function ArticleView({ article }: { article: Article }) {
   const crumb = article.locality?.trim() || "Noticia";
 
   return (
+    <>
     <article className="article-root mx-auto w-full max-w-article px-4 py-6 md:px-8 md:py-8" data-reading-size={readingSize}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <nav aria-label="Migas de pan" className="font-sans text-[13px] text-secondary">
@@ -209,5 +219,7 @@ export function ArticleView({ article }: { article: Article }) {
         />
       </div>
     </article>
+    {guest && returnTo ? <GuestSignupBanner returnTo={returnTo} /> : null}
+    </>
   );
 }

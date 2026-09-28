@@ -40,6 +40,7 @@ from app.services.source_item_service import SourceItemService
 from app.services.source_service import SourceService
 from app.services.verification_service import VerificationService
 from app.services.writing_service import WritingService
+from tests.reader_session import authenticate_reader
 
 B_URL = "https://b.test/seis-heridos"
 C_URL = "https://c.test/transito"
@@ -238,6 +239,7 @@ def test_pipeline_fake_source_to_public_apis(db_session: Session) -> None:
     db_session.commit()
 
     with TestClient(app) as client:
+        authenticate_reader(client)
         assert client.get(f"/api/v1/articles/{article.slug}").status_code == 404
         feed_before = client.get("/api/v1/feed")
         assert article.slug not in [item["slug"] for item in feed_before.json()["items"]]
@@ -272,6 +274,7 @@ def test_pipeline_fake_source_to_public_apis(db_session: Session) -> None:
     assert links >= 3
 
     with TestClient(app) as client:
+        authenticate_reader(client)
         article_json = client.get(f"/api/v1/articles/{article.slug}")
         by_id = client.get(f"/api/v1/articles/{event.public_id}")
         feed = client.get("/api/v1/feed")

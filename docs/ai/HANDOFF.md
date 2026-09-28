@@ -2,14 +2,18 @@
 
 **Fecha:** 2026-09-28
 
-**Tarea:** Validar en base de test la reescritura acotada y, sobre la base operativa, auditar la candidata vigente de cada artículo. Publicar solo lo que aprueba. Sin commit. Beat no se arrancó. `AUTO_PUBLISH` sigue en `false`.
+**Tarea:** El inicio y las áreas personales piden sesión. Las noticias publicadas se leen sin cuenta, con invitación inferior para visitantes. Sin commit.
 
 ## Resultado
 
-Pytest en la imagen de API, contra `sin_linea_test`: 100 pruebas de audit, publish, superficies, certeza y trazabilidad. Las dos que leen el export pasan si el archivo está montado. La política no relaja el tope ni `published_version`.
+No había cuentas de lectores: `/entrar` era la localidad y el admin usa otra cookie. Se agregó sesión real con email y contraseña (`readers`, cookie httpOnly `sl_reader`), sin OAuth ni correo. `GET /api/v1/feed` exige esa sesión. El artículo publicado sigue público.
 
-Corrida real por el worker, una candidata por artículo. Publicados: Formosa `fe26e42b` v2 (1 reescritura), triple crimen `88184369` v1, Esteche `78638d2c` v1, La Tablada `fa0fa66a` v3. Siguen en la versión pública anterior: resolución AMIA `b8343be8` v2 y Rafecas `a3dc7124` v2. Sin publicar: Milei por cobertura y vigencia, Cristina por contrato incompleto junto con atribución, Formosa Gran Guardia `ab70f815` por central sin verificar.
+## Verificación
+
+Frontend: `npm test` 58 ok, lint sin avisos, typecheck ok. En `next dev`, sin cookie, `/` y `/?vista=` redirigen a `/entrar`; `/perfil`, `/guardados`, `/seguidos` y `/notificaciones` también. `/buscar`, `/local`, `/en-vivo`, `/como-funciona`, `/onboarding` y `/mark.svg` responden 200. Un `next` externo se reescribe a `/`. Una cookie firmada abre `/` sin redirigir. La invitación se vio en claro/oscuro y en móvil, se cierra y no vuelve en la misma pestaña; el panel de respaldo queda por encima.
+
+Pytest de la API no corrió: `.env` no tiene `TEST_DATABASE_URL` y Postgres local no aceptó conexión. El login completo contra la API tampoco: el proceso en `:8000` no está.
 
 ## Pendiente
 
-Beat no está en marcha; su configuración no se cambió. No hay artículos ya publicados sin candidata pendiente.
+Recuperación de acceso y verificación por email no existen. Me gusta, Guardados y Poneme al día siguen sin implementarse; las rutas personales solo piden sesión.

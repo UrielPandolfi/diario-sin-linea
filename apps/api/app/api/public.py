@@ -1,9 +1,9 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import JSONResponse, Response
 
-from app.api.deps import DbSession
+from app.api.deps import DbSession, require_reader
 from app.models import ArticleHeroImage
 from app.services.feed_ranking import DEFAULT_LIMIT, FeedRankingService, clamp_limit
 from app.services.search_service import SearchService
@@ -47,18 +47,19 @@ def get_article(key: str, db: DbSession) -> dict:
     return payload
 
 
-@router.get("/feed")
+@router.get("/feed", dependencies=[Depends(require_reader)])
 def feed(
     db: DbSession,
     scope: str = "main",
     locality: str | None = None,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
-) -> dict:
+) -> JSONResponse:
     try:
-        return FeedRankingService(db).feed(scope=scope, locality=locality, limit=clamp_limit(limit), cursor=cursor)
+        payload = FeedRankingService(db).feed(scope=scope, locality=locality, limit=clamp_limit(limit), cursor=cursor)
     except ValueError as exc:
         raise _public_error(exc) from exc
+    return JSONResponse(payload, headers={"Cache-Control": "private, no-store"})
 
 
 @router.get("/local")

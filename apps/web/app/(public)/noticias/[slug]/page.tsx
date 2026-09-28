@@ -1,4 +1,5 @@
 import { ArticleView } from "@/features/article/article-view";
+import { readerFromCookie } from "@/lib/auth/session";
 import { fetchArticle, PublicApiError } from "@/lib/api/public";
 import type { Article } from "@/lib/api/types";
 import { breadcrumbJsonLd, newsArticleJsonLd } from "@/lib/seo/json-ld";
@@ -38,11 +39,12 @@ export default async function ArticlePage({ params }: { params: Promise<Params> 
   }
 
   const origin = getSiteUrl();
+  const reader = await readerFromCookie();
   return (
     <div className="min-h-screen">
       <JsonLd data={newsArticleJsonLd(article, origin)} />
       <JsonLd data={breadcrumbJsonLd(article, origin)} />
-      <ArticleView article={article} />
+      <ArticleView article={article} guest={reader === null} returnTo={`/noticias/${article.slug}`} />
     </div>
   );
 }

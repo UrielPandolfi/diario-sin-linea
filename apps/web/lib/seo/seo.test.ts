@@ -128,11 +128,12 @@ test("robots allow buscar and point sitemap at SITE_URL", () => {
   const rules = buildRobotsRules(true);
   assert.equal(Array.isArray(rules.disallow) && robotsDisallowsBuscar(rules.disallow), false);
   assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/admin"));
+  assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/registro"));
   assert.equal(sitemapAbsoluteUrl(ORIGIN), `${ORIGIN}/sitemap.xml`);
   const preview = buildRobotsRules(false);
   assert.equal(preview.disallow, "/");
   const staticUrls = staticSitemapUrls(ORIGIN).map((row) => row.url);
-  assert.ok(staticUrls.includes(ORIGIN));
+  assert.equal(staticUrls.includes(ORIGIN), false);
   assert.ok(staticUrls.includes(`${ORIGIN}/en-vivo`));
   assert.equal(staticUrls.includes(`${ORIGIN}/buscar`), false);
 });
