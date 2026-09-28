@@ -176,6 +176,19 @@ def test_search_skips_unpublished_and_finds_live_text(db_session: Session) -> No
     _publish_passed(db_session, pub_event)
     db_session.commit()
     with TestClient(app) as client:
+        for path, params in (
+            ("/api/v1/search", {"q": "colectivos"}),
+            ("/api/v1/live", None),
+            ("/api/v1/now", None),
+            ("/api/v1/local", {"locality": "Rosario"}),
+            ("/api/v1/nearby", {"locality": "Rosario"}),
+            ("/api/v1/localities", None),
+        ):
+            denied = client.get(path, params=params)
+            assert denied.status_code == 401
+            assert "Colectivos en Pellegrini" not in denied.text
+            assert "Secreto draft no indexar" not in denied.text
+        authenticate_reader(client)
         empty = client.get("/api/v1/search")
         found = client.get("/api/v1/search", params={"q": "colectivos"})
         by_entity = client.get("/api/v1/search", params={"q": "Pellegrini"})

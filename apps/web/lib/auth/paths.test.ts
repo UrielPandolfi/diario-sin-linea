@@ -10,18 +10,21 @@ test("home and personal areas require a session", () => {
   assert.equal(isPrivateAppPath("/guardados"), true);
   assert.equal(isPrivateAppPath("/seguidos"), true);
   assert.equal(isPrivateAppPath("/notificaciones"), true);
+  assert.equal(isPrivateAppPath("/en-vivo"), true);
+  assert.equal(isPrivateAppPath("/local"), true);
+  assert.equal(isPrivateAppPath("/local/rosario"), true);
+  assert.equal(isPrivateAppPath("/buscar"), true);
+  assert.equal(isPrivateAppPath("/buscar/q"), true);
+  assert.equal(isPrivateAppPath("/onboarding"), true);
+  assert.equal(isPrivateAppPath("/dev/respaldo"), true);
 });
 
 test("public sections stay outside the home gate", () => {
   for (const path of [
     "/noticias/colectivo-pellegrini",
-    "/buscar",
-    "/local",
-    "/en-vivo",
     "/contacto",
     "/seguimiento/abc",
     "/como-funciona",
-    "/onboarding",
     "/entrar",
     "/registro",
     "/admin",

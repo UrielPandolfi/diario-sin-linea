@@ -1,26 +1,24 @@
 "use client";
 
 import { SignOutButton } from "@/features/auth/sign-out-button";
-import { LocalitySelector } from "@/features/locality/locality-selector";
+import { LocalitySearch } from "@/features/locality/locality-search";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { readLocalityCookie } from "@/lib/locality";
+import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
 export function ProfileView() {
-  const [locality, setLocality] = useState<string | null>(null);
+  const [place, setPlace] = useState<ReaderPlace | null>(null);
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setLocality(readLocalityCookie());
-    setReady(true);
-    void fetch("/api/v1/auth/session", { credentials: "include", cache: "no-store" })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((body: { authenticated?: boolean; email?: string } | null) => {
-        if (body?.authenticated && typeof body.email === "string") setEmail(body.email);
+    void fetchReaderAccount()
+      .then((account) => {
+        setEmail(account.email);
+        setPlace(account.locality);
       })
-      .catch(() => undefined);
+      .finally(() => setReady(true));
   }, []);
 
   if (!ready) {
@@ -32,12 +30,19 @@ export function ProfileView() {
       <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-muted">Perfil</p>
       <h1 className="mt-2 font-heading text-3xl font-semibold text-primary">Tu espacio</h1>
       <p className="mt-2 font-sans text-sm text-secondary">
-        {email ? email : "La sesión abre el inicio. La localidad queda en este dispositivo."}
+        {email ? email : "Tu cuenta"}
       </p>
 
-      <section className="mt-8 space-y-2 border-t border-border pt-6">
+      <section className="mt-8 space-y-3 border-t border-border pt-6">
         <h2 className="font-heading text-sm text-primary">Localidad</h2>
-        <LocalitySelector current={locality ?? ""} onSaved={setLocality} />
+        <p className="font-sans text-sm text-secondary">
+          {place
+            ? `${placeLabel(place)}. La usamos para mostrarte noticias cercanas.`
+            : "Todavía no elegiste una localidad. La usamos para mostrarte noticias cercanas."}
+        </p>
+        <div className="max-w-md">
+          <LocalitySearch mode="edit" showClear={place !== null} onChanged={setPlace} />
+        </div>
       </section>
 
       <section className="mt-8 space-y-3 border-t border-border pt-6">

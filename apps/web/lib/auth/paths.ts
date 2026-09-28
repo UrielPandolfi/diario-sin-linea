@@ -1,6 +1,16 @@
 const AUTH_ENTRY = ["/entrar", "/registro"] as const;
 
-const PRIVATE_PREFIXES = ["/perfil", "/guardados", "/seguidos", "/notificaciones"] as const;
+const PRIVATE_PREFIXES = [
+  "/perfil",
+  "/guardados",
+  "/seguidos",
+  "/notificaciones",
+  "/en-vivo",
+  "/local",
+  "/buscar",
+  "/onboarding",
+  "/dev",
+] as const;
 
 export function isAuthEntryPath(pathname: string): boolean {
   return AUTH_ENTRY.some((base) => pathname === base || pathname.startsWith(`${base}/`));

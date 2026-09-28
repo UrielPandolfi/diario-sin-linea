@@ -3,6 +3,7 @@ from app.models.article import Article, ArticleHeroImage, ArticleVersion, Correc
 from app.models.base import Base
 from app.models.claim import Claim, ClaimEvidence, Entity
 from app.models.event import Event, EventEmbedding, EventEntity, EventSource, EventUpdate
+from app.models.geo_locality import GeoLocality
 from app.models.llm_price import LlmPriceBook, LlmPriceRate
 from app.models.llm_usage import LlmUsage
 from app.models.pipeline import PipelineRun
@@ -26,6 +27,7 @@ __all__ = [
     "EventEntity",
     "EventSource",
     "EventUpdate",
+    "GeoLocality",
     "LlmPriceBook",
     "LlmPriceRate",
     "LlmUsage",

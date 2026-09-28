@@ -1,13 +1,14 @@
 """Principal and Últimas scores.
 
-Principal, with a selected locality that resolves to one place:
+Principal, with a saved locality (official id, name and province):
 
     base = 0.45 * relevance + 0.35 * freshness + 0.20 * proximity
     principal = base + 0.15 * confidence * affinity
 
-Without a selected locality the proximity term is dropped and the other two
-weights are renormalized. These coefficients are the initial product values
-in Settings; they are not calibrated against real reading.
+Without a saved locality the proximity term is dropped and the other two
+weights are renormalized. A bare name is not a preference: homonyms match
+only the province stored with the id. These coefficients are the initial
+product values in Settings; they are not calibrated against real reading.
 
 Dates are UTC. Freshness uses the last published material update when that
 timestamp exists, otherwise the first public publication. It does not use
@@ -24,7 +25,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
-from app.services.editorial_gate import fold_place
+from app.services.editorial_gate import CABA_ALIASES, CABA_DISPLAY, fold_place
 
 _UNUSED_TOPICS = frozenset({"", "unknown", "otro", "other", "none", "null"})
 
@@ -83,31 +84,32 @@ def principal_reference(material_update_at: datetime | None, published_at: datet
     return material_update_at or published_at
 
 
-def resolve_place(events: list[tuple[str | None, str | None, str | None]], selected: str | None) -> Place | None:
-    """Match a chosen locality only when public rows share one country and province.
+def comparable_place(value: str | None) -> str:
+    """Fold a place name the same way events and the GeoRef catalog are compared."""
+    folded = fold_place(value)
+    if folded in CABA_ALIASES:
+        return fold_place(CABA_DISPLAY)
+    return folded
 
-    A homonym in another province does not count. An unknown name does not match.
-    """
-    wanted = fold_place(selected)
-    if not wanted:
+
+def preference_place(name: str | None, province: str | None, country: str | None = "AR") -> Place | None:
+    """Build the reader's place from catalog names. A name without province is not enough."""
+    locality = comparable_place(name)
+    province_key = comparable_place(province)
+    if not locality or not province_key:
         return None
-    countries: set[str] = set()
-    provinces: set[str] = set()
-    for country_code, province, locality in events:
-        if fold_place(locality) != wanted or not fold_place(province):
-            continue
-        countries.add(fold_place(country_code or "AR"))
-        provinces.add(fold_place(province))
-    if len(countries) != 1 or len(provinces) != 1:
-        return None
-    return Place(country=next(iter(countries)), province=next(iter(provinces)), locality=wanted)
+    return Place(
+        country=fold_place(country or "AR") or "ar",
+        province=province_key,
+        locality=locality,
+    )
 
 
 def proximity(country_code: str | None, province: str | None, locality: str | None, place: Place | None) -> float:
     if place is None:
         return 0.0
-    event_locality = fold_place(locality)
-    event_province = fold_place(province)
+    event_locality = comparable_place(locality)
+    event_province = comparable_place(province)
     if not event_locality or not event_province:
         return 0.0
     if fold_place(country_code or "AR") != place.country or event_province != place.province:

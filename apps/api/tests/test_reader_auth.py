@@ -63,7 +63,10 @@ def test_register_login_logout_and_private_feed(db_session: Session) -> None:
             json={"email": "Lector@SinLinea.test", "password": "clave-segura-1"},
         )
         assert created.status_code == 201
-        assert created.json() == {"ok": True, "email": "lector@sinlinea.test"}
+        assert created.json()["ok"] is True
+        assert created.json()["email"] == "lector@sinlinea.test"
+        assert created.json()["locality_step"] == "pending"
+        assert created.json()["locality"] is None
         assert "password_hash" not in created.text
         assert "scrypt$" not in created.text
         duplicate = client.post(
@@ -96,8 +99,11 @@ def test_session_does_not_leak_another_reader(db_session: Session) -> None:
     with TestClient(app) as first, TestClient(app) as second:
         authenticate_reader(first, email="ana@sinlinea.test")
         authenticate_reader(second, email="bruno@sinlinea.test")
-        assert first.get("/api/v1/auth/session").json() == {"authenticated": True, "email": "ana@sinlinea.test"}
-        assert second.get("/api/v1/auth/session").json() == {"authenticated": True, "email": "bruno@sinlinea.test"}
+        ana = first.get("/api/v1/auth/session").json()
+        bruno = second.get("/api/v1/auth/session").json()
+        assert ana["authenticated"] is True and ana["email"] == "ana@sinlinea.test"
+        assert bruno["authenticated"] is True and bruno["email"] == "bruno@sinlinea.test"
+        assert ana["locality"] is None and bruno["locality"] is None
         assert first.get("/api/v1/feed").status_code == 200
         assert second.get("/api/v1/feed").status_code == 200
 

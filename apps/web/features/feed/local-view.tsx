@@ -1,38 +1,44 @@
 "use client";
 
 import { FeedList } from "@/features/feed/feed-list";
-import { LocalitySelector } from "@/features/locality/locality-selector";
+import { LocalitySearch } from "@/features/locality/locality-search";
 import { UpcomingFeature } from "@/features/upcoming/upcoming-feature";
-import { readLocalityCookie } from "@/lib/locality";
+import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
 import { useEffect, useState } from "react";
 
 export function LocalView() {
-  const [locality, setLocality] = useState<string | null>(null);
+  const [place, setPlace] = useState<ReaderPlace | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    setLocality(readLocalityCookie());
-    setReady(true);
+    void fetchReaderAccount()
+      .then((account) => setPlace(account.locality))
+      .finally(() => setReady(true));
   }, []);
 
   if (!ready) {
     return <div className="h-40 animate-pulse bg-surface" />;
   }
 
+  const label = place ? placeLabel(place) : null;
+
   return (
     <div className="mx-auto min-h-screen max-w-measure">
-      <header className="sticky top-0 z-10 space-y-3 border-b border-border bg-background/95 px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-10 space-y-3 border-b border-border bg-background px-4 py-3 md:px-6">
         <div>
           <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-muted">Local</p>
-          <h1 className="font-heading text-2xl font-semibold text-primary">{locality ?? "Local"}</h1>
+          <h1 className="font-heading text-2xl font-semibold text-primary">{place?.name ?? "Local"}</h1>
+          {label ? <p className="mt-1 font-sans text-sm text-secondary">{label}</p> : null}
         </div>
-        <LocalitySelector current={locality ?? ""} onSaved={setLocality} />
+        <LocalitySearch mode="edit" showClear={place !== null} onChanged={setPlace} />
       </header>
-      {locality ? (
+      {place ? (
         <FeedList
+          key={place.id}
           kind="local"
-          locality={locality}
-          emptyTitle={`No hay sucesos recientes en ${locality}.`}
+          locality={place.name}
+          province={place.province_name}
+          emptyTitle={`No hay sucesos recientes en ${place.name}.`}
           emptyDescription="Cuando ocurra algo relevante aparecerá acá."
         />
       ) : (

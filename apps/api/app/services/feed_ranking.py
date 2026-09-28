@@ -22,6 +22,8 @@ from app.models import (
     EventUpdate,
     SourceItem,
 )
+from app.models.geo_locality import GeoLocality
+from app.models.reader import Reader
 from app.models.reader_signal import ReaderEventSave
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.schemas.editorial_evidence import decision_was_evaluated
@@ -41,16 +43,18 @@ from app.services.evidence_snapshot import (
     snapshot_sources_by_ref,
 )
 from app.services.feed_score import (
+    Place,
     PrincipalWeights,
     base_score,
     build_profile,
+    comparable_place,
     empty_profile,
     freshness_unit,
+    preference_place,
     principal_reference,
     principal_score,
     proximity,
     relevance_unit,
-    resolve_place,
 )
 from app.services.hero_image_service import fill_missing_hero
 from app.services.reader_engagement import signal_ids
@@ -238,6 +242,22 @@ def normalize_locality(value: str | None) -> str:
 
 def locality_matches(event_locality: str | None, wanted: str) -> bool:
     return bool(wanted) and normalize_locality(event_locality) == normalize_locality(wanted)
+
+
+def locality_in_province(event: Event, *, name: str, province: str) -> bool:
+    return comparable_place(event.locality) == comparable_place(name) and comparable_place(event.province) == comparable_place(province)
+
+
+def saved_place(session: Session, reader_id: UUID | None) -> Place | None:
+    if reader_id is None:
+        return None
+    reader = session.get(Reader, reader_id)
+    if reader is None or not reader.interest_locality_id:
+        return None
+    row = session.get(GeoLocality, reader.interest_locality_id)
+    if row is None:
+        return None
+    return preference_place(row.name, row.province_name, row.country_code)
 
 
 def public_filters():
@@ -453,11 +473,11 @@ class FeedRankingService:
         cursor: str | None,
         sort: str | None = None,
         reader_id: UUID | None = None,
+        province: str | None = None,
     ) -> dict:
         if sort is not None and str(sort).strip():
             return self._sorted_feed(
                 sort=str(sort),
-                locality=locality,
                 limit=limit,
                 cursor=cursor,
                 reader_id=reader_id,
@@ -470,7 +490,16 @@ class FeedRankingService:
             raise ValueError("locality_required")
         rows = self._load_public()
         if scope == "local":
-            rows = [(event, article, live) for event, article, live in rows if locality_matches(event.locality, wanted)]
+            province_name = (province or "").strip()
+            rows = [
+                (event, article, live)
+                for event, article, live in rows
+                if (
+                    locality_in_province(event, name=locality or "", province=province_name)
+                    if province_name
+                    else locality_matches(event.locality, wanted)
+                )
+            ]
         ranked = [self._rank_row(event, article, live, scope=scope, locality=wanted) for event, article, live in rows]
         ranked.sort(
             key=lambda row: (
@@ -571,15 +600,21 @@ class FeedRankingService:
         items.sort(key=lambda row: (row["occurred_at"] or "", row["slug"]), reverse=True)
         return {"items": items[: clamp_limit(limit)]}
 
-    def nearby(self, *, locality: str, limit: int) -> dict:
+    def nearby(self, *, locality: str, province: str | None = None, limit: int) -> dict:
         wanted = normalize_locality(locality)
+        province_name = (province or "").strip()
         if not wanted:
             raise ValueError("locality_required")
         cutoff = utc_now() - timedelta(hours=self.settings.nearby_window_hours)
         rows = [
             (event, article, live)
             for event, article, live in self._load_public()
-            if locality_matches(event.locality, wanted) and public_sort_at(event, article) >= cutoff
+            if public_sort_at(event, article) >= cutoff
+            and (
+                locality_in_province(event, name=locality, province=province_name)
+                if province_name
+                else locality_matches(event.locality, wanted)
+            )
         ]
         rows.sort(key=lambda row: (public_sort_at(row[0], row[1]), str(row[1].id)), reverse=True)
         items = [
@@ -704,7 +739,6 @@ class FeedRankingService:
         self,
         *,
         sort: str,
-        locality: str | None,
         limit: int,
         cursor: str | None,
         reader_id: UUID | None,
@@ -725,7 +759,7 @@ class FeedRankingService:
         if mode == "latest":
             ordered = sorted(rows, key=lambda row: (-_timestamp(row[1].published_at), str(row[1].id)))
         else:
-            ordered = self._rank_principal(rows, locality=locality, reader_id=reader_id, as_of=as_of)
+            ordered = self._rank_principal(rows, reader_id=reader_id, as_of=as_of)
         start = 0
         if after_id is not None:
             found = next((index + 1 for index, row in enumerate(ordered) if row[1].id == after_id), None)
@@ -745,17 +779,12 @@ class FeedRankingService:
         self,
         rows: list[tuple[Event, Article, ArticleVersion]],
         *,
-        locality: str | None,
         reader_id: UUID | None,
         as_of: datetime,
     ) -> list[tuple[Event, Article, ArticleVersion]]:
         weights = _principal_weights(self.settings)
-        locality_selected = bool((locality or "").strip())
-        place = (
-            resolve_place([(event.country_code, event.province, event.locality) for event, _article, _live in rows], locality)
-            if locality_selected
-            else None
-        )
+        place = saved_place(self.session, reader_id)
+        locality_selected = place is not None
         profile = empty_profile()
         if reader_id is not None:
             reads, likes = signal_ids(

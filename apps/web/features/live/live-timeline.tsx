@@ -2,7 +2,8 @@
 
 import { FeedEmpty, FeedError, FeedSkeleton } from "@/features/feed/feed-states";
 import { PublicHero } from "@/features/article/public-hero";
-import { fetchLive } from "@/lib/api/public";
+import { PublicApiError, fetchLive } from "@/lib/api/public";
+import { loginPath } from "@/lib/auth/return-to";
 import type { EventCard as EventCardType } from "@/lib/api/types";
 import { formatClock } from "@/lib/relative-time";
 import Link from "next/link";
@@ -27,7 +28,11 @@ export function LiveTimeline() {
       setItems(page.items);
       setCursor(page.next_cursor);
       setError(false);
-    } catch {
+    } catch (error) {
+      if (error instanceof PublicApiError && error.status === 401) {
+        window.location.assign(loginPath("/en-vivo"));
+        return;
+      }
       setError(true);
     } finally {
       setLoading(false);

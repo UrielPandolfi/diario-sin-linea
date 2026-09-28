@@ -2,20 +2,16 @@
 
 **Fecha:** 2026-09-28
 
-**Tarea:** Guardados privados por lector. Sin commit.
+**Tarea:** Localidad de interés después del registro, con buscador sobre el catálogo local de GeoRef.
 
 ## Resultado
 
-Cada lector guarda o quita una noticia publicada. La relación queda en `reader_event_saves` con `saved_at`. `/guardados` lista la versión publicada, de la más reciente a la más antigua. Sin sesión, la ruta va a `/entrar`; en una nota pública el botón invita a iniciar sesión.
+Tras crear la cuenta se pregunta «¿De qué localidad querés estar al tanto?». Se puede continuar con una sugerencia u omitir con «Ahora no». El paso queda en `readers.locality_step` (`pending`, `done`, `skipped`) y no se repite. Quien ya tenía cuenta entra directo y la cambia desde Inicio o Perfil. La preferencia es el id oficial en texto (`interest_locality_id`) y se relaciona con provincia y país en `geo_localities`. Principal usa esa localidad para la cercanía; sin ella, omite el factor. El catálogo se carga una vez con `python -m app.geo.load_localities` (CSV oficial `https://apis.datos.gob.ar/georef/api/v2.0/localidades.csv`, verificado el 2026-09-28). La búsqueda es `GET /api/v1/geo/localities`.
 
 ## Verificación
 
-`tests/test_saved.py`: 2 passed en Postgres de Compose (`sin_linea_test`). Cubren sesión, borrador oculto, idempotencia, orden por `saved_at`, paginación, otra sesión del mismo lector, aislamiento entre usuarios y exclusión al archivar. Frontend: lint y typecheck ok.
-
-En el navegador, con la API local: sin sesión, Guardar en la nota lleva a `/entrar` y conserva la lectura; con sesión, guardar y quitar funciona en la nota, en la card de Inicio y en `/guardados`. El vacío dice “Todavía no guardaste noticias”. Un fallo simulado muestra “No se pudo quitar.” y deja el botón en Guardado.
-
-No se reejecutó el resto de pytest.
+`tests/test_geo_localities.py`: 2 passed. `npm run typecheck` en `apps/web` pasó. En el navegador: registro muestra el paso, la búsqueda ignora mayúsculas y tildes, Aldao distingue departamento, Rosario se guarda y sigue tras cerrar sesión, se puede cambiar y quitar desde Inicio, Perfil permite elegir, «Ahora no» no vuelve a preguntar, y otra cuenta no hereda la preferencia. Una nota publicada sigue abierta sin sesión. El catálogo de la app quedó en 4028 filas; repetir la carga no duplica.
 
 ## Pendiente
 
-Aplicar nada pendiente de esta tarea en la base local: al levantar la API se corrieron `0017_readers`, `0018_reader_signals` y `0019_reader_saves` sobre `sin_linea`. `/seguidos`, `/notificaciones` y Poneme al día siguen sin implementar.
+Sin commit.

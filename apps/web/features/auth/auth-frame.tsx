@@ -48,7 +48,9 @@ export function AuthFrame({
         setError("No se pudo conectar con la API.");
         return;
       }
-      router.push(destination);
+      const body = (await response.json()) as { locality_step?: string };
+      const askLocality = register || body.locality_step === "pending";
+      router.push(askLocality ? `/onboarding?next=${encodeURIComponent(destination)}` : destination);
       router.refresh();
     } catch {
       setError("No se pudo conectar con la API.");

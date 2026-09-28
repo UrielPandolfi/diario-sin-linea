@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.core.clock import utc_now
 from app.core.config import get_settings
+from app.core.text import normalize_name
 from app.main import app
 from app.models import ArticleVersion
+from app.models.geo_locality import GeoLocality
 from app.models.reader import Reader
 from app.models.reader_signal import ReaderEventLike, ReaderEventRead
 from app.services.reader_auth import issue_reader_token
@@ -35,6 +37,36 @@ def _ready(session: Session, *, locality: str, province: str, headline: str, has
     event.updated_at = published_at
     session.commit()
     return event, article
+
+
+def _catalog(
+    session: Session,
+    *,
+    locality_id: str,
+    name: str,
+    province_id: str,
+    province_name: str,
+    department_id: str,
+    department_name: str,
+) -> None:
+    session.add(
+        GeoLocality(
+            id=locality_id,
+            name=name,
+            name_folded=normalize_name(name),
+            province_id=province_id,
+            province_name=province_name,
+            department_id=department_id,
+            department_name=department_name,
+            country_code="AR",
+        )
+    )
+    session.commit()
+
+
+def _choose(client: TestClient, locality_id: str) -> None:
+    response = client.put("/api/v1/auth/locality", json={"locality_id": locality_id})
+    assert response.status_code == 200, response.text
 
 
 def _slugs(client: TestClient, **params: str) -> list[str]:
@@ -193,6 +225,11 @@ def test_principal_base_rank_locality_and_latest_publication(db_session: Session
         published_at=NOW - timedelta(hours=24),
     )
     del national, local, city, same_province, homonym_a, homonym_b, anchor, aged, fresh_low, material, quiet
+    _catalog(db_session, locality_id="82084120", name="Rosario", province_id="82", province_name="Santa Fe", department_id="82084", department_name="Rosario")
+    _catalog(db_session, locality_id="14014110", name="Villa María", province_id="14", province_name="Córdoba", department_id="14014", department_name="General San Martín")
+    _catalog(db_session, locality_id="82063100", name="San Justo", province_id="82", province_name="Santa Fe", department_id="82063", department_name="San Justo")
+    _catalog(db_session, locality_id="06805010", name="San Justo", province_id="06", province_name="Buenos Aires", department_id="06805", department_name="La Matanza")
+    _catalog(db_session, locality_id="50007010", name="Mendoza", province_id="50", province_name="Mendoza", department_id="50007", department_name="Capital")
 
     with TestClient(app) as first, TestClient(app) as second:
         authenticate_reader(first, email="sin-historial-a@sinlinea.test")
@@ -201,22 +238,28 @@ def test_principal_base_rank_locality_and_latest_publication(db_session: Session
         assert without == _slugs(second, sort="principal")
         assert without.index(national_article.slug) < without.index(local_article.slug)
 
-        rosario = _slugs(first, sort="principal", locality="Rosario")
+        _choose(first, "82084120")
+        rosario = _slugs(first, sort="principal")
         assert rosario.index(local_article.slug) < rosario.index(national_article.slug)
-        villa = _slugs(first, sort="principal", locality="Villa María")
+        spoofed = _slugs(second, sort="principal", locality="Rosario")
+        assert spoofed.index(national_article.slug) < spoofed.index(local_article.slug)
+        _choose(first, "14014110")
+        villa = _slugs(first, sort="principal")
         assert villa.index(same_province_article.slug) < villa.index(city_article.slug)
-        ambiguous = _slugs(first, sort="principal", locality="San Justo")
-        assert ambiguous.index(anchor_article.slug) < ambiguous.index(homonym_a_article.slug)
-        assert ambiguous.index(anchor_article.slug) < ambiguous.index(homonym_b_article.slug)
-        assert _slugs(first, sort="principal", locality="Rosario").index(fresh_article.slug) > _slugs(
-            first, sort="principal", locality="Rosario"
-        ).index(aged_article.slug)
+        _choose(first, "82063100")
+        chosen_homonym = _slugs(first, sort="principal")
+        assert chosen_homonym.index(homonym_a_article.slug) < chosen_homonym.index(homonym_b_article.slug)
+        _choose(first, "82084120")
+        assert _slugs(first, sort="principal").index(fresh_article.slug) > _slugs(first, sort="principal").index(
+            aged_article.slug
+        )
 
         latest_a = _slugs(first, sort="latest")
         latest_b = _slugs(second, sort="latest")
         assert latest_a == latest_b
         assert latest_a.index(quiet_article.slug) < latest_a.index(material_article.slug)
-        principal_mendoza = _slugs(first, sort="principal", locality="Mendoza")
+        _choose(first, "50007010")
+        principal_mendoza = _slugs(first, sort="principal")
         assert principal_mendoza.index(material_article.slug) < principal_mendoza.index(quiet_article.slug)
 
         material_article.updated_at = utc_now()

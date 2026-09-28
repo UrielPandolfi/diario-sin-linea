@@ -6,20 +6,20 @@ import { formatRelative } from "@/lib/relative-time";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-export function NearbyPanel({ locality }: { locality: string }) {
+export function NearbyPanel({ label }: { label: string }) {
   const [items, setItems] = useState<EventCard[]>([]);
   const [error, setError] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     try {
-      const payload = await fetchNearby(locality, 8);
+      const payload = await fetchNearby(undefined, 8);
       setItems(payload.items);
       setError(false);
     } catch {
       setError(true);
     }
-  }, [locality]);
+  }, []);
 
   useEffect(() => {
     void load();
@@ -33,7 +33,7 @@ export function NearbyPanel({ locality }: { locality: string }) {
   return (
     <section className="border-t border-border px-4 py-4">
       <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">Cerca tuyo</h2>
-      <p className="mt-1 font-sans text-xs text-muted">{locality}</p>
+      <p className="mt-1 font-sans text-xs text-muted">{label}</p>
       {error ? (
         <div className="mt-3">
           <p className="font-sans text-sm text-secondary">No pudimos actualizar esta lista.</p>
@@ -42,7 +42,7 @@ export function NearbyPanel({ locality }: { locality: string }) {
           </button>
         </div>
       ) : items.length === 0 ? (
-        <p className="mt-3 font-sans text-sm text-secondary">No hay sucesos recientes cerca de {locality}.</p>
+        <p className="mt-3 font-sans text-sm text-secondary">No hay sucesos recientes cerca de {label}.</p>
       ) : (
         <ol className="mt-3">
           {items.map((item) => (

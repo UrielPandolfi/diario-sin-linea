@@ -10,7 +10,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 | --- | --- |
 | `apps/web/` | Next.js 15 (App Router): UI pública + `/admin` |
 | `apps/api/app/` | FastAPI, dominio, servicios, workers Celery |
-| `apps/api/migrations/versions/` | Alembic (`0001` … `0019_reader_saves`) |
+| `apps/api/migrations/versions/` | Alembic (`0001` … `0020_reader_locality`) |
 | `apps/api/tests/` | Pytest |
 | `docker-compose.yml` | postgres, redis, api, worker, beat, web |
 | `scripts/run_editorial_eval.py` | Eval editorial (fixtures; no RSS) |
@@ -30,6 +30,7 @@ Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gus
 | Decisiones a preservar | `docs/ai/DECISIONS.md` (solo si hay evidencia de intención) |
 | Estado, stubs, hallazgos | `docs/ai/STATE.md` |
 | API pública / feed | `api/public.py`, `services/feed_ranking.py` (freeze: `list_snapshot_binding_runs` + snapshot de `published_version`); sitemap `GET /api/v1/sitemap-articles`; web `app/sitemap.ts`, `app/robots.ts`, `lib/seo/` |
+| Localidad de interés | `models/geo_locality.py`, `services/geo_localities.py`, `api/geo.py`, `api/auth.py`; carga `python -m app.geo.load_localities` |
 | Admin pipeline | `api/admin.py`, `apps/web/app/admin/` (Publicaciones `/admin/publications`, costos en tablero y suceso). Trazabilidad C11: `GET /api/v1/admin/articles/{id}/trace` y `.../versions/{n}/trace` (`version_traceability.py`) |
 | Casos de lectores / contacto | `api/cases.py`, `admin_cases.py`, `services/case_service.py`, `case_rate_limit.py`; UI `/contacto`, `/seguimiento/[token]`, `/admin/cases` |
 | Revisión editorial | `services/editorial_service.py`, `features/admin/editorial-revise-form.tsx` |
@@ -37,7 +38,7 @@ Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gus
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`). `/` (Principal y Últimas), `/perfil`, `/guardados`, `/seguidos` y `/notificaciones` piden sesión de lector. Stubs: `/seguidos`, `/notificaciones`. Cuenta: `/entrar`, `/registro`. Localidad: `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil`, `/guardados`, `/seguidos` y `/notificaciones` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]` y `/como-funciona` siguen abiertas. Stubs: `/seguidos`, `/notificaciones`. Cuenta: `/entrar`, `/registro`. Cliente: `apps/web/lib/api/`, `features/`.
 
 `/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
 

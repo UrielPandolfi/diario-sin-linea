@@ -76,11 +76,13 @@ export function fetchFeed(options: {
 
 export function fetchLocal(options: {
   locality: string;
+  province?: string;
   cursor?: string | null;
   limit?: number;
 }): Promise<CursorPage> {
   return publicGet<CursorPage>("/api/v1/local", {
     locality: options.locality,
+    province: options.province,
     cursor: options.cursor ?? undefined,
     limit: options.limit,
   });
@@ -104,8 +106,8 @@ export function fetchNow(limit?: number): Promise<NowResponse> {
   return publicGet<NowResponse>("/api/v1/now", { limit });
 }
 
-export function fetchNearby(locality: string, limit?: number): Promise<NearbyResponse> {
-  return publicGet<NearbyResponse>("/api/v1/nearby", { locality, limit });
+export function fetchNearby(locality?: string, limit?: number, province?: string): Promise<NearbyResponse> {
+  return publicGet<NearbyResponse>("/api/v1/nearby", { locality, province, limit });
 }
 
 export function fetchSearch(query: string, locality?: string, limit?: number): Promise<SearchResponse> {

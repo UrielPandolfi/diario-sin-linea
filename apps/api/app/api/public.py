@@ -8,6 +8,7 @@ from app.api.deps import DbSession, require_reader
 from app.models import ArticleHeroImage
 from app.models.reader import Reader
 from app.services.feed_ranking import DEFAULT_LIMIT, FeedRankingService, clamp_limit
+from app.services.geo_localities import reader_locality_payload
 from app.services.search_service import SearchService
 
 router = APIRouter(prefix="/api/v1", tags=["public"])
@@ -49,6 +50,9 @@ def get_article(key: str, db: DbSession) -> dict:
     return payload
 
 
+_NO_STORE = {"Cache-Control": "private, no-store"}
+
+
 @router.get("/feed")
 def feed(
     db: DbSession,
@@ -70,69 +74,104 @@ def feed(
         )
     except ValueError as exc:
         raise _public_error(exc) from exc
-    return JSONResponse(payload, headers={"Cache-Control": "private, no-store"})
+    return JSONResponse(payload, headers=_NO_STORE)
 
 
 @router.get("/local")
 def local(
     db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
     locality: str | None = None,
+    province: str | None = None,
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
-) -> dict:
+) -> JSONResponse:
+    del reader
     try:
-        return FeedRankingService(db).feed(
-            scope="local", locality=locality, limit=clamp_limit(limit), cursor=cursor
+        payload = FeedRankingService(db).feed(
+            scope="local",
+            locality=locality,
+            province=province,
+            limit=clamp_limit(limit),
+            cursor=cursor,
         )
     except ValueError as exc:
         raise _public_error(exc) from exc
+    return JSONResponse(payload, headers=_NO_STORE)
 
 
 @router.get("/nearby")
 def nearby(
     db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
     locality: str | None = None,
+    province: str | None = None,
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
-) -> dict:
+) -> JSONResponse:
+    chosen = (locality or "").strip()
+    chosen_province = (province or "").strip() or None
+    if not chosen:
+        saved = reader_locality_payload(db, reader)
+        if saved is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="locality_required")
+        chosen = str(saved["name"])
+        chosen_province = str(saved["province_name"])
     try:
-        return FeedRankingService(db).nearby(locality=locality or "", limit=clamp_limit(limit))
+        payload = FeedRankingService(db).nearby(
+            locality=chosen,
+            province=chosen_province,
+            limit=clamp_limit(limit),
+        )
     except ValueError as exc:
         raise _public_error(exc) from exc
+    return JSONResponse(payload, headers=_NO_STORE)
 
 
 @router.get("/live")
 def live(
     db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
     cursor: str | None = None,
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
-) -> dict:
+) -> JSONResponse:
+    del reader
     try:
-        return FeedRankingService(db).live(limit=clamp_limit(limit), cursor=cursor)
+        payload = FeedRankingService(db).live(limit=clamp_limit(limit), cursor=cursor)
     except ValueError as exc:
         raise _public_error(exc) from exc
+    return JSONResponse(payload, headers=_NO_STORE)
 
 
 @router.get("/now")
-def now(db: DbSession, limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50)) -> dict:
-    return FeedRankingService(db).now(limit=clamp_limit(limit))
+def now(
+    db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
+    limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
+) -> JSONResponse:
+    del reader
+    return JSONResponse(FeedRankingService(db).now(limit=clamp_limit(limit)), headers=_NO_STORE)
 
 
 @router.get("/search")
 def search(
     db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
     q: str | None = None,
     locality: str | None = None,
     limit: int = Query(default=DEFAULT_LIMIT, ge=1, le=50),
-) -> dict:
+) -> JSONResponse:
+    del reader
     try:
-        return SearchService(db).search(query=q or "", locality=locality, limit=clamp_limit(limit))
+        payload = SearchService(db).search(query=q or "", locality=locality, limit=clamp_limit(limit))
     except ValueError as exc:
         raise _public_error(exc) from exc
+    return JSONResponse(payload, headers=_NO_STORE)
 
 
 @router.get("/localities")
-def localities(db: DbSession) -> dict:
-    return FeedRankingService(db).localities()
+def localities(db: DbSession, reader: Annotated[Reader, Depends(require_reader)]) -> JSONResponse:
+    del reader
+    return JSONResponse(FeedRankingService(db).localities(), headers=_NO_STORE)
 
 
 @router.get("/sitemap-articles")

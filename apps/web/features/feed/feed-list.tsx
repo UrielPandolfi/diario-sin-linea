@@ -12,16 +12,17 @@ type Kind = FeedScope | "live" | "principal" | "latest" | "saved";
 async function loadPage(
   kind: Kind,
   locality: string | undefined,
+  province: string | undefined,
   cursor: string | null,
 ): Promise<{ items: EventCardType[]; next_cursor: string | null }> {
   if (kind === "live") return fetchLive({ cursor });
   if (kind === "saved") return fetchSaved({ cursor });
   if (kind === "local") {
     if (!locality) return { items: [], next_cursor: null };
-    return fetchLocal({ locality, cursor });
+    return fetchLocal({ locality, province, cursor });
   }
   if (kind === "principal" || kind === "latest") {
-    return fetchFeed({ sort: kind, locality, cursor });
+    return fetchFeed({ sort: kind, cursor });
   }
   return fetchFeed({ scope: kind, locality, cursor });
 }
@@ -29,11 +30,13 @@ async function loadPage(
 export function FeedList({
   kind,
   locality,
+  province,
   emptyTitle,
   emptyDescription,
 }: {
   kind: Kind;
   locality?: string;
+  province?: string;
   emptyTitle: string;
   emptyDescription?: string;
 }) {
@@ -51,10 +54,10 @@ export function FeedList({
     setLoading(true);
     setCursor(null);
     setError(false);
-    const gated = kind === "principal" || kind === "latest" || kind === "saved" || kind === "main" || kind === "argentina";
+    const gated = true;
     let redirecting = false;
     try {
-      const page = await loadPage(kind, locality, null);
+      const page = await loadPage(kind, locality, province, null);
       if (current !== request.current) return;
       setItems(page.items);
       setCursor(page.next_cursor);
@@ -72,7 +75,7 @@ export function FeedList({
     } finally {
       if (current === request.current && !redirecting) setLoading(false);
     }
-  }, [kind, locality]);
+  }, [kind, locality, province]);
 
   useEffect(() => {
     void refresh();
@@ -87,7 +90,7 @@ export function FeedList({
         if (!entries[0]?.isIntersecting || loadingMoreRef.current) return;
         loadingMoreRef.current = true;
         setLoadingMore(true);
-        void loadPage(kind, locality, cursor)
+        void loadPage(kind, locality, province, cursor)
           .then((page) => {
             setItems((current) => {
               const seen = new Set(current.map((item) => item.public_id));
@@ -112,7 +115,7 @@ export function FeedList({
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [cursor, kind, locality, loading, error]);
+  }, [cursor, kind, locality, province, loading, error]);
 
   if (loading) return <FeedSkeleton />;
   if (error) return <FeedError onRetry={() => void refresh()} />;

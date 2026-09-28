@@ -124,9 +124,9 @@ test("json-ld escapes < to keep the script safe", () => {
   assert.match(html, /\\u003cscript/);
 });
 
-test("robots allow buscar and point sitemap at SITE_URL", () => {
+test("robots hide app sections and point sitemap at SITE_URL", () => {
   const rules = buildRobotsRules(true);
-  assert.equal(Array.isArray(rules.disallow) && robotsDisallowsBuscar(rules.disallow), false);
+  assert.equal(Array.isArray(rules.disallow) && robotsDisallowsBuscar(rules.disallow), true);
   assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/admin"));
   assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/registro"));
   assert.equal(sitemapAbsoluteUrl(ORIGIN), `${ORIGIN}/sitemap.xml`);
@@ -134,8 +134,13 @@ test("robots allow buscar and point sitemap at SITE_URL", () => {
   assert.equal(preview.disallow, "/");
   const staticUrls = staticSitemapUrls(ORIGIN).map((row) => row.url);
   assert.equal(staticUrls.includes(ORIGIN), false);
-  assert.ok(staticUrls.includes(`${ORIGIN}/en-vivo`));
+  assert.equal(staticUrls.includes(`${ORIGIN}/en-vivo`), false);
+  assert.equal(staticUrls.includes(`${ORIGIN}/local`), false);
   assert.equal(staticUrls.includes(`${ORIGIN}/buscar`), false);
+  assert.ok(staticUrls.includes(`${ORIGIN}/contacto`));
+  assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/en-vivo"));
+  assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/local"));
+  assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/buscar"));
 });
 
 test("share payload keeps canonical article path", () => {

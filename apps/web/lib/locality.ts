@@ -1,3 +1,4 @@
+/** Cookie de dispositivo anterior. La preferencia vive en la cuenta del lector. */
 export const LOCALITY_COOKIE = "sl_locality";
 const MAX_AGE = 60 * 60 * 24 * 365;
 

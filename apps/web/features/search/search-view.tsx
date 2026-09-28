@@ -2,7 +2,8 @@
 
 import { EventCard } from "@/features/feed/event-card";
 import { FeedEmpty, FeedError, FeedSkeleton } from "@/features/feed/feed-states";
-import { fetchSearch } from "@/lib/api/public";
+import { PublicApiError, fetchSearch } from "@/lib/api/public";
+import { loginPath } from "@/lib/auth/return-to";
 import type { EventCard as EventCardType } from "@/lib/api/types";
 import { Search } from "lucide-react";
 import { FormEvent, useState } from "react";
@@ -27,7 +28,11 @@ export function SearchView() {
     try {
       const payload = await fetchSearch(q);
       setItems(payload.items);
-    } catch {
+    } catch (error) {
+      if (error instanceof PublicApiError && error.status === 401) {
+        window.location.assign(loginPath("/buscar"));
+        return;
+      }
       setError(true);
       setItems([]);
     } finally {
