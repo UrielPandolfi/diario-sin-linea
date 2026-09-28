@@ -88,7 +88,7 @@ export function ClaimEvidencePanel({
       </div>
       <h3 className="mt-3 font-heading text-[1.35rem] font-semibold leading-snug text-primary">{copy.heading}</h3>
       {showCanonical && copy.canonicalText ? (
-        <p className="mt-2 text-sm leading-relaxed text-secondary">{copy.canonicalText}</p>
+        <p className="mt-3 text-base font-medium leading-snug text-primary">{copy.canonicalText}</p>
       ) : null}
       {copy.explanation ? (
         <p className="mt-2 text-[15px] leading-[1.55] text-secondary">{copy.explanation}</p>
