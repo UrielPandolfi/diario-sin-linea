@@ -2,18 +2,20 @@
 
 **Fecha:** 2026-09-28
 
-**Tarea:** Inicio autenticado con Principal y Últimas. Sin commit.
+**Tarea:** Guardados privados por lector. Sin commit.
 
 ## Resultado
 
-Principal rankea relevancia, actualidad y cercanía, y suma afinidad por `event_type` con lecturas y Me gusta. Últimas ordena por la primera publicación. Sin sesión, el feed web redirige a `/entrar`. La nota publicada sigue abierta.
+Cada lector guarda o quita una noticia publicada. La relación queda en `reader_event_saves` con `saved_at`. `/guardados` lista la versión publicada, de la más reciente a la más antigua. Sin sesión, la ruta va a `/entrar`; en una nota pública el botón invita a iniciar sesión.
 
 ## Verificación
 
-`tests/test_home_feed.py`: 4 passed en Postgres de Compose (`sin_linea_test`). Frontend: `npm test` 59 ok, lint y typecheck ok. En `next dev`, sin cookie, `/?vista=ultimas` va a `/entrar` y el enlace a registro conserva ese destino. El bundle de Inicio trae Principal y Últimas.
+`tests/test_saved.py`: 2 passed en Postgres de Compose (`sin_linea_test`). Cubren sesión, borrador oculto, idempotencia, orden por `saved_at`, paginación, otra sesión del mismo lector, aislamiento entre usuarios y exclusión al archivar. Frontend: lint y typecheck ok.
 
-No se reejecutó el resto de pytest: un contenedor posterior no resolvió el host `postgres`.
+En el navegador, con la API local: sin sesión, Guardar en la nota lleva a `/entrar` y conserva la lectura; con sesión, guardar y quitar funciona en la nota, en la card de Inicio y en `/guardados`. El vacío dice “Todavía no guardaste noticias”. Un fallo simulado muestra “No se pudo quitar.” y deja el botón en Guardado.
+
+No se reejecutó el resto de pytest.
 
 ## Pendiente
 
-Aplicar `0018_reader_signals` en la base de la app. `editorial_topic` no está en el suceso; la afinidad usa `event_type`. Guardados y Poneme al día no se implementaron.
+Aplicar nada pendiente de esta tarea en la base local: al levantar la API se corrieron `0017_readers`, `0018_reader_signals` y `0019_reader_saves` sobre `sin_linea`. `/seguidos`, `/notificaciones` y Poneme al día siguen sin implementar.

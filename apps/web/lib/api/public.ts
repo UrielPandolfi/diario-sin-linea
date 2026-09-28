@@ -86,6 +86,13 @@ export function fetchLocal(options: {
   });
 }
 
+export function fetchSaved(options: { cursor?: string | null; limit?: number } = {}): Promise<CursorPage> {
+  return publicGet<CursorPage>("/api/v1/saved", {
+    cursor: options.cursor ?? undefined,
+    limit: options.limit,
+  });
+}
+
 export function fetchLive(options: { cursor?: string | null; limit?: number } = {}): Promise<CursorPage> {
   return publicGet<CursorPage>("/api/v1/live", {
     cursor: options.cursor ?? undefined,

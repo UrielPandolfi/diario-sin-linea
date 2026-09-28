@@ -8,7 +8,7 @@ from app.models.llm_usage import LlmUsage
 from app.models.pipeline import PipelineRun
 from app.models.reader import Reader
 from app.models.reader_case import ReaderCase, ReaderCaseAction
-from app.models.reader_signal import ReaderEventLike, ReaderEventRead
+from app.models.reader_signal import ReaderEventLike, ReaderEventRead, ReaderEventSave
 from app.models.source import Source, SourceItem
 
 __all__ = [
@@ -35,6 +35,7 @@ __all__ = [
     "ReaderCaseAction",
     "ReaderEventLike",
     "ReaderEventRead",
+    "ReaderEventSave",
     "Source",
     "SourceItem",
 ]

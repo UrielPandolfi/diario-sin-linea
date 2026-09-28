@@ -10,7 +10,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 | --- | --- |
 | `apps/web/` | Next.js 15 (App Router): UI pública + `/admin` |
 | `apps/api/app/` | FastAPI, dominio, servicios, workers Celery |
-| `apps/api/migrations/versions/` | Alembic (`0001` … `0018_reader_signals`) |
+| `apps/api/migrations/versions/` | Alembic (`0001` … `0019_reader_saves`) |
 | `apps/api/tests/` | Pytest |
 | `docker-compose.yml` | postgres, redis, api, worker, beat, web |
 | `scripts/run_editorial_eval.py` | Eval editorial (fixtures; no RSS) |
@@ -18,7 +18,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 
 Entradas: [`apps/api/app/main.py`](../../apps/api/app/main.py), [`apps/api/app/workers/tasks.py`](../../apps/api/app/workers/tasks.py), [`apps/api/app/workers/celery_app.py`](../../apps/api/app/workers/celery_app.py), [`apps/web/middleware.ts`](../../apps/web/middleware.ts).
 
-Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py`, `api/public.py`, `api/cases.py`, `api/admin.py`, `api/admin_cases.py`. Prefijos: `/health`; público, cuenta y casos en `/api/v1`; admin en `/api/v1/admin`.
+Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gusta, lecturas y `GET /api/v1/saved`), `api/public.py`, `api/cases.py`, `api/admin.py`, `api/admin_cases.py`. Prefijos: `/health`; público, cuenta y casos en `/api/v1`; admin en `/api/v1/admin`.
 
 ## Si vas a trabajar en X
 
@@ -37,7 +37,7 @@ Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py`, `api/p
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`). `/` (Principal y Últimas), `/perfil`, `/guardados`, `/seguidos` y `/notificaciones` piden sesión de lector. Stubs: `/seguidos`, `/notificaciones`, `/guardados`. Cuenta: `/entrar`, `/registro`. Localidad: `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`). `/` (Principal y Últimas), `/perfil`, `/guardados`, `/seguidos` y `/notificaciones` piden sesión de lector. Stubs: `/seguidos`, `/notificaciones`. Cuenta: `/entrar`, `/registro`. Localidad: `/onboarding`. Cliente: `apps/web/lib/api/`, `features/`.
 
 `/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
 

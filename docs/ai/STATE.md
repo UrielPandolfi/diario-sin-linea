@@ -225,7 +225,7 @@ Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en ti
 
 ## Parcial / stub / posible defecto
 
-- UI “Próximamente”: `/seguidos`, `/notificaciones`, `/guardados` (la ruta ya pide sesión; no hay Me gusta, Guardados ni Poneme al día). Mapa en local/home. No hay login social ni recuperación de acceso.
+- UI “Próximamente”: `/seguidos` y `/notificaciones`. Me gusta y Guardados ya persisten por lector (`reader_event_likes`, `reader_event_saves`). No hay Poneme al día. Mapa en local/home. No hay login social ni recuperación de acceso.
 - `editorial_hold` se pone `True` en revise UPDATE/CORRECTION; el override de publish no lo pone en `False`.
 - Helpers Rosario / `OUTSIDE_TARGET_LOCALITY` en el gate **no** se usan en `evaluate_editorial_gate`.
 - Filas `LlmUsage` anteriores a A2: USD unknown; atribución inferida de FKs; backfill vs query de embeddings no se parte.

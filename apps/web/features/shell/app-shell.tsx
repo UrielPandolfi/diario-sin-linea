@@ -1,7 +1,8 @@
 "use client";
 
-import { PublicTopBar } from "@/features/shell/public-topbar";
+import { ReaderAuthProvider } from "@/features/auth/reader-context";
 import { MobileNav } from "@/features/shell/mobile-nav";
+import { PublicTopBar } from "@/features/shell/public-topbar";
 import { Sidebar } from "@/features/shell/sidebar";
 import { SiteFooter } from "@/features/shell/site-footer";
 import { usePathname } from "next/navigation";
@@ -12,16 +13,18 @@ export function AppShell({ children, authenticated = false }: { children: ReactN
   const articlePage = pathname?.startsWith("/noticias/") ?? false;
 
   return (
-    <div className="min-h-screen bg-background">
-      <div className="mx-auto flex min-h-screen max-w-[92rem]">
-        <Sidebar authenticated={authenticated} />
-        <div className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
-          <PublicTopBar desktop={!articlePage} authenticated={authenticated} />
-          <div className="min-w-0 flex-1">{children}</div>
-          <SiteFooter />
+    <ReaderAuthProvider authenticated={authenticated}>
+      <div className="min-h-screen bg-background">
+        <div className="mx-auto flex min-h-screen max-w-[92rem]">
+          <Sidebar authenticated={authenticated} />
+          <div className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
+            <PublicTopBar desktop={!articlePage} authenticated={authenticated} />
+            <div className="min-w-0 flex-1">{children}</div>
+            <SiteFooter />
+          </div>
         </div>
+        <MobileNav />
       </div>
-      <MobileNav />
-    </div>
+    </ReaderAuthProvider>
   );
 }

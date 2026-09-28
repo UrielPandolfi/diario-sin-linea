@@ -28,6 +28,26 @@ class ReaderEventLike(Base):
     )
 
 
+class ReaderEventSave(Base):
+    __tablename__ = "reader_event_saves"
+    __table_args__ = (
+        Index("ix_reader_event_saves_reader_id_saved_at", "reader_id", "saved_at"),
+    )
+
+    reader_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("readers.id", ondelete="CASCADE"), primary_key=True
+    )
+    event_id: Mapped[UUID] = mapped_column(
+        Uuid, ForeignKey("events.id", ondelete="CASCADE"), primary_key=True
+    )
+    saved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=utc_now,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
 class ReaderEventRead(Base):
     __tablename__ = "reader_event_reads"
     __table_args__ = (

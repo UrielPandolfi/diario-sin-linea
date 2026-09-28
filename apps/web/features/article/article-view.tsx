@@ -3,6 +3,7 @@
 import { ArticleReadSignal } from "@/features/article/article-read-signal";
 import { GuestSignupBanner } from "@/features/auth/guest-signup-banner";
 import { LikeButton } from "@/features/article/like-button";
+import { SaveButton } from "@/features/article/save-button";
 import { ArticleBody } from "@/features/article/article-body";
 import { PublicHero } from "@/features/article/public-hero";
 import { ReadingSizeToggle, useReadingSize } from "@/features/article/reading-controls";
@@ -139,6 +140,7 @@ export function ArticleView({
               </>
             ) : null}
             <span className="ml-auto flex items-center gap-3">
+              <SaveButton slug={article.slug} guest={guest} returnTo={returnTo ?? href} />
               <LikeButton slug={article.slug} guest={guest} returnTo={returnTo ?? href} />
               <ShareButton href={href} title={article.headline} text={article.summary} />
             </span>

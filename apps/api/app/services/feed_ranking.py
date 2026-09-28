@@ -22,6 +22,7 @@ from app.models import (
     EventUpdate,
     SourceItem,
 )
+from app.models.reader_signal import ReaderEventSave
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.schemas.editorial_evidence import decision_was_evaluated
 from app.services.claim_card_presentation import (
@@ -479,6 +480,38 @@ class FeedRankingService:
             )
         )
         items, next_cursor = self._paginate_scored(ranked, limit=limit, cursor=cursor)
+        return {"items": items, "next_cursor": next_cursor}
+
+    def saved(self, *, reader_id: UUID, limit: int, cursor: str | None) -> dict:
+        live = aliased(ArticleVersion)
+        stmt: Select = (
+            select(Event, Article, live)
+            .join(Article, Article.event_id == Event.id)
+            .join(
+                live,
+                and_(live.article_id == Article.id, live.version_number == Article.published_version),
+            )
+            .join(ReaderEventSave, ReaderEventSave.event_id == Event.id)
+            .options(
+                selectinload(Event.event_sources)
+                .selectinload(EventSource.source_item)
+                .selectinload(SourceItem.source)
+            )
+            .where(ReaderEventSave.reader_id == reader_id)
+            .where(*public_filters())
+            .order_by(ReaderEventSave.saved_at.desc(), Article.id.asc())
+        )
+        rows = [(event, article, live_row) for event, article, live_row in self.session.execute(stmt)]
+        start = 0
+        if cursor:
+            cursor_id = _decode_id_cursor(cursor)
+            found = next((index + 1 for index, row in enumerate(rows) if row[1].id == cursor_id), None)
+            if found is None:
+                raise ValueError("invalid_cursor")
+            start = found
+        window = rows[start : start + limit]
+        items = [card_payload(event, article, live, session=self.session) for event, article, live in window]
+        next_cursor = str(window[-1][1].id) if len(window) == limit and start + limit < len(rows) else None
         return {"items": items, "next_cursor": next_cursor}
 
     def live(self, *, limit: int, cursor: str | None) -> dict:

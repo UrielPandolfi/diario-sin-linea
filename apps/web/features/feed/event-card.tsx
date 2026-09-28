@@ -1,5 +1,6 @@
 "use client";
 
+import { SaveButton } from "@/features/article/save-button";
 import { ShareButton } from "@/features/article/share-button";
 import { PublicHero } from "@/features/article/public-hero";
 import { CardActions, SourceList } from "@/features/feed/source-list";
@@ -8,7 +9,13 @@ import type { EventCard as EventCardType } from "@/lib/api/types";
 import { isMateriallyUpdated } from "@/lib/relative-time";
 import Link from "next/link";
 
-export function EventCard({ item }: { item: EventCardType }) {
+export function EventCard({
+  item,
+  onSavedChange,
+}: {
+  item: EventCardType;
+  onSavedChange?: (saved: boolean) => void;
+}) {
   const href = `/noticias/${item.slug}`;
   const updated = isMateriallyUpdated(item.published_at, item.updated_at);
 
@@ -41,7 +48,10 @@ export function EventCard({ item }: { item: EventCardType }) {
           Actualizado <RelativeTime iso={item.updated_at} />
         </p>
       ) : null}
-      <CardActions share={<ShareButton href={href} title={item.headline} text={item.summary} />} />
+      <CardActions
+        save={<SaveButton slug={item.slug} returnTo={href} onChange={onSavedChange} />}
+        share={<ShareButton href={href} title={item.headline} text={item.summary} />}
+      />
     </article>
   );
 }

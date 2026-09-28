@@ -3,11 +3,11 @@
 import { EventCard } from "@/features/feed/event-card";
 import { FeedEmpty, FeedError, FeedSkeleton } from "@/features/feed/feed-states";
 import { safeReturnTo } from "@/lib/auth/return-to";
-import { PublicApiError, fetchFeed, fetchLive, fetchLocal } from "@/lib/api/public";
+import { PublicApiError, fetchFeed, fetchLive, fetchLocal, fetchSaved } from "@/lib/api/public";
 import type { EventCard as EventCardType, FeedScope } from "@/lib/api/types";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type Kind = FeedScope | "live" | "principal" | "latest";
+type Kind = FeedScope | "live" | "principal" | "latest" | "saved";
 
 async function loadPage(
   kind: Kind,
@@ -15,6 +15,7 @@ async function loadPage(
   cursor: string | null,
 ): Promise<{ items: EventCardType[]; next_cursor: string | null }> {
   if (kind === "live") return fetchLive({ cursor });
+  if (kind === "saved") return fetchSaved({ cursor });
   if (kind === "local") {
     if (!locality) return { items: [], next_cursor: null };
     return fetchLocal({ locality, cursor });
@@ -34,7 +35,7 @@ export function FeedList({
   kind: Kind;
   locality?: string;
   emptyTitle: string;
-  emptyDescription: string;
+  emptyDescription?: string;
 }) {
   const [items, setItems] = useState<EventCardType[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -50,7 +51,7 @@ export function FeedList({
     setLoading(true);
     setCursor(null);
     setError(false);
-    const gated = kind === "principal" || kind === "latest" || kind === "main" || kind === "argentina";
+    const gated = kind === "principal" || kind === "latest" || kind === "saved" || kind === "main" || kind === "argentina";
     let redirecting = false;
     try {
       const page = await loadPage(kind, locality, null);
@@ -120,7 +121,17 @@ export function FeedList({
   return (
     <div>
       {items.map((item) => (
-        <EventCard key={item.public_id} item={item} />
+        <EventCard
+          key={item.public_id}
+          item={item}
+          onSavedChange={
+            kind === "saved"
+              ? (saved) => {
+                  if (!saved) setItems((current) => current.filter((row) => row.public_id !== item.public_id));
+                }
+              : undefined
+          }
+        />
       ))}
       {cursor ? <div ref={sentinel} className="h-8" /> : null}
       {loadingMore ? <FeedSkeleton rows={2} /> : null}

@@ -4,7 +4,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import router as admin_router
 from app.api.auth import router as auth_router
-from app.api.engagement import router as engagement_router
+from app.api.engagement import router as engagement_router, saved_router
 from app.api.admin_cases import router as admin_cases_router
 from app.api.cases import router as cases_router
 from app.api.health import router as health_router
@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
     application.include_router(health_router)
     application.include_router(auth_router)
     application.include_router(engagement_router)
+    application.include_router(saved_router)
     application.include_router(public_router)
     application.include_router(cases_router)
     application.include_router(admin_router)
