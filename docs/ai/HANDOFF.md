@@ -1,17 +1,17 @@
 # Handoff
 
-**Fecha:** 2026-09-28
+**Fecha:** 2026-10-02
 
-**Tarea:** Localidad de interés después del registro, con buscador sobre el catálogo local de GeoRef.
+**Tarea:** Preparar el sitio para producción sin desplegarlo: admin, Next 15.5.27, cuenta, textos legales, ocultar funciones inexistentes, Guardados, «Ahora» y etiquetas de fuente.
 
 ## Resultado
 
-Tras crear la cuenta se pregunta «¿De qué localidad querés estar al tanto?». Se puede continuar con una sugerencia u omitir con «Ahora no». El paso queda en `readers.locality_step` (`pending`, `done`, `skipped`) y no se repite. Quien ya tenía cuenta entra directo y la cambia desde Inicio o Perfil. La preferencia es el id oficial en texto (`interest_locality_id`) y se relaciona con provincia y país en `geo_localities`. Principal usa esa localidad para la cercanía; sin ella, omite el factor. El catálogo se carga una vez con `python -m app.geo.load_localities` (CSV oficial `https://apis.datos.gob.ar/georef/api/v2.0/localidades.csv`, verificado el 2026-09-28). La búsqueda es `GET /api/v1/geo/localities`.
+La contraseña de admin ya no tiene fallback de desarrollo. Vive solo en `.env` (gitignored) para Compose local; producción no se tocó. Las páginas `/admin` consultan `/api/v1/admin/me` y la sesión guarda un sello de la contraseña vigente. Next quedó en 15.5.27 y React en 19.0.8. Recuperar y cambiar contraseña están cableados; sin SMTP la API no afirma un envío. Privacidad y Términos son públicos y no inventan la identidad legal. Seguir, Comentar, mapas, Seguidos y Notificaciones salieron de la interfaz. Guardados se abre desde Perfil. Una republicación sin cambio de texto no vuelve a «Ahora»; si el texto cambia, la entrada dice qué cambió y apunta al mismo artículo. Las etiquetas públicas limpian prefijos de host y omiten títulos ilegibles, sin alterar la URL guardada. Las portadas de IA no se modificaron.
 
 ## Verificación
 
-`tests/test_geo_localities.py`: 2 passed. `npm run typecheck` en `apps/web` pasó. En el navegador: registro muestra el paso, la búsqueda ignora mayúsculas y tildes, Aldao distingue departamento, Rosario se guarda y sigue tras cerrar sesión, se puede cambiar y quitar desde Inicio, Perfil permite elegir, «Ahora no» no vuelve a preguntar, y otra cuenta no hereda la preferencia. Una nota publicada sigue abierta sin sesión. El catálogo de la app quedó en 4028 filas; repetir la carga no duplica.
+API reconstruida: `test_production_prep.py` y `test_reader_auth.py` 16 passed sobre la imagen nueva. Antes, en la imagen anterior con el código montado: `test_admin.py`, `test_saved.py`, `test_publishing.py`, `test_public_api.py` y `test_cases.py` pasaron. Web: `npm test` 60, `tsc --noEmit`, `next lint` y `next build` (Next 15.5.27). El contenedor web ejecuta `npm start` / `next-server` 15.5.27. Alembic local en `0021_account_security`. `dev-admin` responde 401 y la contraseña nueva 200. `/dev/respaldo` responde 404. `/admin` redirige a `/admin/login`. `auto_poll_enabled` está apagado y el proceso local tiene `AUTO_PUBLISH` en false. `pg_dump` custom del Postgres local se listó y se borró; no se restauró encima de la base.
 
 ## Pendiente
 
-Sin commit.
+No hay commit ni despliegue. Producción no se modificó. Faltan SMTP, `COOKIE_SECURE=true`, `SITE_URL` HTTPS, un `APP_SECRET` que no sea el de ejemplo y la identidad legal del responsable.

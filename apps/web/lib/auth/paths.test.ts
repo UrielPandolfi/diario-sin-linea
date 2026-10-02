@@ -8,8 +8,6 @@ test("home and personal areas require a session", () => {
   assert.equal(isPrivateAppPath("/perfil"), true);
   assert.equal(isPrivateAppPath("/perfil/cuenta"), true);
   assert.equal(isPrivateAppPath("/guardados"), true);
-  assert.equal(isPrivateAppPath("/seguidos"), true);
-  assert.equal(isPrivateAppPath("/notificaciones"), true);
   assert.equal(isPrivateAppPath("/en-vivo"), true);
   assert.equal(isPrivateAppPath("/local"), true);
   assert.equal(isPrivateAppPath("/local/rosario"), true);
@@ -25,6 +23,9 @@ test("public sections stay outside the home gate", () => {
     "/contacto",
     "/seguimiento/abc",
     "/como-funciona",
+    "/privacidad",
+    "/terminos",
+    "/cuenta/recuperar",
     "/entrar",
     "/registro",
     "/admin",
@@ -37,4 +38,6 @@ test("public sections stay outside the home gate", () => {
   assert.equal(isAuthEntryPath("/registro"), true);
   assert.equal(isAuthEntryPath("/entrada"), false);
   assert.equal(isPrivateAppPath("/perfiles"), false);
+  assert.equal(isPrivateAppPath("/seguidos"), false);
+  assert.equal(isPrivateAppPath("/notificaciones"), false);
 });

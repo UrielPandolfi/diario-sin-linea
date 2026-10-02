@@ -58,8 +58,17 @@ class Settings(BaseSettings):
 
     redis_url: str = "redis://localhost:6379/0"
     app_secret: str = "dev-secret-change-me"
-    admin_password: str = "dev-admin"
+    # Sin default de desarrollo: el arranque lo rechaza vacío o si sigue siendo un valor conocido.
+    admin_password: str = ""
     cors_origins: str = "http://localhost:3000"
+    site_url: str = "http://localhost:3000"
+    cookie_secure: bool = False
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_from: str = ""
+    smtp_tls: bool = True
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None

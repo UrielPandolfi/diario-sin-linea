@@ -46,6 +46,7 @@ export function NowPanel() {
                   {item.locality ? ` · ${item.locality}` : ""}
                 </p>
                 <p className="mt-1 font-heading text-sm font-semibold leading-snug">{item.headline}</p>
+                {item.notice ? <p className="mt-1 font-sans text-xs text-secondary">{item.notice}</p> : null}
               </Link>
             </li>
           ))}

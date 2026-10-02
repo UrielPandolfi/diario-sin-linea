@@ -1,10 +1,12 @@
 from celery import Celery
 
+from app.core.admin_secret import assert_admin_password
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
 configure_logging("worker")
 settings = get_settings()
+assert_admin_password(settings.admin_password)
 
 celery_app = Celery(
     "sin_linea",

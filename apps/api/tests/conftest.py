@@ -1,6 +1,9 @@
 from collections.abc import Generator
 import os
 
+# La suite no usa la contraseña real ni `dev-admin`. Tiene que cumplir el mínimo de arranque.
+os.environ["ADMIN_PASSWORD"] = "pytest-admin-password-do-not-use-in-production-0001"
+
 import pytest
 from alembic import command
 from alembic.config import Config

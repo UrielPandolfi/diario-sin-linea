@@ -115,7 +115,9 @@ export default function AdminCaseDetailPage() {
       </Link>
       <div>
         <p className="font-heading text-sm uppercase tracking-[0.18em] text-accent-ochre">{row.public_code}</p>
-        <h1 className="mt-2 font-heading text-3xl text-primary">{row.reason}</h1>
+        <h1 className="mt-2 font-heading text-3xl text-primary">
+          {row.reason === "ACCOUNT_DELETION" ? "Eliminación de cuenta" : row.reason}
+        </h1>
         <p className="mt-2 font-sans text-sm text-secondary">
           {row.status}
           {row.outcome ? ` · ${row.outcome}` : ""} · {formatWhen(row.created_at)}

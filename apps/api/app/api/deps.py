@@ -1,3 +1,4 @@
+import hmac
 from typing import Annotated
 from urllib.parse import urlparse
 from uuid import UUID
@@ -8,16 +9,21 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.db import get_db
 from app.models.reader import Reader
-from app.services.reader_auth import READER_COOKIE, read_reader_token
+from app.core.admin_secret import admin_session_stamp
+from app.services.reader_auth import READER_COOKIE, read_reader_session
 
 DbSession = Annotated[Session, Depends(get_db)]
 
 
 def optional_reader(request: Request, db: DbSession) -> Reader | None:
-    sub = read_reader_token(request.cookies.get(READER_COOKIE), get_settings().app_secret)
-    if sub is None:
+    parsed = read_reader_session(request.cookies.get(READER_COOKIE), get_settings().app_secret)
+    if parsed is None:
         return None
-    return db.get(Reader, UUID(sub))
+    sub, generation = parsed
+    reader = db.get(Reader, UUID(sub))
+    if reader is None or int(reader.session_generation or 0) != generation:
+        return None
+    return reader
 
 
 def require_reader(request: Request, db: DbSession) -> Reader:
@@ -28,7 +34,13 @@ def require_reader(request: Request, db: DbSession) -> Reader:
 
 
 def require_admin(request: Request) -> None:
-    if request.session.get("admin") is not True:
+    settings = get_settings()
+    stamp = request.session.get("admin_stamp")
+    expected = admin_session_stamp(settings.admin_password)
+    if request.session.get("admin") is not True or not isinstance(stamp, str):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No autenticado")
+    if not hmac.compare_digest(stamp, expected):
+        request.session.clear()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No autenticado")
 
 

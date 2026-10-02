@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, String, Uuid
+from sqlalchemy import ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -18,3 +18,4 @@ class Reader(TimestampMixin, Base):
         nullable=True,
     )
     locality_step: Mapped[str] = mapped_column(String(16), nullable=False, default="done", server_default="done")
+    session_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")

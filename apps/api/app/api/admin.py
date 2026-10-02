@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.api.deps import DbSession, require_admin, require_admin_origin
+from app.core.admin_secret import admin_passwords_match, admin_session_stamp
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.source_content import body_source_from_item, has_extracted_body
@@ -284,9 +285,11 @@ def _header_tokens(*, calls: int, total_tokens: int) -> int | None:
 @router.post("/login")
 def login(payload: LoginBody, request: Request) -> dict:
     settings = get_settings()
-    if not settings.admin_password or payload.password != settings.admin_password:
+    if not admin_passwords_match(payload.password, settings.admin_password):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Contraseña incorrecta")
+    request.session.clear()
     request.session["admin"] = True
+    request.session["admin_stamp"] = admin_session_stamp(settings.admin_password)
     return {"ok": True}
 
 

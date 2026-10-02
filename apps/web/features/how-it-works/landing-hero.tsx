@@ -1,3 +1,4 @@
+import { registerPath } from "@/lib/auth/return-to";
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
@@ -199,10 +200,10 @@ export function LandingHero() {
                 Ver el proceso
               </a>
               <Link
-                href="/"
+                href={registerPath("/")}
                 className="border border-border px-5 py-3 font-sans text-sm font-medium text-primary transition-colors hover:border-accent-petrol hover:text-accent-petrol"
               >
-                Ir a las noticias
+                Crear cuenta para ver el inicio
               </Link>
             </div>
           </div>

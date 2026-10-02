@@ -2,6 +2,8 @@
 
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { LocalitySearch } from "@/features/locality/locality-search";
+import { DeletionRequestForm } from "@/features/profile/deletion-request-form";
+import { PasswordChangeForm } from "@/features/profile/password-change-form";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
 import Link from "next/link";
@@ -46,6 +48,18 @@ export function ProfileView() {
       </section>
 
       <section className="mt-8 space-y-3 border-t border-border pt-6">
+        <h2 className="font-heading text-sm text-primary">Guardados</h2>
+        <Link href="/guardados" className="inline-block font-sans text-sm">
+          Ver notas guardadas
+        </Link>
+      </section>
+
+      <section className="mt-8 space-y-3 border-t border-border pt-6">
+        <h2 className="font-heading text-sm text-primary">Contraseña</h2>
+        <PasswordChangeForm />
+      </section>
+
+      <section className="mt-8 space-y-3 border-t border-border pt-6">
         <h2 className="font-heading text-sm text-primary">Apariencia</h2>
         <ThemeToggle variant="labeled" />
       </section>
@@ -55,9 +69,20 @@ export function ProfileView() {
         <Link href="/contacto" className="block font-sans text-sm">
           Contacto
         </Link>
-        <Link href="/como-funciona" className="inline-block font-sans text-sm">
+        <Link href="/como-funciona" className="block font-sans text-sm">
           Cómo funciona
         </Link>
+        <Link href="/privacidad" className="block font-sans text-sm">
+          Privacidad
+        </Link>
+        <Link href="/terminos" className="block font-sans text-sm">
+          Términos y condiciones
+        </Link>
+      </section>
+
+      <section className="mt-8 space-y-3 border-t border-border pt-6">
+        <h2 className="font-heading text-sm text-primary">Eliminar cuenta</h2>
+        <DeletionRequestForm />
       </section>
 
       <SignOutButton className="mt-10 border border-border bg-hover text-primary hover:bg-surface-secondary" />

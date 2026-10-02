@@ -15,6 +15,7 @@ import { LandingFooter, LandingHeader } from "@/features/how-it-works/landing-ch
 import { LandingHero } from "@/features/how-it-works/landing-hero";
 import { ProcessStepper, type ProcessStep } from "@/features/how-it-works/process-stepper";
 import { Reveal } from "@/features/how-it-works/reveal";
+import { loginPath } from "@/lib/auth/return-to";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -292,16 +293,16 @@ export function HowItWorksPage() {
               </h2>
               <div className="mt-9 flex flex-wrap items-center gap-3 md:mt-11">
                 <Link
-                  href="/"
+                  href={loginPath("/")}
                   className="rounded-lg bg-action px-5 py-3 font-sans text-sm font-medium text-on-action transition-opacity hover:opacity-90"
                 >
-                  Ver las noticias
+                  Entrar para ver el inicio
                 </Link>
                 <Link
-                  href="/en-vivo"
+                  href={loginPath("/en-vivo")}
                   className="border border-border px-5 py-3 font-sans text-sm font-medium text-primary transition-colors hover:border-accent-petrol hover:text-accent-petrol"
                 >
-                  Sucesos en desarrollo
+                  Entrar a sucesos en desarrollo
                 </Link>
               </div>
             </Reveal>

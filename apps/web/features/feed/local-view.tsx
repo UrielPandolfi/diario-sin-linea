@@ -2,7 +2,6 @@
 
 import { FeedList } from "@/features/feed/feed-list";
 import { LocalitySearch } from "@/features/locality/locality-search";
-import { UpcomingFeature } from "@/features/upcoming/upcoming-feature";
 import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
 import { useEffect, useState } from "react";
 
@@ -46,7 +45,6 @@ export function LocalView() {
           Elegí una localidad para ver los sucesos de ese lugar.
         </p>
       )}
-      <UpcomingFeature compact title="Mapa" description="Explorá qué está pasando alrededor tuyo." />
     </div>
   );
 }

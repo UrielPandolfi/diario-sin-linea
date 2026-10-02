@@ -2,6 +2,7 @@
 
 import { BrandMark } from "@/features/shell/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { loginPath } from "@/lib/auth/return-to";
 import Link from "next/link";
 import { useEffect, useRef } from "react";
 
@@ -36,7 +37,7 @@ export function LandingHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-4 px-5 md:h-16 md:px-8">
-        <Link href="/" className="flex items-center gap-2.5 text-primary">
+        <Link href="/como-funciona" className="flex items-center gap-2.5 text-primary">
           <BrandMark className="h-7 w-7 shrink-0" />
           <span className="font-heading text-[13px] font-medium uppercase tracking-[0.16em] text-primary">
             Sin Línea
@@ -58,10 +59,10 @@ export function LandingHeader() {
         <div className="flex items-center gap-1">
           <ThemeToggle />
           <Link
-            href="/"
+            href={loginPath("/")}
             className="shrink-0 rounded-lg border border-border px-3.5 py-2 font-sans text-[13px] font-medium text-primary transition-colors hover:border-accent hover:text-accent md:px-4"
           >
-            Ver las noticias
+            Entrar para ver el inicio
           </Link>
         </div>
       </div>
@@ -83,14 +84,20 @@ export function LandingFooter() {
           <p className="mt-2 font-sans text-sm text-secondary">Los hechos. El criterio es tuyo.</p>
         </div>
         <nav aria-label="Sitio" className="flex flex-wrap gap-x-6 gap-y-2 font-sans text-sm text-secondary">
-          <Link href="/" className="text-secondary hover:text-primary">
-            Inicio
+          <Link href={loginPath("/")} className="text-secondary hover:text-primary">
+            Entrar al inicio
           </Link>
-          <Link href="/en-vivo" className="text-secondary hover:text-primary">
-            En vivo
+          <Link href={loginPath("/en-vivo")} className="text-secondary hover:text-primary">
+            Entrar a En vivo
           </Link>
           <Link href="/contacto" className="text-secondary hover:text-primary">
             Contacto
+          </Link>
+          <Link href="/privacidad" className="text-secondary hover:text-primary">
+            Privacidad
+          </Link>
+          <Link href="/terminos" className="text-secondary hover:text-primary">
+            Términos
           </Link>
         </nav>
       </div>

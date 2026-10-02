@@ -10,7 +10,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 | --- | --- |
 | `apps/web/` | Next.js 15 (App Router): UI pública + `/admin` |
 | `apps/api/app/` | FastAPI, dominio, servicios, workers Celery |
-| `apps/api/migrations/versions/` | Alembic (`0001` … `0020_reader_locality`) |
+| `apps/api/migrations/versions/` | Alembic (`0001` … `0021_account_security`) |
 | `apps/api/tests/` | Pytest |
 | `docker-compose.yml` | postgres, redis, api, worker, beat, web |
 | `scripts/run_editorial_eval.py` | Eval editorial (fixtures; no RSS) |
@@ -38,7 +38,7 @@ Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gus
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil`, `/guardados`, `/seguidos` y `/notificaciones` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]` y `/como-funciona` siguen abiertas. Stubs: `/seguidos`, `/notificaciones`. Cuenta: `/entrar`, `/registro`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`, `/privacidad`, `/terminos`, `/cuenta/recuperar`, `/cuenta/restablecer`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil` y `/guardados` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]`, `/como-funciona`, `/privacidad` y `/terminos` siguen abiertas. `/seguidos` y `/notificaciones` responden 404. Cuenta: `/entrar`, `/registro`. Cliente: `apps/web/lib/api/`, `features/`.
 
 `/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
 

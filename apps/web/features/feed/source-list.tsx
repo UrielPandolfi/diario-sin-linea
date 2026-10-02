@@ -1,8 +1,6 @@
 "use client";
 
-import { UpcomingAction } from "@/features/upcoming/upcoming-feature";
 import type { ArticleSource } from "@/lib/api/types";
-import { MessageCircle, UserPlus } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function SourceList({ sources }: { sources: ArticleSource[] }) {
@@ -49,14 +47,6 @@ export function CardActions({ save, share }: { save?: ReactNode; share: ReactNod
   return (
     <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
       {save}
-      <UpcomingAction>
-        <UserPlus className="h-3.5 w-3.5" aria-hidden />
-        Seguir
-      </UpcomingAction>
-      <UpcomingAction>
-        <MessageCircle className="h-3.5 w-3.5" aria-hidden />
-        Comentar
-      </UpcomingAction>
       {share}
     </div>
   );

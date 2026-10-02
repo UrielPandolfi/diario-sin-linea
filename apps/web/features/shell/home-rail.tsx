@@ -1,6 +1,5 @@
 "use client";
 
-import { UpcomingFeature } from "@/features/upcoming/upcoming-feature";
 import { NearbyPanel } from "@/features/nearby/nearby-panel";
 import { NowPanel } from "@/features/live/now-panel";
 import { ContextSheets } from "@/features/shell/context-sheets";
@@ -29,9 +28,6 @@ export function HomeRail({ label }: { label: string | null }) {
     <aside className="hidden min-h-screen w-[18rem] shrink-0 overflow-y-auto lg:sticky lg:top-0 lg:block lg:h-screen lg:border-l lg:border-border">
       <NowPanel />
       {label ? <NearbyPanel label={label} /> : null}
-      <div className="border-t border-border">
-        <UpcomingFeature compact title="Mapa" description="Explorá qué está pasando alrededor tuyo." />
-      </div>
     </aside>
   );
 }

@@ -11,6 +11,7 @@ from app.domain.enums import ArticleStatus, EventStatus, EventUpdateType, Pipeli
 from app.models import Article, Event, EventUpdate, PipelineRun
 from app.repositories import ArticleRepository, EventRepository, PipelineRunRepository
 from app.services.audit_policy import blocking_issues, normalized_structural_issues
+from app.services.public_updates import material_notice
 from app.services.hero_image_service import schedule_after_commit
 from app.services.pipeline_lock import PUBLISHING_STAGE, is_write_audit_publish_busy
 
@@ -198,6 +199,16 @@ class PublishService:
 
         now = utc_now()
         first_publish = article.published_at is None or article.published_version is None
+        previous = (
+            None
+            if first_publish or article.published_version is None
+            else self.articles.get_version(article.id, article.published_version)
+        )
+        version = self.articles.get_version(article.id, article.current_version)
+        notice = None if first_publish else material_notice(previous, version)
+        if not first_publish and previous is None:
+            notice = "Actualización del artículo."
+        material = first_publish or notice is not None
         if article.published_at is None:
             article.published_at = now
         article.published_version = article.current_version
@@ -205,9 +216,8 @@ class PublishService:
         event.status = EventStatus.PUBLISHED
         if event.slug is None:
             event.slug = article.slug
-        if not first_publish:
+        if material and not first_publish:
             event.last_material_update_at = now
-        version = self.articles.get_version(article.id, article.current_version)
         if version is not None:
             version.published_at = now
         self.session.add(
@@ -216,7 +226,8 @@ class PublishService:
                 update_type=EventUpdateType.ARTICLE_UPDATED,
                 headline=article.headline,
                 summary=article.summary,
-                is_material=True,
+                is_material=material,
+                public_notice=notice,
                 occurred_at=now,
             )
         )

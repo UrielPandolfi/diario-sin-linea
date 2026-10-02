@@ -126,6 +126,7 @@ class EventUpdate(TimestampMixin, Base):
     headline: Mapped[str] = mapped_column(Text, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text)
     is_material: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    public_notice: Mapped[str | None] = mapped_column(Text)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, server_default=func.now(), nullable=False
     )

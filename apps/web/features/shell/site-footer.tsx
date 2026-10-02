@@ -10,6 +10,12 @@ export function SiteFooter() {
         <Link href="/como-funciona" className="text-secondary hover:text-primary">
           Cómo funciona
         </Link>
+        <Link href="/privacidad" className="text-secondary hover:text-primary">
+          Privacidad
+        </Link>
+        <Link href="/terminos" className="text-secondary hover:text-primary">
+          Términos
+        </Link>
       </nav>
     </footer>
   );

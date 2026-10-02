@@ -130,6 +130,7 @@ export type NowItem = {
   headline: string;
   slug: string;
   public_id: string;
+  notice?: string | null;
 };
 
 export type CursorPage = {

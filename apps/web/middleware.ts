@@ -6,8 +6,29 @@ import { isIndexableDeploy } from "@/lib/seo/site-url";
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+async function adminSession(request: NextRequest): Promise<boolean> {
+  const api = process.env.API_URL || "http://localhost:8000";
+  try {
+    const response = await fetch(`${api}/api/v1/admin/me`, {
+      headers: { cookie: request.headers.get("cookie") ?? "" },
+      cache: "no-store",
+    });
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
+  if ((pathname === "/admin" || pathname.startsWith("/admin/")) && pathname !== "/admin/login") {
+    if (!(await adminSession(request))) {
+      return NextResponse.redirect(new URL("/admin/login", request.url));
+    }
+  }
+  if (process.env.NODE_ENV === "production" && (pathname === "/dev" || pathname.startsWith("/dev/"))) {
+    return NextResponse.next();
+  }
   const reader = await verifyReaderToken(request.cookies.get(READER_COOKIE)?.value, readerSessionSecret());
   const authenticated = reader !== null;
 

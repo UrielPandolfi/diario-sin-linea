@@ -133,6 +133,7 @@ class CaseReason(StrEnum):
     WHY_WRITTEN = "WHY_WRITTEN"
     WHY_PUBLISHED = "WHY_PUBLISHED"
     OTHER = "OTHER"
+    ACCOUNT_DELETION = "ACCOUNT_DELETION"
 
 
 class CaseActionType(StrEnum):

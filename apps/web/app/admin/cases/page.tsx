@@ -26,7 +26,12 @@ const REASON_OPTIONS = [
   "WHY_WRITTEN",
   "WHY_PUBLISHED",
   "OTHER",
+  "ACCOUNT_DELETION",
 ];
+
+const REASON_LABELS: Record<string, string> = {
+  ACCOUNT_DELETION: "Eliminación de cuenta",
+};
 
 export default function AdminCasesPage() {
   const [rows, setRows] = useState<CaseRow[]>([]);
@@ -78,7 +83,7 @@ export default function AdminCasesPage() {
           >
             {REASON_OPTIONS.map((item) => (
               <option key={item || "all"} value={item}>
-                {item || "Todos"}
+                {REASON_LABELS[item] || item || "Todos"}
               </option>
             ))}
           </select>
@@ -92,7 +97,7 @@ export default function AdminCasesPage() {
           {rows.map((row) => (
             <li key={row.id} className="px-4 py-3">
               <Link href={`/admin/cases/${row.id}`} className="font-sans text-sm text-primary">
-                {row.public_code} · {row.status} · {row.reason}
+                {row.public_code} · {row.status} · {REASON_LABELS[row.reason] || row.reason}
               </Link>
               <p className="mt-1 font-sans text-xs text-secondary">
                 {row.headline ?? "Consulta general"}

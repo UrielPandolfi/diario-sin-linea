@@ -284,6 +284,7 @@ def live_content(session: Session, article: Article) -> ArticleVersion | None:
 
 
 def source_payloads(event: Event) -> list[dict]:
+    from app.services.source_labels import public_source_name, public_source_title
     rows: list[dict] = []
     seen: set[str] = set()
     event_places = event_geo_keys(event)
@@ -301,10 +302,13 @@ def source_payloads(event: Event) -> list[dict]:
         seen.add(key)
         rows.append(
             {
-                "name": source.name if source is not None else None,
+                "name": public_source_name(
+                    source.name if source is not None else None,
+                    source.domain if source is not None else None,
+                ),
                 "domain": source.domain if source is not None else None,
                 "url": url,
-                "title": item.title,
+                "title": public_source_title(item.title),
             }
         )
     return rows
@@ -394,6 +398,8 @@ def public_history(
     article: Article,
     corrections: list[Correction],
     updates: list[EventUpdate],
+    *,
+    session: Session | None = None,
 ) -> list[dict]:
     items: list[dict] = []
     if article.published_at is not None:
@@ -414,17 +420,26 @@ def public_history(
                 "headline": None,
             }
         )
-    published_at = article.published_at
     for update in updates:
         if update.update_type != EventUpdateType.ARTICLE_UPDATED or not update.is_material:
             continue
-        if published_at is not None and update.occurred_at <= published_at + timedelta(seconds=2):
+        from app.services.public_updates import previous_published, public_update_notice, version_matching
+
+        matched = version_matching(session, article.id, update.occurred_at) if session is not None else None
+        if matched is not None and previous_published(session, matched) is None:
             continue
+        notice = update.public_notice
+        if not notice and session is not None:
+            notice = public_update_notice(session, article.id, update.occurred_at, update.public_notice)
+            if notice is None:
+                continue
+            if notice == "":
+                notice = None
         items.append(
             {
                 "type": "pipeline_update",
                 "occurred_at": iso(update.occurred_at),
-                "notice": None,
+                "notice": notice,
                 "headline": update.headline,
             }
         )
@@ -450,7 +465,7 @@ def article_payload(event: Event, article: Article, live: ArticleVersion, *, ses
         "published_version": article.published_version,
         "article_id": str(article.id),
         "notices": public_notices(corrections),
-        "history": public_history(article, corrections, updates),
+        "history": public_history(article, corrections, updates, session=session),
         "claims": compact_public_claims(
             session, event, allowed_ids=allowed, freeze_to_version=article.published_version
         ),
@@ -563,10 +578,15 @@ class FeedRankingService:
             .where(EventUpdate.update_type == EventUpdateType.ARTICLE_UPDATED)
             .where(EventUpdate.is_material.is_(True))
             .order_by(EventUpdate.occurred_at.desc())
-            .limit(clamp_limit(limit))
+            .limit(min(clamp_limit(limit) * 8, 200))
         )
         items = []
         for update, event, article in self.session.execute(stmt):
+            from app.services.public_updates import public_update_notice
+
+            notice = public_update_notice(self.session, article.id, update.occurred_at, update.public_notice)
+            if notice is None:
+                continue
             items.append(
                 {
                     "occurred_at": iso(update.occurred_at),
@@ -575,6 +595,7 @@ class FeedRankingService:
                     "slug": article.slug,
                     "public_id": str(event.public_id),
                     "kind": "pipeline_update",
+                    "notice": notice or None,
                 }
             )
         corr_stmt = (

@@ -23,7 +23,7 @@ Monolito modular + workers asíncronos:
 cp .env.example .env
 ```
 
-Para el Admin local, `.env.example` ya trae `ADMIN_PASSWORD=dev-admin` y `APP_SECRET=dev-secret-change-me`. `SITE_URL` es el origen público del frontend (canonical, Open Graph, sitemap); en Compose local queda `http://localhost:3000`. Las claves de IA (M3) no hacen falta para levantar el stack ni para el poll manual; sí hacen falta en el **worker** para extraer/vincular sucesos con modelos reales. Compose define `DATABASE_URL` y `REDIS_URL` hacia los servicios internos.
+`ADMIN_PASSWORD` es obligatoria, de al menos 32 caracteres, y no puede ser un valor de desarrollo. No va en el repositorio: se carga en `.env` local o en el secreto del despliegue. Si está vacía o es de desarrollo, la API y el worker no arrancan. `APP_SECRET` firma las sesiones; en producción no dejes el valor de ejemplo. `SITE_URL` es el origen público del frontend (canonical, Open Graph, sitemap y el enlace de restablecer contraseña). `COOKIE_SECURE=true` solo con HTTPS. El restablecimiento de contraseña necesita `SMTP_HOST` y `SMTP_FROM`; si faltan, la API no dice que envió un correo. En Compose local, `SITE_URL` queda `http://localhost:3000`. Las claves de IA no hacen falta para levantar el stack ni para el poll manual; sí hacen falta en el **worker** para extraer y vincular sucesos con modelos reales. Compose define `DATABASE_URL` y `REDIS_URL` hacia los servicios internos.
 
 2. Levantá todo:
 
@@ -123,7 +123,21 @@ Worker y Beat arrancan con Compose. El worker escucha `ingestion`, `event_detect
 docker compose exec api celery -A app.workers.celery_app inspect ping
 ```
 
-Poll periódico (Beat): tarea `app.workers.tasks.poll_monitored_sources`, intervalo default 300s.
+Poll periódico (Beat): tarea `app.workers.tasks.poll_monitored_sources`, intervalo default 300s. Si `auto_poll_enabled` está apagado, la tarea no encola. Se apaga desde el admin (`PATCH /api/v1/admin/ingestion` con `{"auto_poll_enabled": false}`). `MAX_NEW_EVENTS_PER_POLL=0` corta los sucesos nuevos por poll. Parar el worker y Beat detiene el procesamiento.
+
+## Respaldo
+
+Postgres persiste en el volumen `postgres_data`. Un dump local, sin tocar el archivo de secretos:
+
+```bash
+docker compose exec postgres pg_dump -U sin_linea -Fc sin_linea > respaldo.dump
+```
+
+Restaurar en una base vacía o de prueba, no encima de datos que quieras conservar sin revisar:
+
+```bash
+docker compose exec -T postgres pg_restore -U sin_linea -d sin_linea --clean --if-exists < respaldo.dump
+```
 
 ## Stack
 

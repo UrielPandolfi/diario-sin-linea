@@ -80,18 +80,28 @@ def _b64url_decode(value: str) -> bytes | None:
         return None
 
 
-def canonical_payload(sub: str, exp: int) -> str:
-    return json.dumps({"exp": exp, "sub": sub}, separators=(",", ":"), sort_keys=True)
+def canonical_payload(sub: str, exp: int, generation: int = 0) -> str:
+    payload: dict[str, int | str] = {"exp": exp, "sub": sub}
+    if generation:
+        payload["v"] = generation
+    return json.dumps(payload, separators=(",", ":"), sort_keys=True)
 
 
-def issue_reader_token(sub: UUID | str, secret: str, *, now: int | None = None, ttl: int = READER_SESSION_TTL) -> str:
+def issue_reader_token(
+    sub: UUID | str,
+    secret: str,
+    *,
+    now: int | None = None,
+    ttl: int = READER_SESSION_TTL,
+    generation: int = 0,
+) -> str:
     issued_at = int(time.time()) if now is None else int(now)
-    body = _b64url(canonical_payload(str(sub), issued_at + ttl).encode("utf-8"))
+    body = _b64url(canonical_payload(str(sub), issued_at + ttl, generation).encode("utf-8"))
     signature = hmac.new(secret.encode("utf-8"), body.encode("ascii"), hashlib.sha256).digest()
     return f"{body}.{_b64url(signature)}"
 
 
-def read_reader_token(token: str | None, secret: str, *, now: int | None = None) -> str | None:
+def read_reader_session(token: str | None, secret: str, *, now: int | None = None) -> tuple[str, int] | None:
     if not token or not secret or token.count(".") != 1:
         return None
     body, signature = token.split(".", 1)
@@ -110,7 +120,8 @@ def read_reader_token(token: str | None, secret: str, *, now: int | None = None)
         return None
     sub = payload.get("sub")
     exp = payload.get("exp")
-    if not isinstance(sub, str) or not isinstance(exp, int):
+    generation = payload.get("v", 0)
+    if not isinstance(sub, str) or type(exp) is not int or type(generation) is not int:
         return None
     try:
         UUID(sub)
@@ -119,4 +130,11 @@ def read_reader_token(token: str | None, secret: str, *, now: int | None = None)
     current = int(time.time()) if now is None else int(now)
     if exp <= current:
         return None
-    return sub
+    return sub, generation
+
+
+def read_reader_token(token: str | None, secret: str, *, now: int | None = None) -> str | None:
+    session = read_reader_session(token, secret, now=now)
+    if session is None:
+        return None
+    return session[0]

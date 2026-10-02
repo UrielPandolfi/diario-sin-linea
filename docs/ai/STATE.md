@@ -225,7 +225,7 @@ Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en ti
 
 ## Parcial / stub / posible defecto
 
-- UI “Próximamente”: `/seguidos` y `/notificaciones`. Me gusta y Guardados ya persisten por lector (`reader_event_likes`, `reader_event_saves`). No hay Poneme al día. Mapa en local/home. No hay login social ni recuperación de acceso.
+- Seguidos, Notificaciones, Seguir, Comentar y los mapas de Inicio y Local salieron de la interfaz. `/seguidos` y `/notificaciones` responden 404. Me gusta sigue siendo personalización, sin lista. Guardados se abre desde Perfil. No hay Poneme al día. No hay login social. La identidad legal del responsable no está publicada. El correo de restablecimiento queda inactivo hasta configurar SMTP.
 - `editorial_hold` se pone `True` en revise UPDATE/CORRECTION; el override de publish no lo pone en `False`.
 - Helpers Rosario / `OUTSIDE_TARGET_LOCALITY` en el gate **no** se usan en `evaluate_editorial_gate`.
 - Filas `LlmUsage` anteriores a A2: USD unknown; atribución inferida de FKs; backfill vs query de embeddings no se parte.

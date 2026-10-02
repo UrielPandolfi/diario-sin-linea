@@ -116,7 +116,25 @@ export function AuthFrame({
                 className="sl-input mt-1"
               />
             </label>
-            {register ? <p className="font-sans text-xs text-muted">Mínimo 8 caracteres.</p> : null}
+            {register ? (
+              <p className="font-sans text-xs text-muted">
+                Mínimo 8 caracteres. Al crear la cuenta aceptás los{" "}
+                <Link href="/terminos" className="underline">
+                  Términos
+                </Link>{" "}
+                y la{" "}
+                <Link href="/privacidad" className="underline">
+                  Privacidad
+                </Link>
+                .
+              </p>
+            ) : (
+              <p className="font-sans text-xs text-muted">
+                <Link href="/cuenta/recuperar" className="underline">
+                  Olvidé mi contraseña
+                </Link>
+              </p>
+            )}
             {error ? (
               <p role="alert" className="font-sans text-sm text-accent-ochre">
                 {error}

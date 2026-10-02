@@ -3,8 +3,6 @@ const AUTH_ENTRY = ["/entrar", "/registro"] as const;
 const PRIVATE_PREFIXES = [
   "/perfil",
   "/guardados",
-  "/seguidos",
-  "/notificaciones",
   "/en-vivo",
   "/local",
   "/buscar",

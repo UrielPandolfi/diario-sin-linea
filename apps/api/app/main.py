@@ -10,11 +10,13 @@ from app.api.admin_cases import router as admin_cases_router
 from app.api.cases import router as cases_router
 from app.api.health import router as health_router
 from app.api.public import router as public_router
+from app.core.admin_secret import assert_admin_password
 from app.core.config import get_settings
 from app.core.logging import configure_logging
 
 configure_logging("api")
 settings = get_settings()
+assert_admin_password(settings.admin_password)
 
 
 def create_app() -> FastAPI:
@@ -24,7 +26,7 @@ def create_app() -> FastAPI:
         secret_key=settings.app_secret,
         session_cookie="sl_admin",
         same_site="lax",
-        https_only=False,
+        https_only=settings.cookie_secure,
         max_age=60 * 60 * 12,
     )
     application.add_middleware(
