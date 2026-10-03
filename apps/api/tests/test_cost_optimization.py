@@ -16,9 +16,10 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.usage_context import usage_scope
-from app.domain.enums import ArticleStatus, IngestionMethod, PipelineStatus
-from app.models import Article, Claim, Correction, LlmUsage, PipelineRun
+from app.domain.enums import ArticleStatus, EvidenceType, IngestionMethod, PipelineStatus
+from app.models import Article, Claim, ClaimEvidence, Correction, LlmUsage, PipelineRun
 from app.models.event import EventSource as EventSourceModel
+from app.models.provider_cache import ProviderResultCache
 from app.providers.base import SearchHit, SearchQuery
 from app.providers.model_profile import profile_for
 from app.providers.openai_provider import OpenAIStructuredProvider
@@ -252,6 +253,19 @@ def test_search_cache_reuses_only_fresh_success(monkeypatch, db_session: Session
         execute_cached_search(provider="exa", parameters={"query": "falla"}, fetch=boom)
     assert calls["n"] == 4
 
+    digest = search_request_hash("exa", params)
+    row = db_session.scalars(
+        select(ProviderResultCache).where(
+            ProviderResultCache.request_hash == digest,
+            ProviderResultCache.status == "success",
+        )
+    ).one()
+    assert row is not None
+    row.expires_at = utc_now() - timedelta(seconds=1)
+    db_session.commit()
+    execute_cached_search(provider="exa", parameters=params, fetch=fetch)
+    assert calls["n"] == 5
+
 
 def test_search_cache_single_flight(monkeypatch, db_session: Session) -> None:
     monkeypatch.setattr(get_settings(), "search_cache_enabled", True)
@@ -422,6 +436,114 @@ def test_verification_reuse_requires_identity_ttl_and_real_pairing(db_session: S
     link = db_session.scalars(select(EventSourceModel).where(EventSourceModel.event_id == event.id)).one()
     verify.finished_at = utc_now() - timedelta(minutes=5)
     link.added_at = utc_now()
+    db_session.commit()
+    db_session.refresh(event)
+    assert reusable_verification(db_session, event) is None
+
+
+def test_reuse_ttl_matches_the_news_cycle() -> None:
+    settings = get_settings()
+    assert settings.search_cache_ttl_seconds == 1800
+    assert settings.verification_reuse_ttl_seconds == 7200
+
+
+def test_same_claim_text_new_evidence_invalidates_before_ttl(db_session: Session, monkeypatch) -> None:
+    monkeypatch.setattr(get_settings(), "verification_reuse_enabled", True)
+    event, claim = _event(db_session)
+    source_item = event.event_sources[0].source_item
+    evidence = ClaimEvidence(
+        claim_id=claim.id,
+        source_item_id=source_item.id,
+        evidence_type=EvidenceType.SUPPORTS,
+        excerpt="hubo un choque",
+        source_url=source_item.url,
+    )
+    db_session.add(evidence)
+    claim_run = PipelineRun(
+        event_id=event.id,
+        stage="claim_resolution",
+        status=PipelineStatus.SUCCESS,
+        finished_at=utc_now(),
+        metadata_json={"claims_fingerprint": "fp-1"},
+    )
+    db_session.add(claim_run)
+    db_session.commit()
+    db_session.refresh(event)
+    identity = verification_identity(db_session, event)
+    verify = PipelineRun(
+        event_id=event.id,
+        stage="verification",
+        status=PipelineStatus.SUCCESS,
+        finished_at=utc_now(),
+        metadata_json={
+            "reuse_identity": identity,
+            "claims_fingerprint": "fp-1",
+            "based_on_claim_run_id": str(claim_run.id),
+            "selected": [{"claim_id": str(claim.id)}],
+            "decision_by_claim_id": {str(claim.id): {"label": "attributed"}},
+            "search_unavailable": False,
+        },
+    )
+    db_session.add(verify)
+    db_session.commit()
+    reused = reusable_verification(db_session, event)
+    assert reused is not None
+    assert reused["reused_from"] == str(verify.id)
+    assert reused["based_on_claim_run_id"] == str(claim_run.id)
+
+    evidence.excerpt = "hubo un choque y una corrección posterior"
+    db_session.commit()
+    db_session.refresh(event)
+    assert claim.canonical_text == "hubo un choque"
+    assert reusable_verification(db_session, event) is None
+
+    evidence.excerpt = "hubo un choque"
+    evidence.evidence_type = EvidenceType.CONTRADICTS
+    db_session.commit()
+    db_session.refresh(event)
+    assert reusable_verification(db_session, event) is None
+
+    evidence.evidence_type = EvidenceType.SUPPORTS
+    source_item.content_hash = "otra-procedencia"
+    db_session.commit()
+    db_session.refresh(event)
+    assert reusable_verification(db_session, event) is None
+
+    source_item.content_hash = "costo-a"
+    db_session.commit()
+    db_session.refresh(event)
+    assert reusable_verification(db_session, event) is not None
+
+    monkeypatch.setattr(get_settings(), "cost_profile", "candidate")
+    assert reusable_verification(db_session, event) is None
+    monkeypatch.setattr(get_settings(), "cost_profile", "current")
+
+    verify.metadata_json = {**verify.metadata_json, "search_unavailable": True}
+    db_session.commit()
+    assert reusable_verification(db_session, event) is None
+
+    verify.metadata_json = {
+        **verify.metadata_json,
+        "search_unavailable": False,
+        "selected": [{"claim_id": str(claim.id)}, {"claim_id": "faltante"}],
+    }
+    db_session.commit()
+    assert reusable_verification(db_session, event) is None
+
+    verify.status = PipelineStatus.FAILED
+    verify.metadata_json = {
+        **verify.metadata_json,
+        "selected": [{"claim_id": str(claim.id)}],
+    }
+    db_session.commit()
+    assert reusable_verification(db_session, event) is None
+
+    expired_at = utc_now() - timedelta(hours=3)
+    verify.finished_at = expired_at
+    verify.status = PipelineStatus.SUCCESS
+    link = db_session.scalars(select(EventSourceModel).where(EventSourceModel.event_id == event.id)).one()
+    link.added_at = expired_at
+    verify.metadata_json = {**verify.metadata_json, "reuse_identity": verification_identity(db_session, event)}
     db_session.commit()
     db_session.refresh(event)
     assert reusable_verification(db_session, event) is None

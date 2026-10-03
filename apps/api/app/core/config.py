@@ -115,14 +115,17 @@ class Settings(BaseSettings):
     cost_profile: str = "current"
     cost_profile_roles: str = ""
     usage_environment: str = "production"
-    # 2 h: cubre un poll, sus reintentos y un segundo pase del mismo ciclo,
-    # y vence antes de que el día siguiente reemplace las fuentes.
+    # 30 min. El poll de fuentes monitoreadas es de 15 min. Este TTL cubre
+    # ese ciclo y sus reintentos, y no conserva una búsqueda idéntica un turno
+    # más. Una novedad que todavía no está en el sistema y solo aparecería
+    # repitiendo la misma consulta puede demorarse hasta este TTL.
     search_cache_enabled: bool = False
-    search_cache_ttl_seconds: int = 7200
-    # 6 h: la identidad ya incluye evidencia y procedencia; el TTL cubre
-    # el caso en que el mundo se movió sin un documento nuevo. No es indefinido.
+    search_cache_ttl_seconds: int = 1800
+    # 2 h. Una evidencia, corrección o cambio de procedencia invalida antes.
+    # El TTL solo aplica si el paquete no cambió: es el máximo que podemos
+    # dejar de rebuscar en la web abierta un suceso que no recibió documentos.
     verification_reuse_enabled: bool = False
-    verification_reuse_ttl_seconds: int = 21600
+    verification_reuse_ttl_seconds: int = 7200
     # Tope de gasto estimado por proceso. Vacío = sin tope.
     cost_call_budget_usd: float | None = None
 

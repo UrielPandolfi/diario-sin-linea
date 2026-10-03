@@ -505,6 +505,107 @@ def test_admin_publish_retry_and_conflict(db_session: Session, monkeypatch) -> N
         assert busy.status_code == 409
 
 
+def test_rejected_v2_keeps_published_read_and_approved_v2_publishes_locally(db_session: Session) -> None:
+    event, article, claim = _seed_draft(db_session, headline="Un colectivo chocó en Pellegrini")
+    _audit_pass(db_session, event)
+    published = _publish(db_session, event)
+    db_session.refresh(article)
+    assert published["published"] is True
+    assert article.published_version == 1
+    assert article.hero_image_url is None
+    db_session.commit()
+
+    with TestClient(app) as client:
+        live = client.get(f"/api/v1/articles/{article.slug}")
+    assert live.status_code == 200
+    v1 = live.json()
+    assert v1["published_version"] == 1
+    assert v1["headline"] == "Un colectivo chocó en Pellegrini"
+    v1_claims = v1["claims"]
+
+    extra = _claim(
+        db_session,
+        event,
+        text="El choque dejó seis heridos",
+        claim_type="hecho",
+        importance=ClaimImportance.HIGH,
+        status=ClaimStatus.SUPPORTED,
+    )
+    detailed = EventRepository(db_session).get_with_details(event.id)
+    assert detailed is not None
+    session_item = detailed.event_sources[0].source_item
+    db_session.add(
+        ClaimEvidence(
+            claim_id=extra.id,
+            source_item_id=session_item.id,
+            evidence_type=EvidenceType.SUPPORTS,
+            excerpt="El choque dejó seis heridos",
+            source_url=session_item.url,
+        )
+    )
+    db_session.flush()
+    persist_paired_verification(db_session, event)
+    update_body = "El choque dejó seis heridos. Un colectivo chocó en Pellegrini."
+    update_llm = FakeStructuredLLM(
+        {
+            "ArticleDraft": _draft(
+                "El choque dejó seis heridos",
+                "El choque ocurrió en Rosario.",
+                update_body,
+            )
+        }
+    )
+    written = WritingService(db_session, llm=update_llm).write(event.id, trigger="test")
+    assert written["written"] is True
+    cap = FakeStructuredLLM(
+        {
+            "ArticleAuditResult": [_fail_audit(), _fail_audit(), _fail_audit()],
+            "ArticleDraft": [
+                _draft("El choque dejó seis heridos esta tarde", "El choque ocurrió en Rosario.", update_body),
+                _draft("El choque dejó seis heridos de madrugada", "El choque ocurrió en Rosario.", update_body),
+            ],
+        }
+    )
+    exhausted = AuditService(db_session, llm=cap, writer=cap).audit(event.id, trigger="test")
+    blocked = _publish(db_session, event)
+    db_session.refresh(article)
+    assert exhausted["passed"] is False
+    assert exhausted["reason"] == "cap_exhausted"
+    assert blocked["reason"] == "audit_not_passed"
+    assert article.published_version == 1
+    assert article.status == ArticleStatus.DRAFT
+    assert article.current_version != 1
+    assert article.headline != v1["headline"]
+    db_session.commit()
+
+    with TestClient(app) as client:
+        still = client.get(f"/api/v1/articles/{article.slug}")
+    assert still.status_code == 200
+    frozen = still.json()
+    assert frozen["published_version"] == 1
+    assert frozen["headline"] == v1["headline"]
+    assert frozen["body"] == v1["body"]
+    assert frozen["claims"] == v1_claims
+    assert claim.canonical_text == "Un colectivo chocó en Pellegrini"
+
+    _audit_pass(db_session, event)
+    promoted = _publish(db_session, event)
+    db_session.refresh(article)
+    assert promoted["published"] is True
+    assert article.published_version == article.current_version
+    assert article.published_version != 1
+    assert article.hero_image_url is None
+    db_session.commit()
+
+    with TestClient(app) as client:
+        updated = client.get(f"/api/v1/articles/{article.slug}")
+    assert updated.status_code == 200
+    body = updated.json()
+    assert body["published_version"] == article.published_version
+    assert body["headline"] == article.headline
+    assert "seis heridos" in body["body"]
+
+
 def test_archive_hides_from_public_predicate(db_session: Session) -> None:
     event, article, _claim_row = _seed_draft(db_session)
     _audit_pass(db_session, event)
