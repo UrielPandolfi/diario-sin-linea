@@ -60,9 +60,11 @@ export function AuthFrame({
   }
 
   return (
-    <main className="min-h-screen bg-background">
+    <main className="sl-enter min-h-screen bg-background">
       <div className="mx-auto grid min-h-screen max-w-[1100px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <section className="flex flex-col justify-between px-8 py-10 md:px-14 md:py-16">
+        <section className="relative flex flex-col justify-between overflow-hidden px-8 py-10 md:px-14 md:py-16">
+          <div className="sl-orb -right-24 bottom-0" aria-hidden />
+          <div className="sl-orb-warm sl-orb -left-24 top-0" aria-hidden />
           <div className="flex items-center gap-2 text-primary">
             <BrandMark className="h-9 w-9" />
             <span className="font-heading text-sm font-medium uppercase tracking-[0.18em]">Sin Línea</span>
@@ -78,8 +80,8 @@ export function AuthFrame({
           <p className="hidden font-sans text-xs text-muted lg:block">Medio informativo centrado en sucesos.</p>
         </section>
 
-        <section className="flex flex-col justify-center border-t border-border px-8 py-12 lg:border-l lg:border-t-0 lg:px-14">
-          <p className="font-heading text-xs uppercase tracking-[0.16em] text-muted">
+        <section className="flex flex-col justify-center border-t border-border bg-surface/50 px-8 py-12 lg:border-l lg:border-t-0 lg:px-14">
+          <p className="font-heading text-xs uppercase tracking-[0.16em] text-accent">
             {register ? "Cuenta nueva" : "Ingreso"}
           </p>
           <h2 className="mt-3 font-heading text-2xl font-medium text-primary">

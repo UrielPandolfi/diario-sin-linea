@@ -45,7 +45,7 @@ export default async function SeguimientoPage({ params }: { params: Promise<Para
 
   return (
     <div className="mx-auto min-h-screen max-w-measure px-4 py-8 md:px-6">
-      <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-muted">Seguimiento</p>
+      <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-accent">Seguimiento</p>
       <h1 className="mt-2 font-heading text-3xl font-semibold text-primary">{payload.public_code}</h1>
       <p className="mt-3 font-sans text-sm text-secondary">
         {statusLabel(payload.status)}

@@ -20,8 +20,8 @@ export function EventCard({
   const updated = isMateriallyUpdated(item.published_at, item.updated_at);
 
   return (
-    <article className="border-b border-border px-4 py-5 md:px-6">
-      <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-muted">
+    <article className="sl-feed-item group border-b border-border px-4 py-5 md:px-6">
+      <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-accent">
         {item.locality ? <span>{item.locality}</span> : null}
         {item.locality && item.published_at ? <span> · </span> : null}
         <RelativeTime iso={item.published_at} />

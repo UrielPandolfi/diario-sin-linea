@@ -141,6 +141,9 @@ test("robots hide app sections and point sitemap at SITE_URL", () => {
   assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/en-vivo"));
   assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/local"));
   assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/buscar"));
+  assert.ok(Array.isArray(rules.disallow) && rules.disallow.includes("/transparencia"));
+  assert.equal(staticUrls.includes(`${ORIGIN}/transparencia`), false);
+  assert.equal(staticUrls.includes(`${ORIGIN}/transparencia/borradores`), false);
 });
 
 test("share payload keeps canonical article path", () => {

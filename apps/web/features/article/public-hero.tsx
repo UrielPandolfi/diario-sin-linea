@@ -16,7 +16,7 @@ export function PublicHero({
 }) {
   const frame = (
     <div className={`relative aspect-[1200/630] overflow-hidden bg-surface ${className ?? ""}`.trim()}>
-      <Image src={src} alt="" fill className="object-cover" sizes={sizes} priority={priority} unoptimized />
+      <Image src={src} alt="" fill className="sl-hero-img object-cover" sizes={sizes} priority={priority} unoptimized />
     </div>
   );
   if (!href) return frame;

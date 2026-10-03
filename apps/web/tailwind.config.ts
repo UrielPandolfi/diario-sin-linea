@@ -30,6 +30,11 @@ const config: Config = {
         hover: "var(--hover)",
         muted: "var(--muted)",
         focus: "var(--focus)",
+        notice: {
+          bg: "var(--notice-bg)",
+          fg: "var(--notice-fg)",
+          border: "var(--notice-border)",
+        },
       },
       fontFamily: {
         heading: ["var(--font-heading)", "Newsreader", "Georgia", "Times New Roman", "serif"],

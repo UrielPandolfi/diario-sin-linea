@@ -55,6 +55,20 @@ const nextConfig: NextConfig = {
       { source: "/registro", headers: noIndex },
       { source: "/onboarding", headers: noIndex },
       { source: "/dev/:path*", headers: noIndex },
+      {
+        source: "/transparencia",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          ...noIndex,
+        ],
+      },
+      {
+        source: "/transparencia/:path*",
+        headers: [
+          { key: "Cache-Control", value: "private, no-store" },
+          ...noIndex,
+        ],
+      },
     ];
   },
 };

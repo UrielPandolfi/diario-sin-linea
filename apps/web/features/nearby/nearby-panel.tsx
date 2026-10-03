@@ -32,7 +32,7 @@ export function NearbyPanel({ label }: { label: string }) {
 
   return (
     <section className="border-t border-border px-4 py-4">
-      <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">Cerca tuyo</h2>
+      <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent-ochre">Cerca tuyo</h2>
       <p className="mt-1 font-sans text-xs text-muted">{label}</p>
       {error ? (
         <div className="mt-3">
@@ -46,8 +46,8 @@ export function NearbyPanel({ label }: { label: string }) {
       ) : (
         <ol className="mt-3">
           {items.map((item) => (
-            <li key={item.public_id} className="border-b border-border py-3 last:border-b-0">
-              <Link href={`/noticias/${item.slug}`} className="block text-primary hover:text-accent-blue">
+            <li key={item.public_id} className="border-b border-border py-1 last:border-b-0">
+              <Link href={`/noticias/${item.slug}`} className="sl-hit text-primary">
                 <p className="font-sans text-[11px] text-muted">{formatRelative(item.updated_at || item.published_at, now)}</p>
                 <p className="mt-1 font-heading text-sm font-semibold leading-snug">{item.headline}</p>
               </Link>

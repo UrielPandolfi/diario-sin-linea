@@ -18,7 +18,7 @@ export function FeedTabs() {
   const vista = pathname === "/" ? parseVista(searchParams.get("vista")) : null;
 
   return (
-    <nav aria-label="Filtros del feed" className="flex border-b border-border">
+    <nav aria-label="Filtros del feed" className="flex border-b border-border bg-background/70 backdrop-blur-md">
       {TABS.map((tab) => {
         const active = vista === tab.id;
         return (
@@ -31,7 +31,9 @@ export function FeedTabs() {
             aria-current={active ? "page" : undefined}
           >
             {tab.label}
-            {active ? <span className="absolute inset-x-6 bottom-0 h-px bg-accent-petrol" /> : null}
+            {active ? (
+              <span className="sl-tab-mark absolute inset-x-8 bottom-0 h-0.5 rounded-full bg-accent" />
+            ) : null}
           </Link>
         );
       })}

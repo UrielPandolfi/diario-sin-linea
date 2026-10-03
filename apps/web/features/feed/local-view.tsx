@@ -23,9 +23,9 @@ export function LocalView() {
 
   return (
     <div className="mx-auto min-h-screen max-w-measure">
-      <header className="sticky top-0 z-10 space-y-3 border-b border-border bg-background px-4 py-3 md:px-6">
+      <header className="sticky top-0 z-10 space-y-3 border-b border-border bg-background/80 px-4 py-3 backdrop-blur-md md:px-6">
         <div>
-          <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-muted">Local</p>
+          <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-accent">Local</p>
           <h1 className="font-heading text-2xl font-semibold text-primary">{place?.name ?? "Local"}</h1>
           {label ? <p className="mt-1 font-sans text-sm text-secondary">{label}</p> : null}
         </div>

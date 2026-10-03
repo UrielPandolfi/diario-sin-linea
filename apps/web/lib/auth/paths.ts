@@ -8,6 +8,7 @@ const PRIVATE_PREFIXES = [
   "/buscar",
   "/onboarding",
   "/dev",
+  "/transparencia",
 ] as const;
 
 export function isAuthEntryPath(pathname: string): boolean {

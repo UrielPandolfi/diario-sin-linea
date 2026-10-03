@@ -18,7 +18,7 @@ Histórico (no cargar salvo que la tarea lo pida): `_master_prompt_extract.txt`,
 
 Entradas: [`apps/api/app/main.py`](../../apps/api/app/main.py), [`apps/api/app/workers/tasks.py`](../../apps/api/app/workers/tasks.py), [`apps/api/app/workers/celery_app.py`](../../apps/api/app/workers/celery_app.py), [`apps/web/middleware.ts`](../../apps/web/middleware.ts).
 
-Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gusta, lecturas y `GET /api/v1/saved`), `api/public.py`, `api/cases.py`, `api/admin.py`, `api/admin_cases.py`. Prefijos: `/health`; público, cuenta y casos en `/api/v1`; admin en `/api/v1/admin`.
+Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gusta, lecturas y `GET /api/v1/saved`), `api/public.py`, `api/transparency.py` (borradores no aprobados, sesión de lector), `api/cases.py`, `api/admin.py`, `api/admin_cases.py`. Prefijos: `/health`; público, cuenta, transparencia y casos en `/api/v1`; admin en `/api/v1/admin`.
 
 ## Si vas a trabajar en X
 
@@ -38,7 +38,7 @@ Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gus
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`, `/privacidad`, `/terminos`, `/cuenta/recuperar`, `/cuenta/restablecer`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil` y `/guardados` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]`, `/como-funciona`, `/privacidad` y `/terminos` siguen abiertas. `/seguidos` y `/notificaciones` responden 404. Cuenta: `/entrar`, `/registro`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`, `/privacidad`, `/terminos`, `/transparencia`, `/cuenta/recuperar`, `/cuenta/restablecer`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil`, `/guardados` y `/transparencia` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]`, `/como-funciona`, `/privacidad` y `/terminos` siguen abiertas. `/seguidos` y `/notificaciones` responden 404. Cuenta: `/entrar`, `/registro`. Cliente: `apps/web/lib/api/`, `features/`.
 
 `/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
 

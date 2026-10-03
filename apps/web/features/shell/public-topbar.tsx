@@ -8,7 +8,7 @@ import Link from "next/link";
 export function PublicTopBar({ desktop = true, authenticated = false }: { desktop?: boolean; authenticated?: boolean }) {
   return (
     <div
-      className={`flex items-center gap-3 border-b border-border bg-background px-4 py-1.5 md:px-6 ${
+      className={`flex items-center gap-3 border-b border-border bg-background/80 px-4 py-1.5 backdrop-blur-md md:px-6 ${
         desktop ? "justify-between" : "justify-between md:hidden"
       }`}
     >

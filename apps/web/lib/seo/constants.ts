@@ -22,4 +22,5 @@ export const ROBOTS_DISALLOW = [
   "/local",
   "/buscar",
   "/cuenta",
+  "/transparencia",
 ] as const;

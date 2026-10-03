@@ -5,6 +5,7 @@ import { FeedTabs, parseVista } from "@/features/feed/feed-tabs";
 import { LocalitySearch } from "@/features/locality/locality-search";
 import { HomeContextBar, HomeRail } from "@/features/shell/home-rail";
 import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
+import { MapPin } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -46,22 +47,17 @@ export function HomeFeed() {
     <div className="flex min-h-screen">
       <div className="min-w-0 flex-1 border-r border-border">
         <HomeContextBar label={label} />
-        <header className="sticky top-0 z-10 border-b border-border bg-background">
+        <header className="sticky top-0 z-10 border-b border-border bg-background/80 backdrop-blur-md">
           <div className="px-4 py-3 md:px-6">
             <h1 className="font-heading text-2xl font-semibold text-primary">Inicio</h1>
             {label ? (
-              <p className="mt-1 font-sans text-sm text-secondary">
-                {label}{" "}
-                <button type="button" className="underline" onClick={() => setEditing((open) => !open)}>
-                  Cambiar
-                </button>
-              </p>
+              <button type="button" className="sl-chip mt-2" onClick={() => setEditing((open) => !open)}>
+                <MapPin className="h-3.5 w-3.5 text-accent" aria-hidden />
+                {label}
+              </button>
             ) : (
-              <button
-                type="button"
-                className="mt-1 font-sans text-sm text-secondary underline"
-                onClick={() => setEditing(true)}
-              >
+              <button type="button" className="sl-chip mt-2" onClick={() => setEditing(true)}>
+                <MapPin className="h-3.5 w-3.5 text-accent-ochre" aria-hidden />
                 Elegí una localidad
               </button>
             )}

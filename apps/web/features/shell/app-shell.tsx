@@ -19,7 +19,9 @@ export function AppShell({ children, authenticated = false }: { children: ReactN
           <Sidebar authenticated={authenticated} />
           <div className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
             <PublicTopBar desktop={!articlePage} authenticated={authenticated} />
-            <div className="min-w-0 flex-1">{children}</div>
+            <div key={pathname ?? "app"} className="sl-enter min-w-0 flex-1">
+              {children}
+            </div>
             <SiteFooter />
           </div>
         </div>

@@ -31,7 +31,7 @@ export function MobileNav() {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`flex min-h-11 flex-col items-center justify-center gap-1 py-2 font-sans text-[11px] ${
+                className={`sl-mobile-link mx-1 flex min-h-11 flex-col items-center justify-center gap-1 rounded-xl py-2 font-sans text-[11px] ${
                   active ? "text-primary" : "text-secondary"
                 }`}
               >

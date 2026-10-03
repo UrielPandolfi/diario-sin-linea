@@ -91,9 +91,9 @@ export function LiveTimeline() {
         <Link
           key={item.public_id}
           href={`/noticias/${item.slug}`}
-          className="block border-b border-border px-4 py-5 text-primary hover:bg-hover md:px-6"
+          className="sl-feed-item group block border-b border-border px-4 py-5 text-primary md:px-6"
         >
-          <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-muted">
+          <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-accent">
             {formatClock(item.updated_at || item.published_at)}
             {item.locality ? ` · ${item.locality}` : ""}
           </p>

@@ -15,6 +15,9 @@ test("home and personal areas require a session", () => {
   assert.equal(isPrivateAppPath("/buscar/q"), true);
   assert.equal(isPrivateAppPath("/onboarding"), true);
   assert.equal(isPrivateAppPath("/dev/respaldo"), true);
+  assert.equal(isPrivateAppPath("/transparencia"), true);
+  assert.equal(isPrivateAppPath("/transparencia/borradores"), true);
+  assert.equal(isPrivateAppPath("/transparencia/borradores/11111111-1111-4111-8111-111111111111"), true);
 });
 
 test("public sections stay outside the home gate", () => {

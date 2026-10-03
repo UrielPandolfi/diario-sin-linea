@@ -46,7 +46,10 @@ export async function middleware(request: NextRequest) {
   if (!pathname.startsWith("/api/")) {
     response.headers.set("Cache-Control", "private, no-store");
   }
-  if (!isIndexableDeploy()) {
+  if (pathname === "/transparencia" || pathname.startsWith("/transparencia/")) {
+    response.headers.set("X-Robots-Tag", "noindex, nofollow");
+    response.headers.set("Cache-Control", "private, no-store");
+  } else if (!isIndexableDeploy()) {
     response.headers.set("X-Robots-Tag", "noindex, nofollow");
   }
   return response;

@@ -26,7 +26,10 @@ export function NowPanel() {
 
   return (
     <section className="px-4 py-4">
-      <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">Ahora</h2>
+      <h2 className="flex items-center gap-2 font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent">
+        <span className="sl-live-dot" aria-hidden />
+        Ahora
+      </h2>
       {error ? (
         <div className="mt-3">
           <p className="font-sans text-sm text-secondary">No pudimos actualizar esta lista.</p>
@@ -39,8 +42,8 @@ export function NowPanel() {
       ) : (
         <ol className="mt-3">
           {items.map((item) => (
-            <li key={`${item.slug}-${item.occurred_at}`} className="border-b border-border py-3 last:border-b-0">
-              <Link href={`/noticias/${item.slug}`} className="block text-primary hover:text-accent-blue">
+            <li key={`${item.slug}-${item.occurred_at}`} className="border-b border-border py-1 last:border-b-0">
+              <Link href={`/noticias/${item.slug}`} className="sl-hit text-primary">
                 <p className="font-sans text-[11px] uppercase tracking-[0.12em] text-muted">
                   {formatClock(item.occurred_at)}
                   {item.locality ? ` · ${item.locality}` : ""}

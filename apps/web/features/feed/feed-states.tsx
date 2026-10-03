@@ -16,7 +16,7 @@ export function FeedSkeleton({ rows = 5 }: { rows?: number }) {
 
 export function FeedEmpty({ title, description }: { title: string; description?: string }) {
   return (
-    <div className="px-5 py-16 text-center">
+    <div className="sl-enter px-5 py-16 text-center">
       <p className="font-heading text-lg text-primary">{title}</p>
       {description ? <p className="mt-2 font-sans text-sm text-secondary">{description}</p> : null}
     </div>

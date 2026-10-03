@@ -171,8 +171,8 @@ export function ArticleView({
             sourceKey={`${article.slug}:${article.published_version ?? ""}`}
           />
 
-          <div className="mt-10 border-t border-border pt-5">
-            <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">
+          <div className="sl-block mt-10 p-5">
+            <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent">
               Fuentes y actualizaciones
             </h2>
             <div className="mt-3">
@@ -181,8 +181,8 @@ export function ArticleView({
           </div>
 
           {history.length > 0 ? (
-            <div className="mt-8 border-t border-border pt-5">
-              <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-muted">Historial</h2>
+            <div className="sl-block mt-4 p-5">
+              <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent-ochre">Historial</h2>
               <ol className="mt-3 space-y-3">
                 {history.map((item, index) => (
                   <li key={`${item.type}-${item.occurred_at}-${index}`} className="font-sans text-sm text-secondary">
@@ -197,7 +197,7 @@ export function ArticleView({
             </div>
           ) : null}
 
-          <div className="mt-8 border-t border-border pt-5">
+          <div className="sl-block mt-4 p-5">
             <h2 className="article-kicker text-primary">¿Hay algo que debamos revisar?</h2>
             <p className="mt-2 font-sans text-sm text-secondary">
               Podés señalar un error, aportar una fuente o responder si estás involucrado.

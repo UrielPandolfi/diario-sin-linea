@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 export default function SavedPage() {
   return (
     <div className="mx-auto min-h-screen max-w-measure">
-      <header className="border-b border-border px-4 py-4 md:px-6">
+      <header className="border-b border-border bg-background/80 px-4 py-4 backdrop-blur-md md:px-6">
         <h1 className="font-heading text-2xl font-semibold text-primary">Guardados</h1>
       </header>
       <FeedList kind="saved" emptyTitle="Todavía no guardaste noticias" />
