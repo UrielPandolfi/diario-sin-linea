@@ -1,0 +1,26 @@
+# Entorno del ensayo de costos. No reemplaza docker-compose.yml.
+# Proyecto, puertos, volumen y Redis distintos. Beat no se levanta.
+# En esta máquina no hay Docker; el ensayo usó Postgres y Redis ya locales
+# con base sin_linea_costos y Redis DB 2, sin tocar sin_linea ni DB 0.
+
+name: sin-linea-costos
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: sin_linea
+      POSTGRES_PASSWORD: sin_linea
+      POSTGRES_DB: sin_linea_costos
+    ports:
+      - "55432:5432"
+    volumes:
+      - sin_linea_costos_pg:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+
+volumes:
+  sin_linea_costos_pg:

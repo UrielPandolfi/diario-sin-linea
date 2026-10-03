@@ -105,8 +105,10 @@ class ReplicateImageProvider:
                 },
             )
         except HeroImageError:
+            self._record_image(failed=True)
             raise
         except Exception as exc:
+            self._record_image(failed=True)
             if _is_timeout(exc):
                 raise HeroImageError(
                     "timeout",
@@ -118,9 +120,24 @@ class ReplicateImageProvider:
                 "No se pudo generar la imagen",
                 502,
             ) from exc
+        else:
+            self._record_image(failed=False)
         finally:
             if previous is None:
                 os.environ.pop("REPLICATE_API_TOKEN", None)
             else:
                 os.environ["REPLICATE_API_TOKEN"] = previous
         return _coerce_bytes(output)
+
+    def _record_image(self, *, failed: bool) -> None:
+        from app.core.config import get_settings
+        from app.services.usage_recorder import record_llm_usage
+
+        record_llm_usage(
+            provider="replicate",
+            model=get_settings().article_image_model,
+            call_kind="image",
+            failed=failed,
+            usage_reported=not failed,
+            request_options={"model": get_settings().article_image_model},
+        )

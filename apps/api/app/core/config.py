@@ -110,6 +110,22 @@ class Settings(BaseSettings):
     article_image_megapixels: str = "1"
     article_image_go_fast: bool = True
 
+    # current conserva los modelos del entorno. candidate cambia solo los roles listados.
+    # Lista vacía con candidate = todos los roles del perfil candidato.
+    cost_profile: str = "current"
+    cost_profile_roles: str = ""
+    usage_environment: str = "production"
+    # 2 h: cubre un poll, sus reintentos y un segundo pase del mismo ciclo,
+    # y vence antes de que el día siguiente reemplace las fuentes.
+    search_cache_enabled: bool = False
+    search_cache_ttl_seconds: int = 7200
+    # 6 h: la identidad ya incluye evidencia y procedencia; el TTL cubre
+    # el caso en que el mundo se movió sin un documento nuevo. No es indefinido.
+    verification_reuse_enabled: bool = False
+    verification_reuse_ttl_seconds: int = 21600
+    # Tope de gasto estimado por proceso. Vacío = sin tope.
+    cost_call_budget_usd: float | None = None
+
     auto_publish: bool = False
     initial_research_queries: int = 2
     max_research_queries_per_event: int = 4

@@ -35,7 +35,13 @@ class LlmUsage(Base):
     total_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     cache_write_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    reasoning_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    call_kind: Mapped[str] = mapped_column(String(32), default="llm", nullable=False)
+    environment: Mapped[str] = mapped_column(String(32), default="production", nullable=False, index=True)
+    attempt_index: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    request_options: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    confirmed_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 10), nullable=True)
     usage_reported: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     attribution_kind: Mapped[str] = mapped_column(
         String(32), default="unattributed", nullable=False, index=True

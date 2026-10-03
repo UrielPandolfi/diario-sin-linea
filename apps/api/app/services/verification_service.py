@@ -232,12 +232,26 @@ class VerificationService:
                 event_id=event.id,
                 pipeline_run_id=run.id,
             ):
-                result = postgres_safe_json(self._run(event, claim_id=claim_id) if claim_id else self._run(event))
+                reused = None
+                if claim_id is None and self.settings.verification_reuse_enabled:
+                    from app.services.verification_reuse import reusable_verification
+
+                    reused = reusable_verification(self.session, event)
+                if reused is not None:
+                    result = postgres_safe_json(reused)
+                else:
+                    result = postgres_safe_json(self._run(event, claim_id=claim_id) if claim_id else self._run(event))
+                    from app.services.verification_reuse import verification_identity
+
+                    result["reuse_identity"] = verification_identity(self.session, event)
             run.status = PipelineStatus.SUCCESS
             run.finished_at = utc_now()
             run.metadata_json = postgres_safe_json({**(run.metadata_json or {}), **result})
             event.status = original_status
             self.session.flush()
+            from app.services.usage_recorder import attach_pipeline_run_usages
+
+            attach_pipeline_run_usages(self.session, run.id)
             return {"skipped": False, "event_id": str(event.id), **result}
         except ProviderNotConfiguredError as exc:
             return self._fail(run, event, original_status, str(exc))

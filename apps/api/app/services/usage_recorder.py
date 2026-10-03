@@ -50,6 +50,7 @@ class ExtractedUsage:
     total_tokens: int = 0
     cache_read_tokens: int = 0
     cache_write_tokens: int = 0
+    reasoning_tokens: int = 0
     model_reported: str | None = None
     usage_reported: bool = False
 
@@ -80,12 +81,15 @@ def extract_openai_usage_details(response: Any) -> ExtractedUsage:
         )
         or _attr_or_key(details, "cache_creation_tokens", "cache_write_tokens")
     )
+    completion_details = _attr_or_key(usage, "completion_tokens_details", "output_tokens_details")
+    reasoning = _as_int(_attr_or_key(completion_details, "reasoning_tokens"))
     return ExtractedUsage(
         prompt_tokens=prompt,
         completion_tokens=completion,
         total_tokens=total,
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
+        reasoning_tokens=reasoning,
         model_reported=model_reported,
         usage_reported=True,
     )
@@ -121,6 +125,47 @@ def extract_anthropic_usage(response: Any) -> tuple[int, int, int]:
     return details.prompt_tokens, details.completion_tokens, details.total_tokens
 
 
+def _usage_fk_variants(payload: dict, kind: str) -> list[dict]:
+    """La sesión de gasto no ve filas sin commit. Se conserva event_id si el run es el que falta."""
+    variants = [dict(payload)]
+    if payload.get("pipeline_run_id") is not None:
+        dropped_run = dict(payload)
+        dropped_run["pipeline_run_id"] = None
+        variants.append(dropped_run)
+    if payload.get("event_id") is not None or payload.get("pipeline_run_id") is not None:
+        dropped_both = dict(payload)
+        dropped_both["event_id"] = None
+        dropped_both["pipeline_run_id"] = None
+        if kind != ATTRIBUTION_EMBEDDING_BACKFILL:
+            dropped_both["attribution_kind"] = infer_attribution_kind(
+                event_id=None,
+                source_item_id=dropped_both.get("source_item_id"),
+                explicit=None if kind == ATTRIBUTION_DIRECT else kind,
+            )
+        variants.append(dropped_both)
+    unique: list[dict] = []
+    seen: list[tuple] = []
+    for row in variants:
+        key = (row.get("event_id"), row.get("pipeline_run_id"), row.get("attribution_kind"))
+        if key in seen:
+            continue
+        seen.append(key)
+        unique.append(row)
+    return unique
+
+
+def attach_pipeline_run_usages(session: Session, pipeline_run_id: UUID) -> None:
+    """Sella el run en la misma transacción editorial. Si esa transacción vuelve atrás, el gasto queda."""
+    session.execute(
+        update(LlmUsage)
+        .where(
+            LlmUsage.pipeline_run_id.is_(None),
+            LlmUsage.request_options["intended_pipeline_run_id"].astext == str(pipeline_run_id),
+        )
+        .values(pipeline_run_id=pipeline_run_id)
+    )
+
+
 def record_llm_usage(
     *,
     provider: str,
@@ -136,10 +181,15 @@ def record_llm_usage(
     duration_ms: int | None = None,
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
+    reasoning_tokens: int = 0,
     model_reported: str | None = None,
     usage_reported: bool | None = None,
     attribution_kind: str | None = None,
     failed: bool = False,
+    call_kind: str = "llm",
+    attempt_index: int = 1,
+    request_options: dict | None = None,
+    confirmed_cost_usd=None,
 ) -> None:
     """Best-effort persist; never raise into the LLM call path."""
     try:
@@ -168,12 +218,26 @@ def record_llm_usage(
             explicit=attribution_kind if attribution_kind is not None else ctx.attribution_kind,
         )
 
+        from decimal import Decimal
+
+        from sqlalchemy.exc import IntegrityError
+
+        from app.core.config import get_settings
         from app.core.db import SessionLocal
 
+        resolved_run = pipeline_run_id if pipeline_run_id is not None else ctx.pipeline_run_id
+        options = dict(request_options or {})
+        if ctx.fallback_from and "fallback_from" not in options:
+            options["fallback_from"] = ctx.fallback_from
+        if resolved_run is not None:
+            options.setdefault("intended_pipeline_run_id", str(resolved_run))
+        if resolved_event is not None:
+            options.setdefault("intended_event_id", str(resolved_event))
+        confirmed = None if confirmed_cost_usd is None else Decimal(str(confirmed_cost_usd))
         payload = dict(
             event_id=resolved_event,
             source_item_id=resolved_item,
-            pipeline_run_id=pipeline_run_id if pipeline_run_id is not None else ctx.pipeline_run_id,
+            pipeline_run_id=resolved_run,
             stage=stage if stage is not None else ctx.stage,
             model_role=model_role if model_role is not None else ctx.model_role,
             provider=provider or ctx.provider,
@@ -185,22 +249,18 @@ def record_llm_usage(
             total_tokens=total,
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
+            reasoning_tokens=max(0, int(reasoning_tokens or 0)),
             duration_ms=elapsed,
             usage_reported=reported and not failed,
             attribution_kind=kind,
+            call_kind=call_kind or "llm",
+            environment=(get_settings().usage_environment or "production").strip() or "production",
+            attempt_index=max(1, int(attempt_index or 1)),
+            request_options=options or None,
+            confirmed_cost_usd=confirmed,
         )
-        # Otra sesión no ve event/pipeline_run todavía no commiteados: reintentar sin esos FK.
-        for drop_uncommitted_fks in (False, True):
-            row_kwargs = dict(payload)
-            if drop_uncommitted_fks:
-                row_kwargs["event_id"] = None
-                row_kwargs["pipeline_run_id"] = None
-                if kind != ATTRIBUTION_EMBEDDING_BACKFILL:
-                    row_kwargs["attribution_kind"] = infer_attribution_kind(
-                        event_id=None,
-                        source_item_id=row_kwargs.get("source_item_id"),
-                        explicit=None if kind == ATTRIBUTION_DIRECT else kind,
-                    )
+        variants = _usage_fk_variants(payload, kind)
+        for index, row_kwargs in enumerate(variants):
             session = SessionLocal()
             try:
                 row = LlmUsage(**row_kwargs)
@@ -208,9 +268,9 @@ def record_llm_usage(
                 session.add(row)
                 session.commit()
                 return
-            except Exception:
+            except IntegrityError:
                 session.rollback()
-                if drop_uncommitted_fks:
+                if index == len(variants) - 1:
                     raise
             finally:
                 session.close()

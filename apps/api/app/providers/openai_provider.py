@@ -37,10 +37,12 @@ class OpenAIStructuredProvider:
         provider_name: str = "openai",
         client: Any | None = None,
         reasoning_effort: str | None = None,
+        thinking: str | None = None,
     ) -> None:
         self.model = model
         self.provider_name = provider_name
         self.reasoning_effort = (reasoning_effort or "").strip() or None
+        self.thinking = (thinking or "").strip() or None
         if client is not None:
             self.client = client
         else:
@@ -82,10 +84,13 @@ class OpenAIStructuredProvider:
                 effort = self.reasoning_effort or _reasoning_effort_for_model(self.model)
                 if effort:
                     create_kwargs["reasoning_effort"] = effort
+                if self.provider_name.lower() == "deepseek" and self.thinking == "disabled":
+                    create_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
                 response, duration_ms = self._create_completion(create_kwargs)
                 from app.services.usage_recorder import extract_openai_usage_details, record_llm_usage
 
                 details = extract_openai_usage_details(response)
+                message = response.choices[0].message
                 record_llm_usage(
                     provider=self.provider_name,
                     model=self.model,
@@ -94,9 +99,11 @@ class OpenAIStructuredProvider:
                     total_tokens=details.total_tokens,
                     cache_read_tokens=details.cache_read_tokens,
                     cache_write_tokens=details.cache_write_tokens,
+                    reasoning_tokens=details.reasoning_tokens,
                     model_reported=details.model_reported,
                     usage_reported=details.usage_reported,
                     duration_ms=duration_ms,
+                    request_options=_request_options(create_kwargs, message),
                 )
                 content = response.choices[0].message.content or "{}"
                 return schema.model_validate_json(content)
@@ -110,7 +117,38 @@ class OpenAIStructuredProvider:
         raise last_error or RuntimeError("structured output failed")
 
     def _create_completion(self, create_kwargs: dict) -> tuple[Any, int]:
-        return with_rate_limit_retry(lambda: self._create_completion_once(create_kwargs))
+        from app.core.config import get_settings
+        from app.services.call_budget import CallBudgetExceeded, active_budget
+        from app.services.cost_service import actual_usage_usd, reserve_estimate_usd
+
+        budget = active_budget()
+        hold = None
+        if budget is not None:
+            attempts = 1 + max(0, int(get_settings().job_max_retries))
+            estimate = reserve_estimate_usd(
+                provider=self.provider_name,
+                model=self.model,
+                prompt_chars=_prompt_chars(create_kwargs),
+                max_output_tokens=4096,
+            ) * attempts
+            try:
+                hold = budget.reserve(estimate)
+            except CallBudgetExceeded:
+                self._record_failed_attempt(
+                    duration_ms=0,
+                    request_options={"budget_blocked": True, "thinking": self.thinking},
+                )
+                raise
+        try:
+            response, duration_ms = with_rate_limit_retry(lambda: self._create_completion_once(create_kwargs))
+        except Exception:
+            if budget is not None and hold is not None:
+                budget.release(hold)
+            raise
+        if budget is not None and hold is not None:
+            actual = actual_usage_usd(self.provider_name, self.model, response)
+            budget.settle(hold, actual if actual is not None else hold)
+        return response, duration_ms
 
     def _create_completion_once(self, create_kwargs: dict) -> tuple[Any, int]:
         started = time.perf_counter()
@@ -150,9 +188,12 @@ class OpenAIStructuredProvider:
         duration_ms = int((time.perf_counter() - started) * 1000)
         return response, duration_ms
 
-    def _record_failed_attempt(self, *, duration_ms: int) -> None:
+    def _record_failed_attempt(self, *, duration_ms: int, request_options: dict | None = None) -> None:
         from app.services.usage_recorder import record_llm_usage
 
+        options = {"thinking": self.thinking}
+        if request_options:
+            options.update(request_options)
         record_llm_usage(
             provider=self.provider_name,
             model=self.model,
@@ -162,7 +203,28 @@ class OpenAIStructuredProvider:
             duration_ms=duration_ms,
             usage_reported=False,
             failed=True,
+            request_options=options,
         )
+
+
+def _prompt_chars(create_kwargs: dict) -> int:
+    total = 0
+    for message in create_kwargs.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, str):
+            total += len(content)
+    return total
+
+
+def _request_options(create_kwargs: dict, message: Any) -> dict:
+    extra = create_kwargs.get("extra_body") if isinstance(create_kwargs.get("extra_body"), dict) else {}
+    thinking = extra.get("thinking") if isinstance(extra, dict) else None
+    reasoning_content = getattr(message, "reasoning_content", None)
+    return {
+        "thinking": thinking,
+        "reasoning_effort": create_kwargs.get("reasoning_effort"),
+        "reasoning_content_present": reasoning_content is not None,
+    }
 
 
 class OpenAIEmbeddingProvider:

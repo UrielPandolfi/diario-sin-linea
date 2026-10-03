@@ -101,25 +101,67 @@ class ExaSearchProvider:
     def __init__(self, *, api_key: str, timeout: float = _DEFAULT_TIMEOUT) -> None:
         self.api_key = api_key
         self.timeout = timeout
+        self._attempt = 0
 
     def search(self, query: SearchQuery) -> list[SearchHit]:
-        return with_transient_http_retry(lambda: self._search_once(query))
+        from app.services.search_cache import execute_cached_search
 
-    def _search_once(self, query: SearchQuery) -> list[SearchHit]:
         payload = _build_payload(query)
-        with httpx.Client(timeout=self.timeout) as client:
-            response = client.post(
-                EXA_SEARCH_URL,
-                json=payload,
-                headers={
-                    "Accept": "application/json",
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {self.api_key}",
-                },
+        return execute_cached_search(
+            provider="exa",
+            parameters=payload,
+            fetch=lambda: with_transient_http_retry(lambda: self._search_once(query, payload)),
+        )
+
+    def _search_once(self, query: SearchQuery, payload: dict[str, Any] | None = None) -> list[SearchHit]:
+        import time
+
+        from app.services.usage_recorder import record_llm_usage
+
+        body_payload = payload or _build_payload(query)
+        self._attempt += 1
+        started = time.perf_counter()
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                response = client.post(
+                    EXA_SEARCH_URL,
+                    json=body_payload,
+                    headers={
+                        "Accept": "application/json",
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                )
+                response.raise_for_status()
+                try:
+                    body = response.json()
+                except ValueError as exc:
+                    raise ValueError("Respuesta inválida de Exa: JSON no parseable") from exc
+        except Exception:
+            record_llm_usage(
+                provider="exa",
+                model="search",
+                call_kind="search",
+                failed=True,
+                usage_reported=False,
+                duration_ms=int((time.perf_counter() - started) * 1000),
+                attempt_index=self._attempt,
+                request_options={"parameters": body_payload},
             )
-            response.raise_for_status()
-            try:
-                body = response.json()
-            except ValueError as exc:
-                raise ValueError("Respuesta inválida de Exa: JSON no parseable") from exc
+            raise
+        confirmed = None
+        if isinstance(body, dict):
+            dollars = body.get("costDollars")
+            if isinstance(dollars, dict) and dollars.get("total") is not None:
+                confirmed = dollars.get("total")
+        record_llm_usage(
+            provider="exa",
+            model="search",
+            call_kind="search",
+            usage_reported=True,
+            duration_ms=int((time.perf_counter() - started) * 1000),
+            attempt_index=self._attempt,
+            confirmed_cost_usd=confirmed,
+            request_options={"parameters": body_payload, "confirmed": confirmed is not None},
+        )
         return normalize_exa_results(body)

@@ -19,6 +19,7 @@ ATTRIBUTION_DIRECT = "direct"
 ATTRIBUTION_ITEM = "item"
 ATTRIBUTION_UNATTRIBUTED = "unattributed"
 ATTRIBUTION_EMBEDDING_BACKFILL = "embedding_backfill"
+ATTRIBUTION_SHARED = "shared"
 
 COST_CALCULATED = "calculated"
 COST_PARTIAL = "partial"
@@ -29,6 +30,7 @@ KIND_OUTPUT = "output"
 KIND_CACHED_READ = "cached_read"
 KIND_CACHED_WRITE = "cached_write"
 KIND_EMBEDDING = "embedding"
+KIND_REQUEST = "request"
 
 LUNA_LONG_CONTEXT_TOKENS = 272_000
 MILLION = Decimal("1000000")
@@ -78,6 +80,7 @@ def infer_attribution_kind(
         ATTRIBUTION_ITEM,
         ATTRIBUTION_UNATTRIBUTED,
         ATTRIBUTION_EMBEDDING_BACKFILL,
+        ATTRIBUTION_SHARED,
     }:
         return explicit
     if event_id is not None:
@@ -135,7 +138,23 @@ def _lookup_model(
         }
         if found:
             return candidate, found
+        if provider_key == "deepseek" and model_key == "deepseek-v4-flash":
+            found = {
+                kind: amount
+                for (prov, model, kind), amount in rates.items()
+                if prov == provider_key and model == "deepseek-flash" and kind != KIND_REQUEST
+            }
+            if found:
+                return "deepseek-flash", found
     return None, {}
+
+
+def is_deepseek_peak(moment: datetime) -> bool:
+    """Ventanas pico UTC lun–vie 01:00–04:00 y 06:00–10:00. Sin calendario de feriados: el pico de día hábil sobreestima."""
+    if moment.weekday() >= 5:
+        return False
+    hour = moment.astimezone(timezone.utc).hour
+    return (1 <= hour < 4) or (6 <= hour < 10)
 
 
 @dataclass(frozen=True)
@@ -159,6 +178,7 @@ def estimate_usage_cost(
     usage_reported: bool,
     rates: dict[tuple[str, str, str], Decimal],
     book_id: UUID | None,
+    at: datetime | None = None,
 ) -> CostEstimate:
     snapshot: dict[str, Any] = {
         "provider": provider,
@@ -229,7 +249,10 @@ def estimate_usage_cost(
         snapshot["reason"] = "missing_io_rate"
         return CostEstimate(COST_UNKNOWN, None, snapshot, priced_model)
     cache_read = max(0, min(int(cache_read_tokens or 0), int(prompt_tokens or 0)))
-    uncached = max(0, int(prompt_tokens or 0) - cache_read)
+    write_overlap = 0
+    if found.get(KIND_CACHED_WRITE) is not None and cache_write_tokens:
+        write_overlap = min(int(cache_write_tokens), max(0, int(prompt_tokens or 0) - cache_read))
+    uncached = max(0, int(prompt_tokens or 0) - cache_read - write_overlap)
     input_rate = found[KIND_INPUT]
     output_rate = found[KIND_OUTPUT]
     cached_rate = found.get(KIND_CACHED_READ)
@@ -256,8 +279,15 @@ def estimate_usage_cost(
             partial = True
         else:
             usd += _dec(cache_write_tokens) * write_rate / MILLION
+    if _model_key(provider) == "deepseek" and is_deepseek_peak(at or utc_now()):
+        usd *= Decimal("2")
+        snapshot["peak"] = True
+        snapshot["peak_rule"] = "deepseek_weekday_utc_2x_holidays_not_excluded"
+    else:
+        snapshot["peak"] = False
     snapshot["formula"] = "openai_uncached_plus_cached_plus_output"
     snapshot["uncached_prompt_tokens"] = uncached
+    snapshot["cache_write_overlap_removed"] = write_overlap
     snapshot["input_rate"] = str(input_rate)
     snapshot["output_rate"] = str(output_rate)
     if cached_rate is not None:
@@ -269,6 +299,20 @@ def estimate_usage_cost(
 
 
 def apply_estimated_cost(session: Session, row: LlmUsage) -> LlmUsage:
+    options = row.request_options or {}
+    if options.get("cache_hit"):
+        row.cost_status = COST_CALCULATED
+        row.estimated_cost_usd = Decimal("0")
+        row.rate_snapshot = {"reason": "cache_hit", "marginal_usd": "0"}
+        return row
+    if row.confirmed_cost_usd is not None:
+        row.cost_status = COST_CALCULATED
+        row.estimated_cost_usd = _dec(row.confirmed_cost_usd)
+        row.rate_snapshot = {"reason": "provider_confirmed", "confirmed_cost_usd": str(row.confirmed_cost_usd)}
+        return row
+    if (row.call_kind or "llm") in {"search", "image"}:
+        return _apply_request_cost(session, row)
+
     book = active_price_book(session)
     rates = rates_map(session, book) if book is not None else {}
     estimate = estimate_usage_cost(
@@ -283,6 +327,7 @@ def apply_estimated_cost(session: Session, row: LlmUsage) -> LlmUsage:
         usage_reported=bool(row.usage_reported),
         rates=rates,
         book_id=book.id if book is not None else None,
+        at=row.created_at,
     )
     row.price_book_id = book.id if book is not None else None
     row.cost_status = estimate.status
@@ -352,7 +397,8 @@ def aggregate_usage_costs(
     item_only = by_kind.get(ATTRIBUTION_ITEM, {}).get("known_usd", Decimal("0"))
     unattributed = by_kind.get(ATTRIBUTION_UNATTRIBUTED, {}).get("known_usd", Decimal("0"))
     backfill = by_kind.get(ATTRIBUTION_EMBEDDING_BACKFILL, {}).get("known_usd", Decimal("0"))
-    parts = attributed + item_only + unattributed + backfill
+    shared = by_kind.get(ATTRIBUTION_SHARED, {}).get("known_usd", Decimal("0"))
+    parts = attributed + item_only + unattributed + backfill + shared
 
     return {
         "timestamp_field": "llm_usages.created_at",
@@ -386,6 +432,7 @@ def aggregate_usage_costs(
             "attributed_to_item_only": float(_money(item_only)),
             "unattributed": float(_money(unattributed)),
             "embedding_backfill": float(_money(backfill)),
+            "shared": float(_money(shared)),
             "parts_sum_usd": float(_money(parts)),
             "matches_global": _money(parts) == _money(global_usd),
         },
@@ -430,3 +477,105 @@ def event_direct_cost(session: Session, event_id: UUID) -> dict[str, Any]:
             known_usd=known,
         ),
     }
+
+
+def _apply_request_cost(session: Session, row: LlmUsage) -> LlmUsage:
+    book = active_price_book(session)
+    rate = None
+    if book is not None:
+        rate = session.scalars(
+            select(LlmPriceRate).where(
+                LlmPriceRate.book_id == book.id,
+                LlmPriceRate.provider == (row.provider or ""),
+                LlmPriceRate.model == (row.model_requested or row.model or ""),
+                LlmPriceRate.kind == KIND_REQUEST,
+            )
+        ).first()
+    if rate is None or (rate.extra_json or {}).get("unit") != "request":
+        row.price_book_id = book.id if book is not None else None
+        row.cost_status = COST_UNKNOWN
+        row.estimated_cost_usd = None
+        row.rate_snapshot = {"reason": "no_verified_request_rate", "call_kind": row.call_kind}
+        return row
+    amount = _dec(rate.usd_per_million)
+    row.price_book_id = book.id
+    row.cost_status = COST_CALCULATED
+    row.estimated_cost_usd = _money(amount)
+    row.rate_snapshot = {
+        "formula": "per_request",
+        "usd_per_request": str(amount),
+        "priced_model": rate.model,
+        "price_book_id": str(book.id),
+    }
+    return row
+
+
+# Tarifas de reserva, valle, por 1M. Pico DeepSeek duplica. No es el libro histórico.
+_RESERVE_RATES: dict[tuple[str, str], tuple[Decimal, Decimal]] = {
+    ("openai", "gpt-4o"): (Decimal("2.50"), Decimal("10")),
+    ("openai", "gpt-4o-mini"): (Decimal("0.15"), Decimal("0.60")),
+    ("openai", "gpt-5-nano"): (Decimal("0.05"), Decimal("0.40")),
+    ("openai", "gpt-5.6-luna"): (Decimal("0.20"), Decimal("1.20")),
+    ("deepseek", "deepseek-flash"): (Decimal("0.15"), Decimal("0.60")),
+    ("deepseek", "deepseek-v4-flash"): (Decimal("0.15"), Decimal("0.60")),
+    ("deepseek", "deepseek-v4-pro"): (Decimal("0.66"), Decimal("1.98")),
+    ("deepseek", "deepseek-chat"): (Decimal("0.15"), Decimal("0.60")),
+}
+_UNKNOWN_RESERVE = Decimal("0.25")
+
+
+def reserve_estimate_usd(
+    *,
+    provider: str,
+    model: str,
+    prompt_chars: int,
+    max_output_tokens: int,
+) -> Decimal:
+    """Peor caso de una llamada: entrada sin caché y salida al tope. Desconocido no es cero."""
+    tokens_in = max(1, int(prompt_chars) // 4)
+    rates = _RESERVE_RATES.get((_model_key(provider), _model_key(model)))
+    if rates is None:
+        return _UNKNOWN_RESERVE
+    input_rate, output_rate = rates
+    usd = (_dec(tokens_in) * input_rate + _dec(max(1, max_output_tokens)) * output_rate) / MILLION
+    if _model_key(provider) == "deepseek" and is_deepseek_peak(utc_now()):
+        usd *= Decimal("2")
+    return _money(usd)
+
+
+def actual_usage_usd(provider: str, model: str, response: Any) -> Decimal | None:
+    from app.services.usage_recorder import extract_openai_usage_details
+
+    details = extract_openai_usage_details(response)
+    if not details.usage_reported:
+        return None
+    rates = _RESERVE_RATES.get((_model_key(provider), _model_key(model)))
+    if rates is None:
+        reported = _model_key(details.model_reported)
+        rates = _RESERVE_RATES.get((_model_key(provider), reported))
+    if rates is None:
+        return None
+    input_rate, output_rate = rates
+    cache_read = min(details.cache_read_tokens, details.prompt_tokens)
+    uncached = max(0, details.prompt_tokens - cache_read)
+    cached_rate = input_rate
+    if _model_key(model) == "deepseek-flash" or _model_key(details.model_reported) == "deepseek-flash":
+        cached_rate = Decimal("0.003")
+    elif _model_key(model) == "deepseek-v4-pro":
+        cached_rate = Decimal("0.022")
+    elif _model_key(provider) == "openai":
+        cached_rate = input_rate / Decimal("2") if _model_key(model) == "gpt-4o" else input_rate
+        if _model_key(model) == "gpt-4o":
+            cached_rate = Decimal("1.25")
+        elif _model_key(model) == "gpt-4o-mini":
+            cached_rate = Decimal("0.075")
+        elif _model_key(model) == "gpt-5-nano":
+            cached_rate = Decimal("0.005")
+        elif _model_key(model).startswith("gpt-5.6-luna"):
+            cached_rate = Decimal("0.02")
+    usd = (
+        _dec(uncached) * input_rate + _dec(cache_read) * cached_rate + _dec(details.completion_tokens) * output_rate
+    ) / MILLION
+    if _model_key(provider) == "deepseek" and is_deepseek_peak(utc_now()):
+        usd *= Decimal("2")
+    return _money(usd)

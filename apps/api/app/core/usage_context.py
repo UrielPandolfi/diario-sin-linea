@@ -16,6 +16,7 @@ class UsageContext:
     source_item_id: UUID | None = None
     pipeline_run_id: UUID | None = None
     attribution_kind: str | None = None
+    fallback_from: str | None = None
 
 
 _CTX: ContextVar[UsageContext] = ContextVar("llm_usage_context", default=UsageContext())
@@ -55,6 +56,7 @@ def usage_scope(
     model_role: str | None = None,
     provider: str | None = None,
     attribution_kind: str | None = None,
+    fallback_from: str | None = None,
 ) -> Iterator[None]:
     token = _CTX.set(
         UsageContext(
@@ -65,12 +67,22 @@ def usage_scope(
             model_role=model_role,
             provider=provider,
             attribution_kind=attribution_kind,
+            fallback_from=fallback_from,
         )
     )
     try:
         yield
     finally:
         _CTX.reset(token)
+
+
+@contextmanager
+def fallback_scope(role: str) -> Iterator[None]:
+    token = update_usage_context(fallback_from=role)
+    try:
+        yield
+    finally:
+        reset_usage_context(token)
 
 
 @contextmanager

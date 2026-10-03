@@ -23,7 +23,7 @@ from app.core.source_content import (
 )
 from app.core.text import content_fingerprint, is_placeholder_text, normalize_name, token_set, usable_text
 from app.core.urls import canonicalize_url, url_domain
-from app.core.usage_context import usage_scope
+from app.core.usage_context import fallback_scope, usage_scope
 from app.domain.enums import EventSourceRelation, IngestionMethod, PipelineStatus
 from app.models import Entity, Event, EventEntity, EventSource, PipelineRun, Source, SourceItem
 from app.providers.base import (
@@ -595,18 +595,20 @@ class ResearchService:
         except _LLM_FALLBACK_ERRORS:
             if light is ultra:
                 raise
-            batch = light.generate_structured(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                schema=RelevanceBatch,
-            )
+            with fallback_scope(ModelRole.ULTRA_LIGHT_PROCESSING.value):
+                batch = light.generate_structured(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    schema=RelevanceBatch,
+                )
             return batch, True
         if relevance_needs_fallback(batch) and light is not ultra:
-            batch = light.generate_structured(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                schema=RelevanceBatch,
-            )
+            with fallback_scope(ModelRole.ULTRA_LIGHT_PROCESSING.value):
+                batch = light.generate_structured(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    schema=RelevanceBatch,
+                )
             return batch, True
         return batch, False
 
@@ -630,11 +632,12 @@ class ResearchService:
         except _LLM_FALLBACK_ERRORS:
             if light is ultra:
                 raise
-            return light.generate_structured(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                schema=schema,
-            )
+            with fallback_scope(ModelRole.ULTRA_LIGHT_PROCESSING.value):
+                return light.generate_structured(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    schema=schema,
+                )
 
     def _event_facts(self, event: Event) -> str:
         when = event.started_at or event.detected_at

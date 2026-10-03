@@ -1,0 +1,428 @@
+{
+  "budget_usd": "2.97",
+  "spent_usd": "0.0242036200",
+  "held_usd": "0",
+  "database": "sin_linea_costos",
+  "calls": [
+    {
+      "scenario": "A",
+      "label": "A:a614745e:verification",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "verification",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0028550000",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "El Gobierno de Javier Milei",
+        "supported_by_excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.",
+        "note": "La afirmación está respaldada por la fuente que indica que el Gobierno de Javier Milei intervino en el caso."
+      }
+    },
+    {
+      "scenario": "A",
+      "label": "A:a614745e:verification:pass2",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "verification",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0028450000",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "El Gobierno de Milei",
+        "supported_by_excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.",
+        "note": "La afirmación está respaldada por la fuente que indica que el Gobierno de Javier Milei intervino en el caso."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "A",
+      "label": "A:a614745e:audit",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "audit",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0022800000",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma un 'presunto caso de adoctrinamiento', pero las fuentes no utilizan el término 'presunto'. Ambas fuentes describen el evento como un caso de adoctrinamiento sin calificarlo como presunto."
+        ],
+        "note": "El titular debería reflejar la información proporcionada por las fuentes, que describen el evento como un caso de adoctrinamiento sin el calificativo de 'presunto'."
+      }
+    },
+    {
+      "scenario": "A",
+      "label": "A:a614745e:audit:pass2",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "audit",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0020300000",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma un 'presunto caso de adoctrinamiento', pero las fuentes describen el caso como un hecho concreto, no como presunto."
+        ],
+        "note": "El titular debería reflejar que las fuentes describen el caso como un hecho concreto de adoctrinamiento, no como presunto."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "A",
+      "label": "A:58759b17:verification",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "verification",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0034200000",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "supported_by_excerpt": "Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico.",
+        "note": "La afirmación está respaldada por la fuente que confirma que Chazarreta murió tras ingresar herido al hospital después del tiroteo."
+      }
+    },
+    {
+      "scenario": "A",
+      "label": "A:58759b17:verification:pass2",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "verification",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0035000000",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "supported_by_excerpt": "Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico.",
+        "note": "La afirmación está respaldada por la fuente que confirma que Alan Gabriel Chazarreta murió tras ingresar gravemente herido al Hospital Balestrini después del tiroteo."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "A",
+      "label": "A:58759b17:audit",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "audit",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0019475000",
+      "result": {
+        "passed": "true",
+        "problems": [],
+        "note": "El titular refleja correctamente la información proporcionada por las fuentes, que confirman la muerte de un joven tras un tiroteo en el Complejo 19 de La Tablada."
+      }
+    },
+    {
+      "scenario": "A",
+      "label": "A:58759b17:audit:pass2",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "audit",
+      "reused": false,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0.0019475000",
+      "result": {
+        "passed": "true",
+        "problems": [],
+        "note": "El titular refleja correctamente la información proporcionada por las fuentes, que confirman la muerte de un joven tras un tiroteo en el Complejo 19 de La Tablada."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "B",
+      "label": "B:a614745e:verification",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "verification",
+      "reused": true,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "El Gobierno de Javier Milei",
+        "supported_by_excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.",
+        "note": "La afirmación está respaldada por la fuente que indica que el Gobierno de Javier Milei intervino en el caso."
+      }
+    },
+    {
+      "scenario": "B",
+      "label": "B:a614745e:audit",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "audit",
+      "reused": true,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma un 'presunto caso de adoctrinamiento', pero las fuentes no utilizan el término 'presunto'. Ambas fuentes describen el evento como un caso de adoctrinamiento sin calificarlo como presunto."
+        ],
+        "note": "El titular debería reflejar la información proporcionada por las fuentes, que describen el evento como un caso de adoctrinamiento sin el calificativo de 'presunto'."
+      }
+    },
+    {
+      "scenario": "B",
+      "label": "B:58759b17:verification",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "verification",
+      "reused": true,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "supported_by_excerpt": "Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico.",
+        "note": "La afirmación está respaldada por la fuente que confirma que Chazarreta murió tras ingresar herido al hospital después del tiroteo."
+      }
+    },
+    {
+      "scenario": "B",
+      "label": "B:58759b17:audit",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "audit",
+      "reused": true,
+      "model": "gpt-4o",
+      "thinking": null,
+      "incurred_usd": "0",
+      "result": {
+        "passed": "true",
+        "problems": [],
+        "note": "El titular refleja correctamente la información proporcionada por las fuentes, que confirman la muerte de un joven tras un tiroteo en el Complejo 19 de La Tablada."
+      }
+    },
+    {
+      "scenario": "C",
+      "label": "C:a614745e:verification",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "verification",
+      "reused": false,
+      "model": "deepseek-v4-pro",
+      "thinking": "disabled",
+      "incurred_usd": "0.0004480960",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "Fuente: El Gobierno de Milei investigará el caso de adoctrinamiento de Gildo Insfran en una escuela de Formosa",
+        "supported_by_excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.",
+        "note": "La afirmación es respaldada directamente por la fuente, que indica que el Gobierno de Javier Milei intervino en el caso."
+      }
+    },
+    {
+      "scenario": "C",
+      "label": "C:a614745e:verification:pass2",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "verification",
+      "reused": false,
+      "model": "deepseek-v4-pro",
+      "thinking": "disabled",
+      "incurred_usd": "0.0004540360",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "Fuente: El Gobierno de Milei investigará el caso de adoctrinamiento de Gildo Insfran en una escuela de Formosa",
+        "supported_by_excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.",
+        "note": "La afirmación está respaldada por la fuente, que indica explícitamente que el Gobierno de Javier Milei intervino en el caso."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "C",
+      "label": "C:a614745e:audit",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "audit",
+      "reused": false,
+      "model": "deepseek-flash",
+      "thinking": "disabled",
+      "incurred_usd": "0.0002317020",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma como hecho que hubo un 'presunto caso de adoctrinamiento', pero las fuentes describen denuncias y una investigación en curso, no un caso confirmado.",
+          "El titular no atribuye la denuncia a un actor específico, mientras que las fuentes indican que fueron diputadas provinciales de Formosa y el Gobierno de Milei quienes denunciaron o intervinieron.",
+          "El titular menciona 'una escuela de Gran Guardia' sin especificar que se trata de la EEP N° 59 'Leonor Mauriño', dato presente en las fuentes."
+        ],
+        "note": "El titular presenta como denuncia un hecho que las fuentes atribuyen a denuncias de diputadas provinciales y a una investigación solicitada por el Ministerio de Capital Humano, sin confirmación judicial o administrativa."
+      }
+    },
+    {
+      "scenario": "C",
+      "label": "C:a614745e:audit:pass2",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "audit",
+      "reused": false,
+      "model": "deepseek-flash",
+      "thinking": "disabled",
+      "incurred_usd": "0.0001746540",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma como hecho que hubo un 'presunto caso de adoctrinamiento', pero las fuentes describen denuncias y una investigación en curso, no un caso confirmado.",
+          "El titular usa 'Denuncian' en presente, lo cual está respaldado por las fuentes, pero el término 'adoctrinamiento' sin atribución directa en el titular puede sugerir una conclusión que las fuentes presentan como denuncia o sospecha."
+        ],
+        "note": "El titular atribuye el caso a una denuncia, lo cual es correcto según las fuentes, pero califica el hecho como 'presunto caso de adoctrinamiento' sin aclarar que se trata de una denuncia en investigación, lo que puede leerse como una afirmación de mayor certeza que la que las fuentes sostienen."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "C",
+      "label": "C:58759b17:verification",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "verification",
+      "reused": false,
+      "model": "deepseek-v4-pro",
+      "thinking": "disabled",
+      "incurred_usd": "0.0010629960",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "Fuente: La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "supported_by_excerpt": "El episodio terminó además con un muerto. Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico ubicad",
+        "note": "La afirmación coincide con la información de la fuente: Alan Gabriel Chazarreta, de 27 años, murió tras ingresar gravemente herido al Hospital Balestrini después del tiroteo en el Complejo 19, La Tablada."
+      }
+    },
+    {
+      "scenario": "C",
+      "label": "C:58759b17:verification:pass2",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "verification",
+      "reused": false,
+      "model": "deepseek-v4-pro",
+      "thinking": "disabled",
+      "incurred_usd": "0.0005730120",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "Fuente: La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "supported_by_excerpt": "El episodio terminó además con un muerto. Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico ubicad",
+        "note": "La afirmación coincide con la información de la fuente: Alan Gabriel Chazarreta, de 27 años, murió tras ingresar gravemente herido al Hospital Balestrini después del tiroteo en el Complejo 19, La Tablada."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "C",
+      "label": "C:58759b17:audit",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "audit",
+      "reused": false,
+      "model": "deepseek-flash",
+      "thinking": "disabled",
+      "incurred_usd": "0.0002623860",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma que 'murió un joven tras un tiroteo', pero las fuentes indican que la víctima, Alan Gabriel Chazarreta, tenía 27 años y llegó gravemente herido al Hospital Balestrini, donde murió tras recibir un único disparo. El término 'joven' no está respaldado explícitamente por las fuentes, que no lo describen como joven.",
+          "El titular dice 'en el Complejo 19 de La Tablada', lo cual coincide con las fuentes, pero no especifica que el tiroteo ocurrió en la madrugada del sábado ni que se extendió durante horas, aunque esto no es una atribución excesiva."
+        ],
+        "note": "El titular no atribuye de más en cuanto a la ubicación y el hecho principal, pero el uso de 'joven' para referirse a una persona de 27 años es una caracterización no respaldada por las fuentes, que solo mencionan su edad y domicilio. Las fuentes no lo llaman 'joven'."
+      }
+    },
+    {
+      "scenario": "C",
+      "label": "C:58759b17:audit:pass2",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "audit",
+      "reused": false,
+      "model": "deepseek-flash",
+      "thinking": "disabled",
+      "incurred_usd": "0.0001717380",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma que 'murió un joven tras un tiroteo', pero las fuentes indican que la víctima, Alan Gabriel Chazarreta, tenía 27 años y no especifican que fuera 'joven' ni que muriera 'tras' el tiroteo, sino que ingresó gravemente herido al hospital poco después y murió allí.",
+          "El titular no menciona que la muerte es investigada por la UFI de Homicidios matancera, dato presente en las fuentes."
+        ],
+        "note": "El titular simplifica y generaliza ('un joven') sin respaldar ese término en las fuentes, que solo dan nombre, edad y domicilio de la víctima. Además, omite que la muerte ocurrió en el hospital y que hay una investigación judicial en curso."
+      },
+      "pass": 2
+    },
+    {
+      "scenario": "D",
+      "label": "D:a614745e:verification",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "verification",
+      "reused": true,
+      "model": "deepseek-v4-pro",
+      "thinking": "disabled",
+      "incurred_usd": "0",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "Fuente: El Gobierno de Milei investigará el caso de adoctrinamiento de Gildo Insfran en una escuela de Formosa",
+        "supported_by_excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.",
+        "note": "La afirmación es respaldada directamente por la fuente, que indica que el Gobierno de Javier Milei intervino en el caso."
+      }
+    },
+    {
+      "scenario": "D",
+      "label": "D:a614745e:audit",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "stage": "audit",
+      "reused": true,
+      "model": "deepseek-flash",
+      "thinking": "disabled",
+      "incurred_usd": "0",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma como hecho que hubo un 'presunto caso de adoctrinamiento', pero las fuentes describen denuncias y una investigación en curso, no un caso confirmado.",
+          "El titular no atribuye la denuncia a un actor específico, mientras que las fuentes indican que fueron diputadas provinciales de Formosa y el Gobierno de Milei quienes denunciaron o intervinieron.",
+          "El titular menciona 'una escuela de Gran Guardia' sin especificar que se trata de la EEP N° 59 'Leonor Mauriño', dato presente en las fuentes."
+        ],
+        "note": "El titular presenta como denuncia un hecho que las fuentes atribuyen a denuncias de diputadas provinciales y a una investigación solicitada por el Ministerio de Capital Humano, sin confirmación judicial o administrativa."
+      }
+    },
+    {
+      "scenario": "D",
+      "label": "D:58759b17:verification",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "verification",
+      "reused": true,
+      "model": "deepseek-v4-pro",
+      "thinking": "disabled",
+      "incurred_usd": "0",
+      "result": {
+        "decision": "supported",
+        "certainty": "high",
+        "attributed_to": "Fuente: La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "supported_by_excerpt": "El episodio terminó además con un muerto. Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico ubicad",
+        "note": "La afirmación coincide con la información de la fuente: Alan Gabriel Chazarreta, de 27 años, murió tras ingresar gravemente herido al Hospital Balestrini después del tiroteo en el Complejo 19, La Tablada."
+      }
+    },
+    {
+      "scenario": "D",
+      "label": "D:58759b17:audit",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "stage": "audit",
+      "reused": true,
+      "model": "deepseek-flash",
+      "thinking": "disabled",
+      "incurred_usd": "0",
+      "result": {
+        "passed": "false",
+        "problems": [
+          "El titular afirma que 'murió un joven tras un tiroteo', pero las fuentes indican que la víctima, Alan Gabriel Chazarreta, tenía 27 años y llegó gravemente herido al Hospital Balestrini, donde murió tras recibir un único disparo. El término 'joven' no está respaldado explícitamente por las fuentes, que no lo describen como joven.",
+          "El titular dice 'en el Complejo 19 de La Tablada', lo cual coincide con las fuentes, pero no especifica que el tiroteo ocurrió en la madrugada del sábado ni que se extendió durante horas, aunque esto no es una atribución excesiva."
+        ],
+        "note": "El titular no atribuye de más en cuanto a la ubicación y el hecho principal, pero el uso de 'joven' para referirse a una persona de 27 años es una caracterización no respaldada por las fuentes, que solo mencionan su edad y domicilio. Las fuentes no lo llaman 'joven'."
+      }
+    }
+  ],
+  "skipped": [],
+  "note": "Gasto incurrido de este ensayo, no el libro histórico. B y D no repiten la llamada de A y C. Los pases 2 de A y C sí se pagan. No se llamó a Exa, Replicate ni a publicación."
+}

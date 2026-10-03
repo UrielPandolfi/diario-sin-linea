@@ -1,0 +1,190 @@
+[
+  {
+    "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+    "title": "Diputadas provinciales de Formosa denunciaron un nuevo caso de adoctrinamiento político en una escuela primaria de Gran Guardia, tras difundirse en redes un video en el que la delegada zonal educativa Gladys Esther González vincula beneficios escolares con una decisión del gobernador Gildo Insfrán.",
+    "event_type": "protesta",
+    "status": "DETECTED",
+    "summary": "Diputadas provinciales de Formosa denunciaron un presunto caso de adoctrinamiento político en una escuela de Gran Guardia, tras la difusión de un video en el que una delegada educativa vincula beneficios escolares con una decisión del gobernador Gildo Insfrán; señalan que los recursos los paga el Estado y que la charla fue presentada como una decisión del gobernador, calificando la situación como propaganda política ante niños.",
+    "article": {
+      "headline": "Denuncian en Formosa un presunto caso de adoctrinamiento en una escuela de Gran Guardia",
+      "summary": "Diputadas provinciales cuestionaron un video difundido en redes en el que la delegada educativa Gladys Esther González vincula beneficios escolares con una decisión política del gobernador Gildo Insfrán.",
+      "status": "DRAFT",
+      "published_version": null,
+      "current_version": 3
+    },
+    "claims": [
+      {
+        "text": "El Gobierno de Javier Milei intervino en un caso de adoctrinamiento político en una escuela de Formosa.",
+        "type": "hecho",
+        "subject": "Gobierno de Javier Milei",
+        "predicate": "intervino en",
+        "object": "un caso de adoctrinamiento político en una escuela de Formosa",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "El Gobierno nacional solicitó información a las autoridades educativas de Formosa para esclarecer lo ocurrido en el caso de adoctrinamiento.",
+        "type": "hecho",
+        "subject": "Gobierno nacional",
+        "predicate": "solicitó información a",
+        "object": "las autoridades educativas de Formosa para esclarecer lo ocurrido en el caso de adoctrinamiento",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "El Gobierno nacional considera que la utilización del ámbito escolar para exaltar a una autoridad en funciones constituye un hecho de gravedad institucional.",
+        "type": "hecho",
+        "subject": "Gobierno nacional",
+        "predicate": "considera que",
+        "object": "la utilización del ámbito escolar para exaltar a una autoridad en funciones constituye un hecho de gravedad institucional",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "El Ministerio de Capital Humano pidió formalmente a la provincia de Formosa que avance con una investigación para esclarecer las circunstancias de lo ocurrido.",
+        "type": "hecho",
+        "subject": "Ministerio de Capital Humano",
+        "predicate": "pidió formalmente a",
+        "object": "la provincia de Formosa que avance con una investigación para esclarecer las circunstancias de lo ocurrido",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "Gladys Esther González vinculó distintos beneficios escolares con una decisión política del gobernador Gildo Insfrán.",
+        "type": "declaracion",
+        "subject": "Gladys Esther González",
+        "predicate": "vinculó",
+        "object": "distintos beneficios escolares con una decisión política del gobernador Gildo Insfrán.",
+        "status": "UNCERTAIN"
+      },
+      {
+        "text": "Agostina Villaggi afirmó que los recursos mencionados durante la charla son financiados por el Estado y cuestionó que fueran presentados ante los niños como una decisión personal del gobernador.",
+        "type": "declaracion",
+        "subject": "Agostina Villaggi",
+        "predicate": "afirmó que",
+        "object": "los recursos mencionados durante la charla son financiados por el Estado y cuestionó que fueran presentados ante los niños como una decisión personal del gobernador.",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "Agostina Villaggi afirmó que Gildo Insfrán utiliza las escuelas para adoctrinar y hacer propaganda política.",
+        "type": "declaracion",
+        "subject": "Agostina Villaggi",
+        "predicate": "afirmó que",
+        "object": "Gildo Insfrán utiliza las escuelas para adoctrinar y hacer propaganda política.",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "Las diputadas solicitaron que intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial.",
+        "type": "declaracion",
+        "subject": "Las diputadas",
+        "predicate": "solicitaron que",
+        "object": "intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial.",
+        "status": "UNCERTAIN"
+      }
+    ],
+    "sources": [
+      {
+        "title": "Adoctrinamiento en Formosa: Le exigieron a niños agradecerle a Gildo Insfran por un vaso de leche",
+        "excerpt": "Diputadas provinciales deFormosa denunciaron un nuevo caso de adoctrinamiento político en una escuela primaria de Gran Guardia, luego de que se difundiera en redes sociales un video en el que la delegada zonal educativa Gladys Esther González vincula distintos beneficios escolares con una decisión política del autoritario gobernador peronista Gildo Insfrán.\nEn las imágenes difundidas en redes sociales aparece Gladys González, quien se presenta ante los niños como delegada zonal.\nDurante el discurso, la funcionaria pregunta a los estudiantes quién les había enviado los guardapolvos. Ante las diferentes respuestas, insiste: “El gobierno provincial. ¿Cómo se llama el gobernador?”, a lo que los "
+      },
+      {
+        "title": "El Gobierno de Milei investigará el caso de adoctrinamiento de Gildo Insfran en una escuela de Formosa",
+        "excerpt": "El Gobierno de Javier Milei intervino en el grave caso de adoctrinamiento político en una escuela de Formosa y, a través del Ministerio de Capital Humano, solicitó información a las autoridades educativas de la provincia para esclarecer lo ocurrido.\nEl pedido surgió después de la difusión de un video registrado en una escuela primaria de Gran Guardia, donde una funcionaria vinculó distintos beneficios escolares con la figura del autoritario gobernador peronista Gildo Insfrán.\nEl episodio ocurrió en la EEP N° 59 “Leonor Mauriño” y tiene como protagonista a Gladys Esther González, delegada zonal educativa. En el comunicado de Capital Humano, se denuncia que la funcionaria pronunció ante los al"
+      },
+      {
+        "title": "Diputadas de la UCR denuncian “adoctrinamiento” en una escuela de un pueblo de Formosa - LA NACION",
+        "excerpt": "suicidio\nEntrá a la guía de Fundación La Nación y encontrá los tips de los expertos sobre cómo prevenir, actuar y encontrar ayuda frente a este problema\nDos diputadas radicales denunciaron un presunto caso de adoctrinamiento en una escuela primaria de Formosa. Agostina Villagi y Carla Zaiser difundieron imágenes tomadas el viernes durante un acto en un establecimiento educativo de la pequeña localidad de Gran Guardia, a 80 kilómetros de la capital formoseña.\nEn el clip se puede ver a una delegada zonal que les recuerda a los alumnos que los guardapolvos, útiles escolares, zapatillas y el servicio de comedor que reciben son entregados por el gobernador Gildo Insfrán.\n“¿Todos tienen guardapolv"
+      }
+    ]
+  },
+  {
+    "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+    "title": "Se produjo un tiroteo de varias horas en el Complejo 19, La Tablada, La Matanza (Provincia de Buenos Aires), que dejó muerto a Alan Gabriel Chazarreta, de 27 años, quien ingresó gravemente herido al Hospital Balestrini y murió. La muerte quedó bajo investigación de la UFI de Homicidios matancera; no hay pruebas de que la víctima esté vinculada con los disparos.",
+    "event_type": "homicidio",
+    "status": "PUBLISHED",
+    "summary": "Un tiroteo en el Complejo 19 de La Tablada dejó un muerto; la investigación está a cargo de la UFI de Homicidios matancera y no hay pruebas de la vinculación de la víctima con los disparos.",
+    "article": {
+      "headline": "Murió un joven tras un tiroteo en el Complejo 19 de La Tablada",
+      "summary": "Alan Gabriel Chazarreta, de 27 años, murió después de ingresar gravemente herido al Hospital Balestrini tras un tiroteo en el Complejo 19 de La Tablada. La investigación está a cargo de la UFI de Homicidios de La Matanza.",
+      "status": "PUBLISHED",
+      "published_version": 3,
+      "current_version": 3
+    },
+    "claims": [
+      {
+        "text": "Alan Gabriel Chazarreta, de 27 años, murió tras ingresar gravemente herido al Hospital Balestrini después de un tiroteo en el Complejo 19, La Tablada.",
+        "type": "hecho",
+        "subject": "Alan Gabriel Chazarreta",
+        "predicate": "murió tras ingresar gravemente herido",
+        "object": "al Hospital Balestrini después de un tiroteo en el Complejo 19, La Tablada",
+        "status": "SUPPORTED"
+      },
+      {
+        "text": "La muerte de Alan Gabriel Chazarreta está bajo investigación de la UFI de Homicidios matancera.",
+        "type": "hecho",
+        "subject": "La muerte de Alan Gabriel Chazarreta",
+        "predicate": "está bajo investigación",
+        "object": "de la UFI de Homicidios matancera",
+        "status": "SUPPORTED"
+      },
+      {
+        "text": "No hay pruebas que vinculen a Alan Gabriel Chazarreta con los disparos registrados durante el enfrentamiento.",
+        "type": "hecho",
+        "subject": "No hay pruebas",
+        "predicate": "que vinculen a Alan Gabriel Chazarreta",
+        "object": "con los disparos registrados durante el enfrentamiento",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "Alan Gabriel Chazarreta recibió un único disparo durante el tiroteo.",
+        "type": "hecho",
+        "subject": "Alan Gabriel Chazarreta",
+        "predicate": "recibió un único disparo",
+        "object": "durante el tiroteo",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "Alan Gabriel Chazarreta, de 27 años, llegó al Hospital Balestrini con una herida de bala poco después de un tiroteo ocurrido en La Tablada.",
+        "type": "hecho",
+        "subject": "Alan Gabriel Chazarreta",
+        "predicate": "llegó al hospital con",
+        "object": "una herida de bala",
+        "status": "SUPPORTED"
+      },
+      {
+        "text": "Chazarreta había recibido un solo disparo y su estado era grave cuando ingresó al centro de salud.",
+        "type": "hecho",
+        "subject": "Chazarreta",
+        "predicate": "había recibido",
+        "object": "un solo disparo",
+        "status": "SINGLE_SOURCE"
+      },
+      {
+        "text": "La investigación por la muerte de Alan Gabriel Chazarreta quedó a cargo de la UFI de Homicidios de La Matanza.",
+        "type": "hecho",
+        "subject": "La investigación",
+        "predicate": "quedó a cargo de",
+        "object": "la UFI de Homicidios de La Matanza",
+        "status": "SUPPORTED"
+      },
+      {
+        "text": "Los disparos se escucharon durante la madrugada del sábado 19 de septiembre en el Complejo 19, un conjunto de monoblocks de La Tablada.",
+        "type": "hecho",
+        "subject": "Los disparos",
+        "predicate": "se escucharon durante",
+        "object": "la madrugada del sábado 19 de septiembre",
+        "status": "SINGLE_SOURCE"
+      }
+    ],
+    "sources": [
+      {
+        "title": "La Matanza de Kicillof: Delincuentes usaron una ametralladora en un feroz tiroteo en La Tablada",
+        "excerpt": "La violencia e inseguridad volvió a quedar expuesta en la provincia de Buenos Aires con un feroz tiroteo que se extendió durante horas en la madrugada del sábado en el Complejo 19, una zona de monoblocks de La Tablada, en el partido de La Matanza.\nLos vecinos, aterrados por el enfrentamiento, registraron con sus teléfonos el sonido de los disparos, que fueron efectuados a repetición y con lo que describieron como una ametralladora.\nEl episodio terminó además con un muerto. Alan Gabriel Chazarreta, de 27 años y con domicilio en Ciudad Evita, ingresó gravemente herido al Hospital Balestrini poco después de la balacera. Había recibido un único disparo y murió tras llegar al centro médico ubicad"
+      },
+      {
+        "title": "La Matanza sangrienta: feroz batalla a tiros de ametralladora - Infobae",
+        "excerpt": "El sábado último por la madrugada, una feroz batalla a tiros se extendió durante horas en el Complejo 19, la zona de monoblocks en La Tablada. Los propios vecinos del lugar, aterrados, grabaron el sonido de las balas, disparadas a repetición por ametralladoras, un disparo tras otro.\nUna víctima fatal ingresó al Hospital Balestrini poco después del tiroteo. Se trata de Alan Gabriel Chazarreta, con domicilio en Ciudad Evita. Llegó gravemente herido al centro médico cercano al lugar. “Aparentemente, lo dejó un familiar que después se fue”, asegura una alta fuente oficial en la zona. Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera.\nPU"
+      },
+      {
+        "title": "Tiroteo en La Tablada: murió un joven y crece la tensión narco",
+        "excerpt": "Tiroteo en La Tablada: murió un joven y crece la tensión narco\nUna madrugada de balaceras volvió a sacudir el Complejo 19 de La Tablada y dejó como saldo la muerte de Alan Gabriel Chazarreta, de 27 años. Mientras la Justicia investiga el hecho, en la zona crecen las versiones sobre una nueva disputa por el control del negocio narco.\n“La violencia narcocriminal se comporta como una marea: baja por momentos, pero vuelve a subir con otra forma y los mismos territorios en disputa”. En La Tablada, esa dinámica volvió a sentirse el sábado de madrugada, cuando una feroz balacera se prolongó durante horas en el Complejo 19, el sector de monoblocks que desde hace años aparece asociado a episodios de "
+      }
+    ]
+  }
+]

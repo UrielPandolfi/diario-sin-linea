@@ -14,7 +14,7 @@ from app.core.clock import utc_now
 from app.core.config import get_settings
 from app.core.prompts import load_prompt
 from app.core.text import is_person_name_suffix, normalize_name, usable_text
-from app.core.usage_context import attribution_scope, update_usage_context, usage_scope
+from app.core.usage_context import attribution_scope, fallback_scope, update_usage_context, usage_scope
 from app.domain.enums import EntityType, EventSourceRelation, PipelineStatus, SourceItemStatus
 from app.models import Entity, Event, EventEntity, PipelineRun, SourceItem
 from app.models.event import EMBEDDING_DIMENSIONS
@@ -280,7 +280,8 @@ class DetectionService:
         except ProviderNotConfiguredError:
             raise
         except Exception as exc:
-            candidate = _call(_light())
+            with fallback_scope(ModelRole.ULTRA_LIGHT_PROCESSING.value):
+                candidate = _call(_light())
             reason = (
                 "invalid_schema"
                 if isinstance(exc, _EXTRACT_FALLBACK_ERRORS)
@@ -294,7 +295,8 @@ class DetectionService:
             }
 
         if needs_location_fallback(candidate):
-            candidate = _call(_light())
+            with fallback_scope(ModelRole.ULTRA_LIGHT_PROCESSING.value):
+                candidate = _call(_light())
             return candidate, {
                 "fallback_from": ModelRole.ULTRA_LIGHT_PROCESSING.value,
                 "fallback_to": ModelRole.LIGHT_PROCESSING.value,

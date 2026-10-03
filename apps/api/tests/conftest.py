@@ -3,6 +3,7 @@ import os
 
 # La suite no usa la contraseña real ni `dev-admin`. Tiene que cumplir el mínimo de arranque.
 os.environ["ADMIN_PASSWORD"] = "pytest-admin-password-do-not-use-in-production-0001"
+os.environ["USAGE_ENVIRONMENT"] = "test"
 
 import pytest
 from alembic import command

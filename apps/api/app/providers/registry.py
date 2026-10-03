@@ -8,6 +8,7 @@ from app.providers.base import (
     SearchProvider,
     StructuredLLMProvider,
 )
+from app.providers.model_profile import profile_for
 from app.providers.openai_provider import OpenAIEmbeddingProvider, OpenAIStructuredProvider
 from app.providers.voyage_provider import VoyageEmbeddingProvider
 
@@ -36,7 +37,7 @@ def _api_key_for(provider: str) -> str | None:
     return mapping.get(provider.lower())
 
 
-def _structured_role_config(role: ModelRole) -> tuple[str | None, str | None]:
+def _structured_role_config(role: ModelRole) -> tuple[str | None, str | None, str | None]:
     settings = get_settings()
     mapping = {
         ModelRole.ULTRA_LIGHT_PROCESSING: (
@@ -71,13 +72,16 @@ def _structured_role_config(role: ModelRole) -> tuple[str | None, str | None]:
         raise ProviderNotConfiguredError(f"El rol {role} no es un LLM estructurado")
     provider_name, model = mapping[role]
     if role == ModelRole.AMBIGUOUS_DEDUP and (not provider_name or not model):
-        return settings.claim_resolution_provider, settings.claim_resolution_model
-    return provider_name, model
+        provider_name, model = settings.claim_resolution_provider, settings.claim_resolution_model
+    override_provider, override_model, thinking = profile_for(role.value)
+    if override_provider and override_model:
+        return override_provider, override_model, thinking
+    return provider_name, model, None
 
 
 def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
     settings = get_settings()
-    provider_name, model = _structured_role_config(role)
+    provider_name, model, thinking = _structured_role_config(role)
 
     if not provider_name or not model:
         raise ProviderNotConfiguredError(
@@ -100,6 +104,7 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
             model=model,
             provider_name="openai",
             reasoning_effort=reasoning_effort,
+            thinking=thinking,
         )
     if provider_name.lower() == "deepseek":
         return OpenAIStructuredProvider(
@@ -108,6 +113,7 @@ def get_structured_provider(role: ModelRole) -> StructuredLLMProvider:
             base_url="https://api.deepseek.com",
             provider_name="deepseek",
             reasoning_effort=reasoning_effort,
+            thinking=thinking,
         )
     if provider_name.lower() == "anthropic":
         from app.providers.anthropic_provider import AnthropicJsonProvider

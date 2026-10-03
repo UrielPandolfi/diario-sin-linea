@@ -7,6 +7,7 @@ from app.models.geo_locality import GeoLocality
 from app.models.llm_price import LlmPriceBook, LlmPriceRate
 from app.models.llm_usage import LlmUsage
 from app.models.pipeline import PipelineRun
+from app.models.provider_cache import ProviderResultCache
 from app.models.reader import Reader
 from app.models.reader_case import ReaderCase, ReaderCaseAction
 from app.models.reader_password_reset import ReaderPasswordReset
@@ -33,6 +34,7 @@ __all__ = [
     "LlmPriceRate",
     "LlmUsage",
     "PipelineRun",
+    "ProviderResultCache",
     "Reader",
     "ReaderCase",
     "ReaderCaseAction",
