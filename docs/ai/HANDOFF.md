@@ -2,53 +2,68 @@
 
 **Fecha:** 2026-10-03
 
-**Tarea:** Cerrar la comparación real, la vigencia de la reutilización y la actualización de un artículo publicado. Rama `feat/costos-deepseek-cache`, worktree `E:\sin-linea-wt-costos`. Sin merge, push ni despliegue.
+**Tarea:** Cerrar la decisión de modelos en `feat/costos-deepseek-cache`, worktree `E:\sin-linea-wt-costos`. Sin merge, push ni despliegue. `main` sigue en `f4f1b07`.
 
-## Qué quedó comprobado
+## Política de verificación
 
-El poll de El Ciudadano no se repitió. El ensayo de prompt corto no sirve como validación editorial: pedía un esquema propio y un campo libre, y por eso ambos modelos devolvieron `supported` con certeza alta copiando el texto del claim. En los prompts reales el excerpt sale del paquete de fuentes. Cuando coincide con el claim, esa frase está en el snippet (Derecha Diario; Nube Noticias). No es el claim usado como única prueba.
+Se reaplicó cada juicio guardado desde `input_evidence`, con admisión, `assess_origins` y la política, y se revirtió la sesión. La evidencia y los metadatos quedaron iguales.
 
-Auditoría con `article_audit.md` y el snapshot de la versión:
+| Claim | Orígenes admitidos | Modelo | Persistible |
+| --- | --- | --- | --- |
+| `84d4352c`, sin vínculo de Chazarreta con los disparos | 1, `derechadiario.com.ar` | gpt-4o `SINGLE_SOURCE`; Pro `SUPPORTED` | `SINGLE_SOURCE` |
+| `fb6ac81f`, un disparo y estado grave | 1, `nubenoticias.com.ar` | gpt-4o `SINGLE_SOURCE`; Pro `SUPPORTED` | `SINGLE_SOURCE` |
+| `55ca7750`, condena de 4 años y 6 meses | 3 medios, ninguna primaria judicial | Pro `SUPPORTED`; gpt-4o `SINGLE_SOURCE` | `SINGLE_SOURCE` |
 
-- La Tablada, titular «Murió un joven…». Flash no emitió un issue sobre «joven» y `passed=true`. La auditoría persistida de gpt-4o también había pasado; los LOW son `surface_indeterminate` del código. Una fuente trae «joven» en el título y el cuerpo dice 27 años. La política no bloquea por una palabra aislada.
-- Formosa. El bloqueo persistido es `structural_block` (`central_unverified`), igual para cualquier modelo. Flash, sobre el mismo prompt, no marcó HIGH ni MEDIUM por «presunto».
-- Marcha `1c28e01f`. Flash reescribió la bajada de la V1 para atribuir («Según la documentación…»). gpt-4o, sobre esa V1 y sobre la V2, pasó sin issues HIGH o MEDIUM. El titular no cambió.
-- Enfermero `e6c037d3`. El `structural_block` es de código. gpt-4o no agregó un bloqueo lingüístico.
+En los dos de La Tablada el plan pide corroboración independiente y hay un solo origen informativo. Pro los da por corroborados; la política no. En la condena el plan exige registro judicial. Tres medios no reemplazan esa primaria, así que el estado es `SINGLE_SOURCE` con `MISSING_DOCUMENTARY_PRIMARY`. El replay de gpt-4o tenía excerpts cortados a 240 caracteres y por eso contó dos orígenes y otra razón; el status igual fue `SINGLE_SOURCE`. No se repitió esa llamada.
 
-Juicio, mismo paquete y el mismo prompt de `verification.md`:
+La compuerta `needs_sol_after_assessment` coincidió en escalar o no en todos los claims medidos. Flash no se salteó el juicio de la condena ni el de los dos de La Tablada, y no agregó una escalada que Nano no hiciera. En la consigna de la marcha ambos no escalan: Flash porque la evaluación ya tiene primaria auténtica; Nano porque no le quedó soporte admitido. En la inhabilitación, el plan de Nano pediría corroboración y, con un origen, escalaría; el de Flash no. El estado ya guardado es `SINGLE_SOURCE`.
 
-- De 7 claims históricos escalados, gpt-4o y `deepseek-v4-pro` coincidieron en 5 status. En dos de La Tablada (vinculación con los disparos; disparo único) gpt-4o dijo `SINGLE_SOURCE` y Pro `SUPPORTED`, porque Pro trató los medios como independientes. Este replay no volvió a admitir esos excerpts en `assess_origins`.
-- En el poll, Pro corrió solo en la condena del enfermero y propuso `SUPPORTED` (0.95). gpt-4o, sobre el mismo paquete, dijo `SINGLE_SOURCE` (0.8). La decisión guardada por la política ya es `SINGLE_SOURCE`.
-- Los otros tres claims del poll no escalaron. La decisión es de Flash más la política. No hay juicio de Pro ni de gpt-4o ahí. Nano y Flash no devolvieron las mismas relaciones; no se reejecutó `needs_sol_after_assessment`.
+Ruta real de la condena, con el perfil candidato: evaluación Flash USD 0.002472396, juicio Pro USD 0.004507140 y tres búsquedas USD 0.021. Total USD 0.027979536. El contravalor Nano + gpt-4o, sin repetir la búsqueda, sale USD 0.035065100. La marcha no llamó a Pro: evaluación USD 0.001653258 más dos búsquedas USD 0.014.
 
-Los modelos pedidos coincidieron con los reportados. DeepSeek llevó `thinking={"type":"disabled"}` y no hubo fallback de proveedor en el replay.
+## Extracción, research y planificación
 
-Reutilización: TTL de búsqueda 1800 s y de verificación 7200 s. Beat usa 900 s (`INGESTION_POLL_INTERVAL_SECONDS`). Una búsqueda idéntica puede ocultar una página nueva hasta 30 minutos. Si la verificación se reutiliza, no se busca de nuevo hasta 2 horas, y solo cuando el paquete no cambió. Una fuente nueva, una corrección, otro excerpt, otra procedencia, otro modelo o un resultado fallido o incompleto no esperan el TTL. Los tests cubren eso, más el vencimiento, otro `numResults` y la concurrencia.
+Mismos textos persistidos. No hubo otro poll. No se exigió texto idéntico.
 
-Actualización: `test_rejected_v2_keeps_published_read_and_approved_v2_publishes_locally` publica una V1 de prueba, rechaza la candidata y comprueba que la lectura pública conserva titular, cuerpo y claims. Después publica la V2 solo en la base de test, sin imagen.
+La extracción de Flash y de Nano deja pasar el gate, con la misma localidad y provincia, y describe el mismo incidente en los cuatro sucesos. El `event_type` libre no coincide en tres (`condena`/`judicial`, `marcha`/`protesta`, `protesta`/`denuncia`). La Tablada coincide en `homicidio`. Ninguno pidió el fallback de lugar.
+
+Las consultas del poll salieron del código. La relevancia se rehizo solo sobre documentos ya guardados, con el inicio del texto y no el snippet original. En la marcha, Nano marcaría contexto —y no adjuntaría— el recorrido, los cortes y un resumen de finde que Flash adjuntó. En Formosa, Flash dejaría fuera notas del mismo caso y rechazaría una nota distinta sobre Adorni que sí estaba adjuntada. No se volvió a verificar con el otro conjunto.
+
+Después de `refine_plan`, 2 de 13 planes coinciden en las decisiones que cambian la búsqueda o la compuerta. Flash pasa los dos claims de La Tablada de `JUDICIAL_RECORD` a `INDEPENDENT_CORROBORATION`. Esa búsqueda no se repitió.
+
+## Auditoría
+
+La atribución agregada en la bajada de la marcha sigue la regla vigente. La consigna `50961d28` es `SUPPORTED` y es un dicho: `attribution_required` queda en true. `structural_findings` de la V1 marca `surface_attribution` alto. Ese hallazgo es de código. La primera auditoría de Flash devolvió 10 tokens de completion (USD 0.000281628). La reescritura la hizo Luna, USD 0.003340670, y la segunda auditoría de Flash costó USD 0.000451728. La V2 ya no tiene ese hallazgo alto. gpt-4o también pasaba el texto; el estructural igual obliga la reparación.
 
 ## Gasto en `sin_linea_costos`
 
-Todo calculado. Cero costos desconocidos. Exa del poll está confirmada a USD 0.007 por request.
+Todo calculado. Cero costos desconocidos.
 
 | Tramo | USD | Llamadas |
 | --- | --- | --- |
-| Ensayo corto, incluido el corte por esquema inválido | 0.043922640 | 34 |
-| Descarte deportivo, solo detección | 0.000883050 | 1 |
+| Ensayo corto | 0.043922640 | 34 |
+| Descarte deportivo | 0.000883050 | 1 |
 | Poll, dos notas | 0.089172062 | 35 |
-| Replay de prompts reales, con reintentos de esquema | 0.126329412 | 51 |
-| Total | 0.260307164 | 121 |
+| Replay de prompts reales | 0.126329412 | 51 |
+| Extracción, plan y relevancia | 0.016948358 | 21 |
+| Total | 0.277255522 | 142 |
 
-Quedan USD 2.739692836 de los 3.
+Quedan USD 2.722744478 de los 3.
 
-Hasta la auditoría aprobada, solo la marcha: USD 0.039793342. No se publicó ni se generó portada, y no hubo otra verificación después de la reescritura. El enfermero se detuvo en `structural_block` a USD 0.049378720; eso no es un costo hasta aprobación.
+## Configuración propuesta
 
-## Qué activar
+No activar el perfil entero. `ultra_light_processing` mezcla extracción, relevancia, plan y evaluación.
 
-Se puede activar, cuando se decida y fuera de este entorno, la caché de búsqueda y la reutilización de verificación. Siguen apagadas. No activar `COST_PROFILE=candidate`, ni la auditoría en Flash, ni el juicio en Pro.
+```
+COST_PROFILE=candidate
+COST_PROFILE_ROLES=verification,auditing
+SEARCH_CACHE_ENABLED=true
+VERIFICATION_REUSE_ENABLED=true
+```
 
-Para volver atrás: `COST_PROFILE=current`, `SEARCH_CACHE_ENABLED=false`, `VERIFICATION_REUSE_ENABLED=false`. `main` y los contenedores `diariosinlnea-*` no se modificaron.
+Para volver atrás: `COST_PROFILE=current`, `COST_PROFILE_ROLES=` vacío, `SEARCH_CACHE_ENABLED=false`, `VERIFICATION_REUSE_ENABLED=false`.
 
-## Pruebas
+Frescura: una búsqueda idéntica puede ocultar una página nueva hasta 30 minutos. Una verificación reutilizada no busca de nuevo hasta 2 horas si el paquete no cambió. Una fuente nueva, una corrección, otro excerpt, otra procedencia, otro hash, otro modelo o un resultado fallido no esperan el TTL.
 
-En `sin_linea_costos_test`: costos, registro, uso, tarifas, Exa, publicación, auditoría, Track B y verificación. La corrida completa de esos módulos pasó; los dos tests nuevos fallaron una vez y, ya corregidos, pasan. No se corrió el resto de la suite.
+## Sigue sin comprobar
+
+Dedup, resolución de claims y prompt de imagen no tuvieron un caso. No se rehizo la búsqueda con el otro plan ni con los documentos que el otro modelo habría adjuntado. El excerpt completo de gpt-4o en la condena no se volvió a pedir. Estas banderas no están puestas en el entorno aislado ni en `main`.
