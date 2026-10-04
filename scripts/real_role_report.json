@@ -1,0 +1,1900 @@
+{
+  "database": "sin_linea_costos",
+  "spent_before": "0.1959715960",
+  "unknown_before": 0,
+  "remaining_before": "2.8040284040",
+  "models": {
+    "current_assessor": "gpt-5-nano",
+    "current_verification": "gpt-4o",
+    "current_audit": "gpt-4o",
+    "candidate_assessor": "deepseek-flash",
+    "candidate_verification": "deepseek-v4-pro",
+    "candidate_audit": "deepseek-flash"
+  },
+  "assessments": [
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "128c16f0-9779-459f-afe8-babed98c21b0",
+      "claim": "la legisladora provincial Agostina Villaggi sostuvo que los recursos mencionados durante la charla son financiados por el Estado y cuestionó que fueran presentados ante los niños como una decisión personal del gobernador",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "UNCERTAIN",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Eso es una decisión política del señor gobernador"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Eso es una decisión política del señor gobernador"
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "los paga el Estado, no un funcionario"
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 4,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Eso es una decisión política del señor gobernador"
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 5,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Eso es una decisión política del señor gobernador"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 6,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 7,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "una metodología impulsada desde la gobernación"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 8,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "vinculó la entrega de guardapolvos, útiles y el servicio de comedor con la figura del gobernador Gildo Insfrán"
+          }
+        ],
+        "ambiguous": true
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 3, 4, 5, 6 y 8 contienen declaraciones de Villaggi que sostienen que los recursos son financiados por el Estado y cuestionan su presentación ante los niños como propaganda política, lo que respalda el Claim. Las fuentes 1 y 2 solo mencionan la denuncia sin la declaración específica, y la",
+        "judgements": [
+          {
+            "relation": "MENTIONS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Las diputadas provinciales de la UCR de Formosa, Agostina Villaggi y Carla Zaiser, denunciaron un presunto adoctrinamiento político en una escuela primaria de Gran Guardia, luego de que se difundiera un video en el que una delegada educativ"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Las diputadas provinciales de la UCR denunciaron adoctrinamiento político en una escuela primaria de la localidad de Gran Guardia, Formosa, después de que circulara un video en redes sociales en el que una delegada zonal educativa atribuye "
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi recordó en su cuenta de X que los elementos que mencionó la delegada \"los paga el Estado, no un funcionario\" y agregó: \"A nuestro criterio, es propaganda política ante niños\"."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "En una publicación en X, la diputada afirmó que los elementos \"los paga el Estado, no un funcionario\" y agregó: \"A nuestro criterio, es propaganda política ante niños\"."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi recordó en su cuenta de X que los elementos que mencionó la delegada \"los paga el Estado, no un funcionario\" y agregó: \"A nuestro criterio, es propaganda política ante niños\"."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Villaggi, presidenta de la UCR de Formosa, sostuvo que los elementos mencionados \"los paga el Estado\" y cuestionó que la funcionaria los vincule personalmente con el gobernado"
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 7,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La legisladora sostuvo que \"esto no es un hecho aislado\" sino \"una metodología\" impulsada desde la gobernación. Según explicó, se imparten órdenes a docentes y delegados zonales para \"enalteger constantemente su figura\" como si el gobernado"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 8,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi afirmó en su cuenta en X que los elementos \"los paga el Estado, no un funcionario\" y calificó el episodio como \"propaganda política ante niños\""
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "1fd24748-25f1-4469-acc9-c39d6590b648",
+      "claim": "La Secretaría de Educación de la Nación advirtió que se trataba de un caso de adoctrinamiento partidario en contexto escolar.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": false,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "la Secretaría de Educación de la Nación intervino formalmente y advirtió que se trataba de un caso de adoctrinamiento partidario en contexto escolar."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 2,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "En medio de la polémica por el caso de adoctrinamiento en una escuela de Formosa,"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "La provincia de Formosa volvió a convertirse en el escenario de la polémica luego de que desde la Unión Cívica Radical local denunciasen un nuevo acto de adoctrinamiento oficialista a estudiantes menores de edad que habría ocurrido el pasado viernes."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 4,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Una nueva polémica sacudió a la provincia de Formosa, donde se denunciaron hechos que parecen mostrar un intento de adoctrinamiento en las escuelas públicas."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Solo la fuente 1 atribuye directamente a la Secretaría de Educación de la Nación la advertencia sobre adoctrinamiento partidario en contexto escolar; las demás fuentes no mencionan esa advertencia específica.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "la Secretaría de Educación de la Nación intervino formalmente y advirtió que se trataba de un caso de “adoctrinamiento partidario en contexto escolar”."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "el Ministerio de Capital Humano solicitó información al Ministerio de Educación de la provincia"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "desde la Unión Cívica Radical local denunciasen un nuevo acto de adoctrinamiento oficialista"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La Unión Cívica Radical local difundió un video en el que se ve a una referente educativa realizando preguntas"
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "3a0be300-2ed8-44f6-931c-0a4ea0fb5aeb",
+      "claim": "Las legisladoras Agostina Villaggi y Carla Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "UNCERTAIN",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Las diputadas provinciales Agostina Villaggi, presidenta de la UCR de Formosa, y Carla Zaiser denunciaron que una delegada educativa habló con niños de una escuela primaria de Gran Guardia para vincular la llegada de beneficios escolares con la voluntad política de Insfrán y que además tratara el te"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 2,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Dos diputadas nacionales de la Unión Cívica Radical denunciaron un presunto caso de adoctrinamiento en una escuela primaria de Formosa."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Las diputadas provinciales Agostina Villaggi, presidenta de la UCR de Formosa, y Carla Zaiser denunciaron que una delegada educativa habló con niños de una escuela primaria de Gran Guardia para vincular la llegada de beneficios escolares con la voluntad política de Insfrán y que además tratara el te"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 4,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Villaggi y Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 5,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "El episodio tiene como protagonista a Gladys Esther González, delegada zonal educativa de Pirané. En las imágenes, difundidas por Villaggi en X y por Zaiser en Instagram, aparece Gladys González, que se presenta ante los alumnos como delegada zonal y les pregunta quién les entregó los guardapolvos. "
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 6,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "El Gobierno nacional a través del Ministerio de Capital Humano solicitó información a la provincia de Formosa por un presunto caso de adoctrinamiento registrado en una escuela de esa provincia. El Ministerio señaló que solicitó a la provincia que inicie una investigación para esclarecer los hechos e"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 7,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "La provincia de Formosa volvió a convertirse en el escenario de la polémica luego de que desde la Unión Cívica Radical local denunciasen un nuevo acto de adoctrinamiento oficialista a estudiantes menores de edad. Durante un acto escolar la referente educativa preguntó quién les dio sus guardapolvos "
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1, 2, 3 y 4 sostienen directamente que Villaggi y Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial se presentaran ante alumnos asociados a la figura del gobernador. Las fuentes 5, 6 y 7 solo mencionan el tema sin atribuir el cuestionamiento específico a a",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Las diputadas provinciales Agostina Villaggi, presidenta de la UCR de Formosa, y Carla Zaiser denunciaron que una delegada educativa habló con niños de una escuela primaria de Gran Guardia para vincular la llegada de beneficios escolares co"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "En el clip se puede ver a una delegada zonal que les recuerda a los alumnos que los guardapolvos, útiles escolares, zapatillas y el servicio de comedor que reciben son entregados por el gobernador Gildo Insfrán."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Las diputadas provinciales Agostina Villaggi, presidenta de la UCR de Formosa, y Carla Zaiser denunciaron que una delegada educativa habló con niños de una escuela primaria de Gran Guardia para vincular la llegada de beneficios escolares co"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi y Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "una delegada zonal vinculó distintas prestaciones escolares con la figura del gobernador Gildo Insfrán"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Agostina Villaggi, presidenta de la Unión Cívica Radical (UCR) de Formosa, y Carla Zaiser diputada provincial denunciaron adoctrinamiento"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 7,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "desde la Unión Cívica Radical local denunciasen un nuevo acto de adoctrinamiento oficialista a estudiantes menores de edad"
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "3e8a684c-357b-41e6-86a3-50181e0eb732",
+      "claim": "Las diputadas solicitaron que intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "UNCERTAIN",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "La oposición pidió que intervenga el Ministerio de Cultura y Educación de la provincia y anunció acciones legales."
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 2,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "solicitó la intervención de la Secretaría de Educación del Ministerio de Capital Humano Nacional para que ordene sumarios administrativos."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": true,
+            "excerpt": "las diputadas solicitaron que intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 4,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "ambas anunciaron que pedirán la intervención del Ministerio de Cultura y Educación de Formosa y adelantaron la presentación de acciones legales."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 5,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Zaiser anunció acciones legales y solicitó la intervención."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 6,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Dos diputadas radicales denunciaron un presunto caso de adoctrinamiento en una escuela primaria de Formosa."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1, 3, 4 y 5 sostienen explícitamente que las diputadas solicitaron la intervención del área educativa provincial y adelantaron acciones judiciales; la fuente 2 aclara que la solicitud fue a nivel nacional, y la fuente 6 solo menciona la denuncia sin los detalles del Claim.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La oposición pidió que intervenga el Ministerio de Cultura y Educación de la provincia y anunció acciones legales."
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "solicitó la intervención de la Secretaría de Educación del Ministerio de Capital Humano Nacional para que ordene sumarios administrativos"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": true,
+            "excerpt_in_prompt": true,
+            "excerpt": "las diputadas solicitaron que intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "ambas anunciaron que pedirán la intervención del Ministerio de Cultura y Educación de Formosa y adelantaron la presentación de acciones legales."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Zaiser anunció acciones legales y solicitó la intervención del Ministerio de Cultura y Educación."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Dos diputadas radicales denunciaron un presunto caso de adoctrinamiento en una escuela primaria de Formosa."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "fe1b7c92-9895-4a58-975b-d28b7bd51db9",
+      "claim": "¿Cómo se llama el gobernador?”, a lo que los alumnos responden: “Gildo Insfrán”.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": false,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "a lo que los alumnos responden: “Gildo Insfrán”."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 2,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "del gobernador Gildo Insfrán."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Los alumnos responden: “Gildo Insfrán”."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 4,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "gracias al mandatario Gildo Insfrán."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1 y 3 sostienen directamente la proposición del Claim; las fuentes 2 y 4 no la establecen. No hay contradicciones.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "“El gobierno provincial. ¿Cómo se llama el gobernador?”, a lo que los alumnos responden: “Gildo Insfrán”."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Los alumnos responden: “Gildo Insfrán”."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "1ae2433c-eaed-462f-8cc7-31130b279b61",
+      "claim": "La cercanía del hospital y la secuencia temporal forman parte de los datos conocidos, pero no establecen por sí mismas una conexión entre la muerte y el enfrentamiento.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": true,
+            "excerpt": "La cercanía del hospital y la secuencia temporal forman parte de los datos conocidos, pero no establecen por sí mismas una conexión entre la muerte y el enfrentamiento."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 3,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 5,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 6,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "La autopsia es el procedimiento que se ejecuta sobre el cadáver con el objeto de determinar la causa y el mecanismo de la muerte."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 7,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 8,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 9,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "no existen pruebas que permitan vincular al joven con los disparos"
+          }
+        ],
+        "ambiguous": true
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1, 8 y 9 sostienen explícitamente que la cercanía del hospital y la secuencia temporal no establecen por sí mismas una conexión entre la muerte y el enfrentamiento; las demás fuentes no abordan la proposición.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": true,
+            "excerpt_in_prompt": true,
+            "excerpt": "La cercanía del hospital y la secuencia temporal forman parte de los datos conocidos, pero no establecen por sí mismas una conexión entre la muerte y el enfrentamiento."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Su muerte es investigada por la UFI de Homicidios matancera."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 7,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 8,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 9,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "37f7556a-5db8-4b63-897b-28ecd73ce273",
+      "claim": "Alan Gabriel Chazarreta recibió un único disparo durante el tiroteo.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1, 2, 6 y 7 sostienen explícitamente que Alan Gabriel Chazarreta recibió un único disparo durante el tiroteo; las demás fuentes no abordan el hecho. No hay contradicciones.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Había recibido un único disparo y murió tras llegar al centro médico"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 7,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 8,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "84d4352c-b493-4bb3-9bca-c05843e87d27",
+      "claim": "No hay pruebas que vinculen a Alan Gabriel Chazarreta con los disparos registrados durante el enfrentamiento.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por ahora, no hay pruebas que vinculen a la víctima con los disparos."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "MATANZA TRIBUNAL EN LO CRIMINAL Nº 4"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 5,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "SCBA - JUBA"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 6,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "LA MATANZA TRIBUNAL EN LO CRIMINAL Nº 5 Conden"
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 7,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "La muerte es investigada por la UFI de Homicidios matancera."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1, 2, 3 y 7 sostienen explícitamente que no hay pruebas que vinculen a Alan Gabriel Chazarreta con los disparos. Las fuentes 4, 5 y 6 son documentos judiciales no relacionados. No hay contradicciones.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por ahora, no hay pruebas que vinculen a la víctima con los disparos."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 7,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Su muerte es investigada por la UFI de Homicidios matancera."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "fb6ac81f-48ab-4ca9-8ae7-c246f60b1df6",
+      "claim": "Chazarreta había recibido un solo disparo y su estado era grave cuando ingresó al centro de salud.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-5-nano",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "escalated_originally": true,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta tenía domicilio en Ciudad Evita y había recibido un solo disparo. Su estado era grave cuando ingresó al centro de salud, ubicado cerca del lugar del enfrentamiento."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Llegó gravemente herido al centro médico cercano al lugar. Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "relation": "QUALIFIES",
+            "source_ref": 3,
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 4,
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Un joven de 28 años fue asesinado de múltiples disparos en el cruce de Las Margaritas y Las Magnolias, en el barrio 22 de Enero, Ciudad Evita, partido de La Matanza."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las fuentes 1, 2 y 3 reproducen de forma independiente el mismo contenido (una parece resumen de otra) y establecen que Chazarreta recibió un único disparo y llegó gravemente herido al Hospital Balestrini; la fuente 4 trata un hecho distinto en Ciudad Evita y no aborda el Claim.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta tenía domicilio en Ciudad Evita y había recibido un solo disparo. Su estado era grave cuando ingresó al centro de salud"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Llegó gravemente herido al centro médico cercano al lugar. ... Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Llegó gravemente herido al centro médico cercano al lugar. ... Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Un joven de 28 años fue asesinado de múltiples disparos en el cruce de Las Margaritas y Las Magnolias, en el barrio 22 de Enero de Ciudad Evita"
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "poll",
+      "event_id": "e6c037d3-7ef3-4bd9-9765-d205fac1a2b3",
+      "claim_id": "55ca7750-9028-4a8e-9ca1-c86a0ae5d075",
+      "claim": "Luis Emmanuel Benavidez fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio y otras sustancias medicinales peligrosas.",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-flash",
+      "executed_profile": "current",
+      "executed_model": "gpt-5-nano",
+      "escalated_originally": true,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Un enfermero del Policlínico Pami II de Rosario, en barrio Arroyito, fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio –de exclusivo uso hospitalario para facilitar la anestesia general, q"
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La Corte Suprema de Justicia de la Nación expresó sus condolencias a la familia del ex Ministro del Máximo Tribunal, Augusto César Belluscio, fallecido en la mañana de hoy."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Se realizarán del 7 al 9 de octubre en Buenos Aires, organizadas por la Dirección de Mandamientos de la Corte y la Unión Internacional de Oficiales de Justicia."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Se realizarán del 7 al 9 de octubre en Buenos Aires, organizadas por la Dirección de Mandamientos de la Corte y la Unión Internacional de Oficiales de Justicia."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 5,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Un enfermero del Policlínico PAMI II, de la ciudad santafesina de Rosario, fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio y otras sustancias medicinales peligrosas para la salud, que su"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 6,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Un enfermero del Policlínico PAMI II de Rosario ha recibido una condena de cuatro años y seis meses de prisión por su implicación en la comercialización de fentanilo y bromuro de vecuronio... Según información de Fiscales.gob, el condenado,"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 7,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Luis Emmanuel Benavidez recibió cuatro años y medio de prisión efectiva y quedó inhabilitado para ejercer su profesión. Sustraía medicamentos del Policlínico PAMI II y los comercializaba como drogas recreativas."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Las dos fuentes citadas reportan la condena de Benavidez a 4 años y 6 meses por comercializar fentanilo y bromuro de vecuronio junto a otras sustancias peligrosas, coherentes con el claim.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Un enfermero del Policlínico Pami II de Rosario, en barrio Arroyito, fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio –de exclusivo uso hospitalario para facilitar la anestesia general, q"
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "poll",
+      "event_id": "e6c037d3-7ef3-4bd9-9765-d205fac1a2b3",
+      "claim_id": "d02abcb3-d0a9-495d-9ad5-a2fd5db25f21",
+      "claim": "Luis Emmanuel Benavidez fue inhabilitado por cuatro años y seis meses para ejercer cargos públicos y la profesión de enfermero.",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-flash",
+      "executed_profile": "current",
+      "executed_model": "gpt-5-nano",
+      "escalated_originally": false,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Además, quedó inhabilitado por cuatro años y seis meses para ejercer cargos públicos y la profesión de enfermero."
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "La fuente 1 verifica la inhabilitación para el mismo plazo y las mismas áreas (cargos públicos y enfermería). No hay contradicción ni necesidad de matizarse.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Además, quedó inhabilitado por cuatro años y seis meses para ejercer cargos públicos y la profesión de enfermero."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "poll",
+      "event_id": "1c28e01f-33cf-4ac1-bc9d-6bc3fce79dd8",
+      "claim_id": "50961d28-7f56-4f3b-a604-556a06ea3463",
+      "claim": "La consigna central de la marcha es “¡Basta de travesticidios! ¡Ley Integral Trans ya!”.",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-flash",
+      "executed_profile": "current",
+      "executed_model": "gpt-5-nano",
+      "escalated_originally": false,
+      "policy_status": "SUPPORTED",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Bajo la consigna central “¡Basta de travesticidios! ¡Ley Integral Trans ya!”, la movilización busca superar la convocatoria histórica del año pasado"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La 20° Marcha del Orgullo se realizará este sábado 3 de octubre bajo el lema “¡Basta de travesticidios! ¡Ley Integral Trans ya!”."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La marcha de este año tendrá como lema \"¡Basta de travesticidios! ¡Ley Integral Trans Ya!\""
+          },
+          {
+            "relation": "DOES_NOT_ESTABLISH",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": ""
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "Todos los snippets citan la consigna central como lema de la Marcha del Orgullo en Rosario; por lo tanto, apoyan el claim.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "¡Basta de travesticidios! ¡Ley Integral Trans ya!"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "¡Basta de travesticidios! ¡Ley Integral Trans ya!"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "¡Basta de travesticidios! ¡Ley Integral Trans Ya!"
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "¡Basta de travesticidios! ¡Ley Integral Trans Ya!"
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "poll",
+      "event_id": "1c28e01f-33cf-4ac1-bc9d-6bc3fce79dd8",
+      "claim_id": "5c41d718-b9a4-4b30-82eb-4e159798d207",
+      "claim": "La comunidad LGBTIQNB+ celebra la 20ª edición de la Marcha del Orgullo en Rosario.",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-flash",
+      "executed_profile": "current",
+      "executed_model": "gpt-5-nano",
+      "escalated_originally": false,
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La comunidad LGBTIQNB+, junto a diversas organizaciones sociales y políticas, celebra la 20ª edición de la Marcha del Orgullo en la ciudad."
+          },
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La 20° Marcha del Orgullo se realizará este sábado 3 de octubre bajo el lema “¡Basta de travesticidios! ¡Ley Integral Trans ya!”."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La movilización se realizará este sábado con concentración desde las 14 y marcha a partir de las 17 desde la plaza Libertad."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Este sábado 3 de octubre se realizará en Rosario la Marcha del Orgullo, por lo que la Municipalidad implementará cortes y desvíos de tránsito en distintos puntos de la ciudad."
+          }
+        ],
+        "ambiguous": false
+      },
+      "executed": {
+        "ambiguous": false,
+        "reason": "La evidencia indica un único fuente que soporta directamente la proposición; las demás fuentes mencionan la marcha sin confirmar la edición o la celebración.",
+        "judgements": [
+          {
+            "relation": "SUPPORTS",
+            "source_ref": 1,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La comunidad LGBTIQNB+, junto a diversas organizaciones sociales y políticas, celebra la 20ª edición de la Marcha del Orgullo en la ciudad."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 2,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "La 20° Marcha del Orgullo se realizará este sábado 3 de octubre bajo el lema \"¡Basta de travesticidios! ¡Ley Integral Trans ya!\"."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 3,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La movilización se realizará este sábado con concentración desde las 14 y marcha a partir de las 17 desde la plaza Libertad."
+          },
+          {
+            "relation": "MENTIONS",
+            "source_ref": 4,
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La concentración será desde las 14 en plaza Libertad y la movilización comenzará a las 17 con destino al Parque Nacional a la Bandera."
+          }
+        ]
+      }
+    }
+  ],
+  "judgements": [
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "128c16f0-9779-459f-afe8-babed98c21b0",
+      "claim": "la legisladora provincial Agostina Villaggi sostuvo que los recursos mencionados durante la charla son financiados por el Estado y cuestionó que fueran presentados ante los niños como una decisión personal del gobernador",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "UNCERTAIN",
+      "persisted": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Las fuentes documentan que Agostina Villaggi efectivamente afirmó que los recursos son financiados por el Estado y cuestionó su presentación como decisión personal del gobernador.",
+        "evidence": [
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Villaggi recordó en su cuenta de X que los elementos que mencionó la delegada \"los paga el Estado, no un funcionario\" y agregó: \"A nuestro criterio, es propaganda política ante niños\"."
+          },
+          {
+            "source_ref": 4,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "En una publicación en X, la diputada afirmó que los elementos “los paga el Estado, no un funcionario” y agregó: “A nuestro criterio, es propaganda política ante niños”."
+          },
+          {
+            "source_ref": 6,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Villaggi, presidenta de la UCR de Formosa, sostuvo que los elementos mencionados “los paga el Estado” y cuestionó que la funcionaria los vincule personalmente con el gobernador."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Múltiples fuentes independientes citan declaraciones de la legisladora Agostina Villaggi afirmando que los recursos son pagados por el Estado y cuestionando su presentación como decisión personal del gobernador, lo que respalda el claim.",
+        "evidence": [
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi recordó en su cuenta de X que los elementos que mencionó la delegada \"los paga el Estado, no un funcionario\" y agregó: \"A nuestro criterio, es propaganda política ante niños\"."
+          },
+          {
+            "source_ref": 5,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi recordó en su cuenta de X que los elementos que mencionó la delegada “los paga el Estado, no un funcionario” y agregó: “A nuestro criterio, es propaganda política ante niños”."
+          },
+          {
+            "source_ref": 6,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi, presidenta de la UCR de Formosa, sostuvo que los elementos mencionados “los paga el Estado” y cuestionó que la funcionaria los vincule personalmente con el gobernado"
+          },
+          {
+            "source_ref": 7,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La legisladora sostuvo que \"esto no es un hecho aislado\" sino \"una metodología\" impulsada desde la gobernación. Según explicó, se imparten órdenes a docentes y delegados zonales para \"enalteger constantemente su figura\" como si el gobernado"
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "3a0be300-2ed8-44f6-931c-0a4ea0fb5aeb",
+      "claim": "Las legisladoras Agostina Villaggi y Carla Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "UNCERTAIN",
+      "persisted": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Las fuentes proporcionan evidencia clara de que las legisladoras Agostina Villaggi y Carla Zaiser cuestionaron la presentación de recursos y servicios estatales asociados con el gobernador Gildo Insfrán ante los alumnos.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": false,
+            "excerpt_equals_claim": false,
+            "excerpt": "Las diputadas provinciales Agostina Villaggi, presidenta de la UCR de Formosa, y Carla Zaiser denunciaron que una delegada educativa habló con niños de una escuela primaria de Gran Guardia para vincular la llegada de beneficios escolares con la voluntad política de Insfrán."
+          },
+          {
+            "source_ref": 4,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Villaggi y Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SUPPORTED",
+        "confidence": 0.95,
+        "reason": "Múltiples fuentes independientes reportan que las legisladoras Agostina Villaggi y Carla Zaiser cuestionaron explícitamente que recursos y servicios financiados por el Estado provincial fueran presentados ante los alumnos asociados directamente con la figura del gobernador. La evidencia cubre la proposición completa.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Las diputadas provinciales Agostina Villaggi, presidenta de la UCR de Formosa, y Carla Zaiser denunciaron que una delegada educativa habló con niños de una escuela primaria de Gran Guardia para vincular la llegada de beneficios escolares co"
+          },
+          {
+            "source_ref": 4,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Villaggi y Zaiser cuestionaron que recursos y servicios financiados por el Estado provincial sean presentados ante los alumnos asociados directamente con la figura del mandatario."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "claim_id": "3e8a684c-357b-41e6-86a3-50181e0eb732",
+      "claim": "Las diputadas solicitaron que intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "UNCERTAIN",
+      "persisted": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Las fuentes proporcionan evidencia consistente de que las diputadas solicitaron la intervención del área educativa provincial y adelantaron acciones judiciales.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "La oposición pidió que intervenga el Ministerio de Cultura y Educación de la provincia y anunció acciones legales."
+          },
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": true,
+            "excerpt": "las diputadas solicitaron que intervenga el área educativa provincial y adelantaron que llevarán el planteo al ámbito judicial."
+          },
+          {
+            "source_ref": 4,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "ambas anunciaron que pedirán la intervención del Ministerio de Cultura y Educación de Formosa y adelantaron la presentación de acciones legales."
+          },
+          {
+            "source_ref": 5,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Zaiser anunció acciones legales y solicitó la intervención del Ministerio de Cultura y Educación."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Múltiples fuentes independientes reportan que las diputadas solicitaron la intervención del área educativa provincial y anunciaron acciones legales, coincidiendo con la proposición del claim.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La oposición pidió que intervenga el Ministerio de Cultura y Educación de la provincia y anunció acciones legales."
+          },
+          {
+            "source_ref": 4,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "ambas anunciaron que pedirán la intervención del Ministerio de Cultura y Educación de Formosa y adelantaron la presentación de acciones legales."
+          },
+          {
+            "source_ref": 5,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Zaiser anunció acciones legales y solicitó la intervención del Ministerio de Cultura y Educación."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "1ae2433c-eaed-462f-8cc7-31130b279b61",
+      "claim": "La cercanía del hospital y la secuencia temporal forman parte de los datos conocidos, pero no establecen por sí mismas una conexión entre la muerte y el enfrentamiento.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Las fuentes periodísticas independientes coinciden en que no hay pruebas que vinculen la muerte de Alan Gabriel Chazarreta con el tiroteo, confirmando que la cercanía y la secuencia temporal no establecen una conexión por sí mismas.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": true,
+            "excerpt": "La cercanía del hospital y la secuencia temporal forman parte de los datos conocidos, pero no establecen por sí mismas una conexión entre la muerte y el enfrentamiento."
+          },
+          {
+            "source_ref": 8,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          },
+          {
+            "source_ref": 9,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Múltiples fuentes periodísticas independientes coinciden en que la cercanía del hospital y la secuencia temporal no establecen por sí mismas una conexión entre la muerte y el enfrentamiento, y que no hay pruebas que vinculen a la víctima con los disparos.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": true,
+            "excerpt_in_prompt": true,
+            "excerpt": "La cercanía del hospital y la secuencia temporal forman parte de los datos conocidos, pero no establecen por sí mismas una conexión entre la muerte y el enfrentamiento."
+          },
+          {
+            "source_ref": 8,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          },
+          {
+            "source_ref": 9,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "37f7556a-5db8-4b63-897b-28ecd73ce273",
+      "claim": "Alan Gabriel Chazarreta recibió un único disparo durante el tiroteo.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "status": "SINGLE_SOURCE",
+        "confidence": 0.7,
+        "reason": "Las fuentes periodísticas coinciden en que Alan Gabriel Chazarreta recibió un único disparo, pero todas parecen derivar de la misma información inicial sin evidencia primaria independiente.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera."
+          },
+          {
+            "source_ref": 2,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Había recibido un único disparo y murió tras llegar al centro médico ubicado cerca del lugar donde se produjo el enfrentamiento."
+          },
+          {
+            "source_ref": 6,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SINGLE_SOURCE",
+        "confidence": 0.7,
+        "reason": "Múltiples fuentes periodísticas afirman que Chazarreta recibió un único disparo, pero todas derivan de la misma información de una 'alta fuente oficial' citada por Infobae, sin corroboración independiente de un registro judicial o médico.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "source_ref": 2,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Había recibido un único disparo y murió tras llegar al centro médico ubicado cerca del lugar donde se produjo el enfrentamiento."
+          },
+          {
+            "source_ref": 6,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo."
+          },
+          {
+            "source_ref": 7,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "84d4352c-b493-4bb3-9bca-c05843e87d27",
+      "claim": "No hay pruebas que vinculen a Alan Gabriel Chazarreta con los disparos registrados durante el enfrentamiento.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "status": "SINGLE_SOURCE",
+        "confidence": 0.8,
+        "reason": "Las fuentes periodísticas coinciden en que no hay pruebas que vinculen a Alan Gabriel Chazarreta con los disparos, pero no se presenta evidencia de un registro judicial que lo confirme.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          },
+          {
+            "source_ref": 2,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por ahora, no hay pruebas que vinculen a la víctima con los disparos."
+          },
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Múltiples fuentes periodísticas independientes coinciden en que, al momento de la publicación, no existían pruebas que vincularan a Alan Gabriel Chazarreta con los disparos. La afirmación es consistente con la información disponible.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no existen pruebas que vinculen al joven con los disparos registrados durante el enfrentamiento."
+          },
+          {
+            "source_ref": 2,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por ahora, no hay pruebas que vinculen a la víctima con los disparos."
+          },
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Por el momento, no hay elementos firmes que permitan vincular a la víctima con los disparos."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "claim_id": "fb6ac81f-48ab-4ca9-8ae7-c246f60b1df6",
+      "claim": "Chazarreta había recibido un solo disparo y su estado era grave cuando ingresó al centro de salud.",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-v4-pro",
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "status": "SINGLE_SOURCE",
+        "confidence": 0.8,
+        "reason": "Las tres fuentes coinciden en que Chazarreta recibió un solo disparo y su estado era grave al ingresar al hospital. Sin embargo, todas parecen derivar de un mismo reporte inicial, por lo que no hay corroboración independiente.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta tenía domicilio en Ciudad Evita y había recibido un solo disparo. Su estado era grave cuando ingresó al centro de salud, ubicado cerca del lugar del enfrentamiento."
+          },
+          {
+            "source_ref": 2,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera."
+          },
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_in_packet": true,
+            "excerpt_equals_claim": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Su muerte es investigada por la UFI de Homicidios matancera."
+          }
+        ]
+      },
+      "executed": {
+        "status": "SUPPORTED",
+        "confidence": 0.9,
+        "reason": "Tres fuentes periodísticas independientes coinciden en que Chazarreta recibió un solo disparo y estaba grave al ingresar al hospital. No hay contradicciones.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Chazarreta tenía domicilio en Ciudad Evita y había recibido un solo disparo. Su estado era grave cuando ingresó al centro de salud"
+          },
+          {
+            "source_ref": 2,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Llegó gravemente herido al centro médico cercano al lugar."
+          },
+          {
+            "source_ref": 3,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": false,
+            "excerpt": "Chazarreta, de 27 años, recibió un único disparo. Llegó gravemente herido al centro médico cercano al lugar."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "poll",
+      "event_id": "e6c037d3-7ef3-4bd9-9765-d205fac1a2b3",
+      "claim_id": "55ca7750-9028-4a8e-9ca1-c86a0ae5d075",
+      "claim": "Luis Emmanuel Benavidez fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio y otras sustancias medicinales peligrosas.",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-v4-pro",
+      "executed_profile": "current",
+      "executed_model": "gpt-4o",
+      "policy_status": "SINGLE_SOURCE",
+      "persisted": {
+        "reason": "Múltiples fuentes periodísticas independientes reportan la condena de Luis Emmanuel Benavidez a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio y otras sustancias medicinales peligrosas. Aunque no se incluye el documento judicial primario, la consistencia entre fuentes y la mención del acuerdo homologado por el juez Carlos Vera Barros respaldan la afirmación.",
+        "status": "SUPPORTED",
+        "evidence": [
+          {
+            "excerpt": "Un enfermero del Policlínico Pami II de Rosario, en barrio Arroyito, fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio –de exclusivo uso hospitalario para facilitar la anestesia general, que produce parálisis neuromuscular– y otras sustancias medicinales peligrosas para la salud que sustraía de su trabajo y ofrecía a través de redes sociales.",
+            "comparison": null,
+            "confidence": 0.95,
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS"
+          },
+          {
+            "excerpt": "Un enfermero del Policlínico PAMI II, de la ciudad santafesina de Rosario, fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio y otras sustancias medicinales peligrosas para la salud, que sustraía de su trabajo y vendía como drogas recreativas en redes sociales.",
+            "comparison": null,
+            "confidence": 0.95,
+            "source_ref": 5,
+            "evidence_type": "SUPPORTS"
+          },
+          {
+            "excerpt": "Un enfermero del Policlínico PAMI II de Rosario ha recibido una condena de cuatro años y seis meses de prisión por su implicación en la comercialización de fentanilo y bromuro de vecuronio, un medicamento utilizado en anestesia que causa parálisis neuromuscular.",
+            "comparison": null,
+            "confidence": 0.9,
+            "source_ref": 6,
+            "evidence_type": "SUPPORTS"
+          },
+          {
+            "excerpt": "Luis Emmanuel Benavidez recibió cuatro años y medio de prisión efectiva y quedó inhabilitado para ejercer su profesión. Sustraía medicamentos del Policlínico PAMI II y los comercializaba como drogas recreativas.",
+            "comparison": null,
+            "confidence": 0.9,
+            "source_ref": 7,
+            "evidence_type": "SUPPORTS"
+          }
+        ],
+        "confidence": 0.95,
+        "unresolved": false
+      },
+      "executed": {
+        "status": "SINGLE_SOURCE",
+        "confidence": 0.8,
+        "reason": "Las fuentes periodísticas coinciden en la condena de Luis Emmanuel Benavidez a cuatro años y seis meses de prisión por comercializar fentanilo y bromuro de vecuronio. Sin embargo, falta una fuente primaria judicial que confirme el registro oficial del hecho.",
+        "evidence": [
+          {
+            "source_ref": 1,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Un enfermero del Policlínico Pami II de Rosario, en barrio Arroyito, fue condenado a cuatro años y seis meses de prisión por comercializar fentanilo, bromuro de vecuronio –de exclusivo uso hospitalario para facilitar la anestesia general, q"
+          },
+          {
+            "source_ref": 5,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "La condena fue dictada en el marco de un acuerdo pleno celebrado entre los representantes del Ministerio Público Fiscal y la defensa del condenado, Luis Emmanuel Benavidez, quien reconoció expresamente los hechos atribuidos, su participació"
+          },
+          {
+            "source_ref": 6,
+            "evidence_type": "SUPPORTS",
+            "excerpt_equals_claim": false,
+            "excerpt_in_prompt": true,
+            "excerpt": "Un enfermero del Policlínico PAMI II de Rosario ha recibido una condena de cuatro años y seis meses de prisión por su implicación en la comercialización de fentanilo y bromuro de vecuronio, un medicamento utilizado en anestesia que causa pa"
+          }
+        ]
+      }
+    }
+  ],
+  "audits": [
+    {
+      "corpus": "poll",
+      "event_id": "e6c037d3-7ef3-4bd9-9765-d205fac1a2b3",
+      "version": 1,
+      "headline": "Un enfermero de Rosario recibió una condena de cuatro años y seis meses, según reportes periodísticos",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-flash",
+      "persisted_passed": false,
+      "persisted_reason": "structural_block",
+      "executed_profile": "current",
+      "executed_model": "gpt-4o",
+      "executed": {
+        "passed": true,
+        "blocking": [],
+        "issues": [
+          {
+            "severity": "LOW",
+            "type": "UNSUPPORTED_CLAIM",
+            "reason": "single_as_corroborated",
+            "text": "Un enfermero de Rosario recibió una condena de cuatro años y seis meses, según reportes periodísticos",
+            "explanation": "El titular omite la atribución explícita a los reportes periodísticos, pero la bajada y el lead la incluyen. Esto se ajusta a la excepción editorial permitida."
+          }
+        ]
+      }
+    },
+    {
+      "corpus": "poll",
+      "event_id": "1c28e01f-33cf-4ac1-bc9d-6bc3fce79dd8",
+      "version": 1,
+      "headline": "Rosario realiza este sábado la 20ª Marcha del Orgullo LGBTIQNB+",
+      "persisted_profile": "candidate",
+      "persisted_model": "deepseek-flash",
+      "persisted_passed": true,
+      "persisted_reason": "passed",
+      "executed_profile": "current",
+      "executed_model": "gpt-4o",
+      "executed": {
+        "passed": true,
+        "blocking": [],
+        "issues": []
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "a614745e-0885-4aee-be03-8a1c8052fd20",
+      "headline": "Denuncian en Formosa un presunto caso de adoctrinamiento en una escuela de Gran Guardia",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "persisted_passed": false,
+      "persisted_reason": "structural_block",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "executed": {
+        "passed": true,
+        "blocking": [],
+        "issues": []
+      }
+    },
+    {
+      "corpus": "historical",
+      "event_id": "58759b17-3239-4dd8-9251-89dac4336805",
+      "headline": "Murió un joven tras un tiroteo en el Complejo 19 de La Tablada",
+      "persisted_profile": "current",
+      "persisted_model": "gpt-4o",
+      "persisted_passed": true,
+      "persisted_reason": "passed",
+      "executed_profile": "candidate",
+      "executed_model": "deepseek-flash",
+      "executed": {
+        "passed": true,
+        "blocking": [],
+        "issues": []
+      }
+    }
+  ],
+  "skipped": [],
+  "spent_after": "0.2511771640",
+  "unknown_after": 0,
+  "replay_delta": "0.0552055680"
+}
