@@ -220,6 +220,30 @@ def test_backfill_is_not_sealed_to_triggering_event(db_session: Session) -> None
     assert direct["backfill_excluded"] is True
 
 
+def test_successful_image_without_tokens_is_recorded(db_session: Session) -> None:
+    record_llm_usage(
+        provider="replicate",
+        model="black-forest-labs/flux-schnell",
+        call_kind="image",
+        failed=False,
+        usage_reported=True,
+        stage="hero_image",
+        request_options={"model": "black-forest-labs/flux-schnell"},
+    )
+    check = SessionLocal()
+    try:
+        rows = list(
+            check.scalars(
+                select(LlmUsage).where(LlmUsage.model == "black-forest-labs/flux-schnell")
+            )
+        )
+        assert len(rows) == 1
+        assert rows[0].call_kind == "image"
+        assert rows[0].usage_reported is True
+    finally:
+        check.close()
+
+
 def test_record_failed_usage_without_tokens(db_session: Session) -> None:
     record_llm_usage(
         provider="openai",

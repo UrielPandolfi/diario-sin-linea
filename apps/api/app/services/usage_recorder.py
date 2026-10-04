@@ -208,7 +208,8 @@ def record_llm_usage(
             and cache_read == 0
             and cache_write == 0
         )
-        if empty and elapsed is None and not failed:
+        # Búsqueda e imagen se cobran por pedido, sin tokens. Un éxito vacío igual se guarda.
+        if empty and elapsed is None and not failed and (call_kind or "llm") not in {"search", "image"}:
             return
         resolved_event = event_id if event_id is not None else ctx.event_id
         resolved_item = source_item_id if source_item_id is not None else ctx.source_item_id
