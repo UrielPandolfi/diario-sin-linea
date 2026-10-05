@@ -58,6 +58,37 @@ function NoticeBlock({ notice }: { notice: ArticleNotice }) {
   );
 }
 
+function ArticleDossier({ history, sources }: { history: ArticleHistoryItem[]; sources: Article["sources"] }) {
+  return (
+    <>
+      <div className="sl-block p-5">
+        <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent">
+          Fuentes y actualizaciones
+        </h2>
+        <div className="mt-3">
+          <SourceList sources={sources} />
+        </div>
+      </div>
+      {history.length > 0 ? (
+        <div className="sl-block mt-4 p-5">
+          <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent-ochre">Historial</h2>
+          <ol className="mt-3 space-y-3">
+            {history.map((item, index) => (
+              <li key={`${item.type}-${item.occurred_at}-${index}`} className="font-sans text-sm text-secondary">
+                <p className="text-primary">
+                  {historyLabel(item)}
+                  {item.occurred_at ? ` — ${formatNoticeStamp(item.occurred_at)}` : ""}
+                </p>
+                {item.notice ? <p className="mt-1">{item.notice}</p> : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 function placeKicker(article: Article): string | null {
   const locality = article.locality?.trim() || null;
   const province = article.province?.trim() || null;
@@ -109,7 +140,7 @@ export function ArticleView({
       </div>
 
       <div className="mt-8 grid grid-cols-1 xl:grid-cols-[var(--article-measure)_var(--article-panel)] xl:gap-x-[var(--article-gap)] xl:items-start">
-        <header className="min-w-0 max-w-[var(--article-measure)]">
+        <header className="min-w-0 max-w-[var(--article-measure)] xl:col-start-1 xl:row-start-1">
           {kicker ? (
             <p className="font-sans text-[12px] font-medium uppercase tracking-[0.14em] text-muted">{kicker}</p>
           ) : null}
@@ -146,9 +177,7 @@ export function ArticleView({
             </span>
           </div>
         </header>
-        <div className="hidden xl:block" aria-hidden="true" />
-
-        <div className="min-w-0 max-w-[var(--article-measure)]">
+        <div className="min-w-0 max-w-[var(--article-measure)] xl:col-start-1 xl:row-start-2">
           {article.hero_image_url ? (
             <PublicHero
               src={article.hero_image_url}
@@ -171,33 +200,20 @@ export function ArticleView({
             sourceKey={`${article.slug}:${article.published_version ?? ""}`}
           />
 
-          <div className="sl-block mt-10 p-5">
-            <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent">
-              Fuentes y actualizaciones
-            </h2>
-            <div className="mt-3">
-              <SourceList sources={article.sources} />
-            </div>
+          <div className="mt-10 xl:hidden">
+            <ArticleDossier history={history} sources={article.sources} />
           </div>
+        </div>
 
-          {history.length > 0 ? (
-            <div className="sl-block mt-4 p-5">
-              <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent-ochre">Historial</h2>
-              <ol className="mt-3 space-y-3">
-                {history.map((item, index) => (
-                  <li key={`${item.type}-${item.occurred_at}-${index}`} className="font-sans text-sm text-secondary">
-                    <p className="text-primary">
-                      {historyLabel(item)}
-                      {item.occurred_at ? ` — ${formatNoticeStamp(item.occurred_at)}` : ""}
-                    </p>
-                    {item.notice ? <p className="mt-1">{item.notice}</p> : null}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          ) : null}
+        <aside
+          data-evidence-column
+          className="relative mt-10 hidden min-h-[12rem] xl:col-start-2 xl:row-span-3 xl:row-start-1 xl:mt-0 xl:block"
+        >
+          <ArticleDossier history={history} sources={article.sources} />
+        </aside>
 
-          <div className="sl-block mt-4 p-5">
+        <div className="min-w-0 max-w-[var(--article-measure)] xl:col-start-1 xl:row-start-3">
+        <div className="sl-block mt-4 p-5">
             <h2 className="article-kicker text-primary">¿Hay algo que debamos revisar?</h2>
             <p className="mt-2 font-sans text-sm text-secondary">
               Podés señalar un error, aportar una fuente o responder si estás involucrado.
@@ -216,12 +232,6 @@ export function ArticleView({
             )}
           </div>
         </div>
-
-        <aside
-          data-evidence-column
-          className="relative hidden min-h-[12rem] xl:block"
-          aria-hidden="true"
-        />
       </div>
     </article>
     {!guest ? <ArticleReadSignal slug={article.slug} /> : null}

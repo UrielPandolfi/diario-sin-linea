@@ -7,11 +7,12 @@ export function ContextSheets({
   now,
   nearby,
 }: {
-  now: ReactNode;
-  nearby: ReactNode;
+  now?: ReactNode;
+  nearby?: ReactNode;
 }) {
   const [open, setOpen] = useState<"now" | "nearby" | null>(null);
   const titleId = useId();
+  const sheet = open === "now" ? now : open === "nearby" ? nearby : null;
 
   useEffect(() => {
     if (!open) return;
@@ -22,28 +23,34 @@ export function ContextSheets({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
+  if (!now && !nearby) return null;
+
   return (
     <>
       <div className="sticky top-0 z-20 flex border-b border-border bg-background lg:hidden">
-        <button
-          type="button"
-          onClick={() => setOpen("now")}
-          className="flex flex-1 items-center justify-center gap-2 py-2.5 font-sans text-xs text-secondary hover:bg-hover hover:text-primary"
-        >
-          <Clock className="h-3.5 w-3.5" aria-hidden />
-          Ahora
-        </button>
-        <button
-          type="button"
-          onClick={() => setOpen("nearby")}
-          className="flex flex-1 items-center justify-center gap-2 border-l border-border py-2.5 font-sans text-xs text-secondary hover:bg-hover hover:text-primary"
-        >
-          <MapPin className="h-3.5 w-3.5" aria-hidden />
-          Cerca tuyo
-        </button>
+        {now ? (
+          <button
+            type="button"
+            onClick={() => setOpen("now")}
+            className="flex flex-1 items-center justify-center gap-2 py-2.5 font-sans text-xs text-secondary hover:bg-hover hover:text-primary"
+          >
+            <Clock className="h-3.5 w-3.5" aria-hidden />
+            Ahora
+          </button>
+        ) : null}
+        {nearby ? (
+          <button
+            type="button"
+            onClick={() => setOpen("nearby")}
+            className={`flex flex-1 items-center justify-center gap-2 py-2.5 font-sans text-xs text-secondary hover:bg-hover hover:text-primary ${now ? "border-l border-border" : ""}`}
+          >
+            <MapPin className="h-3.5 w-3.5" aria-hidden />
+            Cerca tuyo
+          </button>
+        ) : null}
       </div>
 
-      {open ? (
+      {sheet ? (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button
             type="button"
@@ -70,7 +77,7 @@ export function ContextSheets({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            {open === "now" ? now : nearby}
+            {sheet}
           </div>
         </div>
       ) : null}

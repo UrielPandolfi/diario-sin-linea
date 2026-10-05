@@ -1,4 +1,5 @@
 import { LiveTimeline } from "@/features/live/live-timeline";
+import { SectionFrame } from "@/features/shell/section-frame";
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
@@ -9,8 +10,8 @@ export const metadata: Metadata = {
 
 export default function LivePage() {
   return (
-    <div className="mx-auto min-h-screen max-w-measure">
+    <SectionFrame nearby>
       <LiveTimeline />
-    </div>
+    </SectionFrame>
   );
 }

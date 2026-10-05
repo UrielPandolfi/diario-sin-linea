@@ -6,7 +6,7 @@ import { formatRelative } from "@/lib/relative-time";
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 
-export function NearbyPanel({ label }: { label: string }) {
+export function NearbyPanel({ label, divided = true }: { label: string; divided?: boolean }) {
   const [items, setItems] = useState<EventCard[]>([]);
   const [error, setError] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -31,7 +31,7 @@ export function NearbyPanel({ label }: { label: string }) {
   }, []);
 
   return (
-    <section className="border-t border-border px-4 py-4">
+    <section className={divided ? "border-t border-border px-4 py-4" : "px-4 py-4"}>
       <h2 className="font-sans text-[12px] font-medium uppercase tracking-[0.16em] text-accent-ochre">Cerca tuyo</h2>
       <p className="mt-1 font-sans text-xs text-muted">{label}</p>
       {error ? (
