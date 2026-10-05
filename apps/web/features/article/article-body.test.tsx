@@ -223,6 +223,19 @@ test("several claims in one fragment keep separate copy", async () => {
   assert.match(text, /Afirmaciones de este pasaje|Respaldo de las afirmaciones/);
 });
 
+test("source stance is a tag colored by evidence type", async () => {
+  await render(<ClaimEvidenceList claims={[FIXTURE_CLAIMS.disputed, FIXTURE_CLAIMS.partial]} />);
+  const tags = Array.from(document.querySelectorAll(".stance-chip"));
+  assert.deepEqual(
+    tags.map((tag) => [tag.getAttribute("data-stance"), tag.textContent]),
+    [
+      ["SUPPORTS", "respalda"],
+      ["CONTRADICTS", "contradice"],
+      ["QUALIFIES", "matiza"],
+    ],
+  );
+});
+
 test("documents disclosure keeps counts out of the label and lists unknown vs empty", async () => {
   await render(<ClaimEvidenceList claims={[FIXTURE_CLAIMS.limited, FIXTURE_CLAIMS.unevaluated]} />);
   const buttons = Array.from(document.querySelectorAll("button")).filter((button) =>
@@ -233,6 +246,12 @@ test("documents disclosure keeps counts out of the label and lists unknown vs em
     buttons.every((button) => !/3 documentos/.test(button.textContent ?? "")),
     true,
   );
+  const summaries = Array.from(document.querySelectorAll("[data-document-summary]"));
+  assert.deepEqual(
+    summaries.map((node) => node.textContent),
+    ["3 documentos consultados, los 3 respaldan"],
+  );
+  assert.equal(document.querySelector(".status-chip[data-kind]"), null);
   await act(async () => {
     for (const button of buttons) button.click();
   });
@@ -289,9 +308,16 @@ test("article text and surrounding copy stay intact", async () => {
   assert.equal(incendio.tagName, "BUTTON");
   assert.match(incendio.className, /claim-trigger/);
   assert.ok(incendio.querySelector("svg"));
+  assert.equal(triggerByKey("0-1").getAttribute("data-kind"), "confirmed");
+  assert.equal(triggerByKey("0-3").getAttribute("data-kind"), "confirmed_utterance");
+  assert.equal(triggerByKey("1-0").getAttribute("data-kind"), "limited_support");
+  assert.equal(triggerByKey("1-2").getAttribute("data-kind"), "disputed");
+  assert.equal(triggerByKey("3-0").getAttribute("data-kind"), "disproven");
+  assert.equal(triggerByKey("3-2").getAttribute("data-kind"), "unevaluated");
+  assert.equal(triggerByKey("2-0").getAttribute("data-kind"), "limited_support");
   assert.equal(
     triggerByKey("2-0").getAttribute("aria-label"),
-    "Un mismo pasaje cubre dos afirmaciones: incendio y denuncia. Consultar respaldo",
+    "Un mismo pasaje cubre dos afirmaciones: incendio y denuncia. Respaldo limitado. Consultar respaldo",
   );
 });
 

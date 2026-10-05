@@ -2,18 +2,30 @@
 
 import { ClaimEvidenceList } from "./claim-evidence-panel";
 import { ClaimEvidenceOverlay } from "./claim-evidence-overlay";
-import { hoverDelayMs } from "./claim-popover-copy";
+import { claimTriggerMark, hoverDelayMs, type ClaimMarkKind } from "./claim-popover-copy";
 import { claimsForIds } from "./claim-status";
 import { focusableElements } from "./evidence-focus";
 import { useEvidenceSurface } from "./use-evidence-surface";
 import type { ArticleBodyBlock, ArticleClaim } from "../../lib/api/types";
-import { Info } from "lucide-react";
+import { Check, CircleHelp, CircleMinus, CircleSlash, Info, Quote, Scale, type LucideIcon } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 
-function evidenceTriggerLabel(text: string): string {
+const CLAIM_MARK_ICON: Record<ClaimMarkKind, LucideIcon> = {
+  confirmed: Check,
+  confirmed_utterance: Quote,
+  limited_support: CircleMinus,
+  not_confirmed: CircleHelp,
+  disputed: Scale,
+  disproven: CircleSlash,
+  unevaluated: Info,
+};
+
+function evidenceTriggerLabel(text: string, label: string | null): string {
   const trimmed = text.trim();
   const needsStop = !/[.!?…]$/.test(trimmed);
-  return `${trimmed}${needsStop ? "." : ""} Consultar respaldo`;
+  const sentence = `${trimmed}${needsStop ? "." : ""}`;
+  if (!label) return `${sentence} Consultar respaldo`;
+  return `${sentence} ${label}. Consultar respaldo`;
 }
 
 function splitPlainBody(body: string): string[] {
@@ -246,6 +258,8 @@ function ClaimSegment({
   }
 
   const title = claims.length > 1 ? "Respaldo de las afirmaciones" : "Respaldo de la afirmación";
+  const mark = claimTriggerMark(claims);
+  const MarkIcon = CLAIM_MARK_ICON[mark.kind];
 
   return (
     <span className="relative inline">
@@ -255,8 +269,9 @@ function ClaimSegment({
         aria-expanded={open}
         aria-controls={open ? dialogId : undefined}
         aria-haspopup="dialog"
-        aria-label={evidenceTriggerLabel(text)}
+        aria-label={evidenceTriggerLabel(text, mark.label)}
         data-claim-segment={segmentKey}
+        data-kind={mark.kind}
         data-open={open ? "true" : "false"}
         className="claim-trigger"
         onMouseEnter={scheduleOpen}
@@ -298,7 +313,7 @@ function ClaimSegment({
         }}
       >
         {text}
-        <Info className="claim-info" strokeWidth={1.75} aria-hidden />
+        <MarkIcon className="claim-info" strokeWidth={1.75} aria-hidden />
       </button>
       <ClaimEvidenceOverlay
         open={open}

@@ -15,7 +15,7 @@ export function AppShell({ children, authenticated = false }: { children: ReactN
   return (
     <ReaderAuthProvider authenticated={authenticated}>
       <div className="min-h-screen bg-background">
-        <div className="mx-auto flex min-h-screen max-w-[92rem]">
+        <div className="sl-shell mx-auto flex min-h-screen max-w-[92rem]">
           <Sidebar authenticated={authenticated} />
           <div className="flex min-w-0 flex-1 flex-col pb-16 md:pb-0">
             <PublicTopBar desktop={!articlePage} authenticated={authenticated} />

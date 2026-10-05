@@ -86,6 +86,13 @@ body {
   min-height: 100%;
 }
 
+/* Pinta el margen izquierdo del contenedor centrado con el color de la barra, sin cambiar su caja. */
+@media (min-width: 768px) {
+  .sl-nav-bleed {
+    box-shadow: -100vmax 0 0 100vmax var(--nav);
+  }
+}
+
 body {
   background:
     radial-gradient(980px 420px at 8% -8%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 62%),
@@ -287,12 +294,88 @@ summary::-webkit-details-marker {
   border-radius: 2px;
 }
 
+.claim-trigger[data-kind="confirmed"] {
+  text-decoration-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+}
+
+.claim-trigger[data-kind="confirmed_utterance"] {
+  text-decoration-style: dotted;
+  text-decoration-thickness: 2px;
+  text-decoration-color: color-mix(in srgb, var(--accent) 72%, var(--border));
+}
+
+.claim-trigger[data-kind="limited_support"] {
+  text-decoration-color: var(--bronze);
+}
+
+.claim-trigger[data-kind="not_confirmed"] {
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: color-mix(in srgb, var(--bronze) 80%, var(--border));
+}
+
+.claim-trigger[data-kind="disputed"] {
+  text-decoration-style: wavy;
+  text-decoration-color: var(--amber-fg);
+}
+
+.claim-trigger[data-kind="disproven"] {
+  text-decoration-style: wavy;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--amber-fg);
+}
+
 .claim-trigger:hover,
 .claim-trigger:focus-visible,
 .claim-trigger[data-open="true"] {
   background: color-mix(in srgb, var(--amber-bg) 82%, transparent);
-  text-decoration-color: var(--bronze);
   text-decoration-thickness: 1.15px;
+}
+
+.claim-trigger[data-kind="confirmed"]:hover,
+.claim-trigger[data-kind="confirmed"]:focus-visible,
+.claim-trigger[data-kind="confirmed"][data-open="true"],
+.claim-trigger[data-kind="confirmed_utterance"]:hover,
+.claim-trigger[data-kind="confirmed_utterance"]:focus-visible,
+.claim-trigger[data-kind="confirmed_utterance"][data-open="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  text-decoration-color: var(--accent);
+}
+
+.claim-trigger[data-kind="confirmed_utterance"]:hover,
+.claim-trigger[data-kind="confirmed_utterance"]:focus-visible,
+.claim-trigger[data-kind="confirmed_utterance"][data-open="true"] {
+  text-decoration-thickness: 2px;
+}
+
+.claim-trigger[data-kind="limited_support"]:hover,
+.claim-trigger[data-kind="limited_support"]:focus-visible,
+.claim-trigger[data-kind="limited_support"][data-open="true"],
+.claim-trigger[data-kind="not_confirmed"]:hover,
+.claim-trigger[data-kind="not_confirmed"]:focus-visible,
+.claim-trigger[data-kind="not_confirmed"][data-open="true"] {
+  text-decoration-color: var(--bronze);
+}
+
+.claim-trigger[data-kind="not_confirmed"]:hover,
+.claim-trigger[data-kind="not_confirmed"]:focus-visible,
+.claim-trigger[data-kind="not_confirmed"][data-open="true"] {
+  text-decoration-thickness: 1.5px;
+}
+
+.claim-trigger[data-kind="disputed"]:hover,
+.claim-trigger[data-kind="disputed"]:focus-visible,
+.claim-trigger[data-kind="disputed"][data-open="true"],
+.claim-trigger[data-kind="disproven"]:hover,
+.claim-trigger[data-kind="disproven"]:focus-visible,
+.claim-trigger[data-kind="disproven"][data-open="true"] {
+  text-decoration-color: var(--amber-fg);
+}
+
+.claim-trigger[data-kind="disproven"]:hover,
+.claim-trigger[data-kind="disproven"]:focus-visible,
+.claim-trigger[data-kind="disproven"][data-open="true"] {
+  text-decoration-thickness: 1.5px;
 }
 
 .claim-info {
@@ -303,6 +386,16 @@ summary::-webkit-details-marker {
   color: var(--bronze);
   vertical-align: -0.12em;
   opacity: 0.78;
+}
+
+.claim-trigger[data-kind="confirmed"] .claim-info,
+.claim-trigger[data-kind="confirmed_utterance"] .claim-info {
+  color: var(--accent);
+}
+
+.claim-trigger[data-kind="disputed"] .claim-info,
+.claim-trigger[data-kind="disproven"] .claim-info {
+  color: var(--amber-fg);
 }
 
 .claim-trigger:hover .claim-info,
@@ -372,6 +465,35 @@ summary::-webkit-details-marker {
 .status-chip[data-kind="confirmed_utterance"] {
   background: var(--status-neutral-bg);
   color: var(--text-secondary);
+}
+
+.stance-chip {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 0.08rem 0.5rem;
+  font-family: var(--font-sans), Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  background: var(--status-neutral-bg);
+  color: var(--status-neutral-fg);
+}
+
+.stance-chip[data-stance="SUPPORTS"] {
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface));
+  color: var(--accent);
+}
+
+.stance-chip[data-stance="QUALIFIES"] {
+  background: var(--status-limited-bg);
+  color: var(--status-limited-fg);
+}
+
+.stance-chip[data-stance="CONTRADICTS"] {
+  background: var(--notice-bg);
+  color: var(--notice-fg);
 }
 
 @media (prefers-reduced-motion: no-preference) {

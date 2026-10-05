@@ -8,6 +8,8 @@ import {
   MISSING_PRESENTATION_HEADING,
   claimEvidenceCopy,
   claimPopoverCopy,
+  claimTriggerMark,
+  documentCountSummary,
   documentsAvailability,
   EVIDENCE_SIDE_MIN_WIDTH,
   HOVER_CLOSE_MS,
@@ -152,6 +154,52 @@ test("unknown counts stay distinct from an empty document list", () => {
   );
   assert.equal(documentsAvailability(empty), "empty");
   assert.equal(EMPTY_DOCUMENTS.includes("documentos listados"), true);
+});
+
+test("the inline mark follows presentation_kind and prefers the more cautious claim", () => {
+  assert.deepEqual(claimTriggerMark([FIXTURE_CLAIMS.confirmed]), {
+    kind: "confirmed",
+    label: "Confirmado",
+  });
+  assert.deepEqual(claimTriggerMark([FIXTURE_CLAIMS.utterance]), {
+    kind: "confirmed_utterance",
+    label: "Declaración confirmada",
+  });
+  assert.deepEqual(claimTriggerMark([FIXTURE_CLAIMS.confirmed, FIXTURE_CLAIMS.limited]), {
+    kind: "limited_support",
+    label: "Respaldo limitado",
+  });
+  assert.equal(claimTriggerMark([FIXTURE_CLAIMS.disproven, FIXTURE_CLAIMS.confirmed]).kind, "disproven");
+  assert.deepEqual(claimTriggerMark([FIXTURE_CLAIMS.missing]), { kind: "unevaluated", label: null });
+  const pending = claim({
+    presentation: {
+      verification_label: "Evaluación en curso",
+      limitation: null,
+      coverage: "",
+      explanation: null,
+      evidence_detail: [],
+      basis_known: false,
+      documents_consulted: null,
+      documents_supporting: null,
+      known_independent_count: null,
+      unknown_group_count: null,
+      presentation_kind: "unevaluated_pending",
+    },
+  });
+  assert.deepEqual(claimTriggerMark([pending, FIXTURE_CLAIMS.confirmed]), {
+    kind: "unevaluated",
+    label: "Evaluación en curso",
+  });
+});
+
+test("document summary uses the stored counts and stays quiet when they are unknown", () => {
+  assert.equal(documentCountSummary(2, 2), "2 documentos consultados, los 2 respaldan");
+  assert.equal(documentCountSummary(1, 1), "1 documento consultado, lo respalda");
+  assert.equal(documentCountSummary(2, 1), "2 documentos consultados, 1 respalda");
+  assert.equal(documentCountSummary(2, 0), "2 documentos consultados, ninguno respalda");
+  assert.equal(documentCountSummary(0, 0), "Ningún documento consultado");
+  assert.equal(documentCountSummary(null, 2), null);
+  assert.equal(documentCountSummary(2, null), null);
 });
 
 test("identified scopes are exposed without inventing the missing side", () => {

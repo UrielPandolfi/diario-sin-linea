@@ -4,6 +4,7 @@ import {
   EMPTY_DOCUMENTS,
   UNKNOWN_COVERAGE,
   claimEvidenceCopy,
+  documentCountSummary,
   documentsAvailability,
   officialDocumentDetailIndex,
   type ClaimEvidenceCopy,
@@ -77,15 +78,18 @@ export function ClaimEvidencePanel({
     copy.missingPresentation || copy.kind === "unevaluated" || copy.verifiedScope || copy.unsupportedScope
       ? null
       : "El respaldo se refiere al texto resaltado.";
+  const summary = documentCountSummary(copy.documentsConsulted, copy.documentsSupporting);
 
   return (
     <article className="font-sans text-[15px]" data-presentation-kind={copy.kind ?? "unknown"}>
       <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted">Respaldo de esta afirmación</p>
-      <div className="mt-3">
-        <span className="status-chip" data-kind={copy.kind ?? "unknown"}>
-          {copy.heading}
-        </span>
-      </div>
+      {summary ? (
+        <div className="mt-3">
+          <span className="status-chip" data-document-summary="">
+            {summary}
+          </span>
+        </div>
+      ) : null}
       <h3 className="mt-3 font-heading text-[1.35rem] font-semibold leading-snug text-primary">{copy.heading}</h3>
       {showCanonical && copy.canonicalText ? (
         <p className="mt-3 text-base font-medium leading-snug text-primary">{copy.canonicalText}</p>
@@ -152,7 +156,7 @@ export function ClaimEvidencePanel({
                 <ul className="space-y-2">
                   {copy.documents.map((row, index) => (
                     <li key={`${row.url ?? row.name ?? index}-${row.evidence_type}`}>
-                      <SourceRow row={row} stance />
+                      <SourceRow row={row} />
                       {index === officialIndex && copy.documentaryLimitation ? (
                         <span className="mt-1 block text-sm text-secondary">{copy.documentaryLimitation}</span>
                       ) : null}
@@ -171,14 +175,20 @@ export function ClaimEvidencePanel({
   );
 }
 
-function SourceRow({ row, stance = false }: { row: ClaimEvidenceDetail; stance?: boolean }) {
+function SourceRow({ row }: { row: ClaimEvidenceDetail }) {
   const name = row.name || "Publicación consultada";
   return (
     <div className="flex items-start gap-2.5">
       <FileText className="mt-0.5 h-4 w-4 shrink-0 text-muted" strokeWidth={1.7} aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="break-words text-sm leading-snug text-primary">{name}</p>
-        {stance && row.stance ? <p className="mt-0.5 text-xs text-secondary">{row.stance}</p> : null}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <p className="break-words text-sm leading-snug text-primary">{name}</p>
+          {row.stance ? (
+            <span className="stance-chip" data-stance={row.evidence_type || "unknown"}>
+              {row.stance}
+            </span>
+          ) : null}
+        </div>
         {row.url ? (
           <a
             href={row.url}

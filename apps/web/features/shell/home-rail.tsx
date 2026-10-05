@@ -64,10 +64,16 @@ export function SectionRail({
   if (!now && !nearby) return null;
   const showNearby = nearby && (pending || !now || label !== null);
   return (
-    <aside className="hidden w-[18rem] shrink-0 flex-col overflow-hidden lg:sticky lg:top-0 lg:flex lg:h-[calc(100dvh-3.75rem)] lg:border-l lg:border-border">
+    <aside className="hidden w-[18rem] shrink-0 flex-col border-border lg:sticky lg:top-0 lg:flex lg:h-dvh lg:border-r">
       {now ? <NowPanel fill /> : null}
       {showNearby ? (
-        <div className={now ? "max-h-[40%] shrink-0 overflow-y-auto" : "min-h-0 flex-1 overflow-y-auto"}>
+        <div
+          className={
+            now
+              ? "max-h-[40%] shrink-0 overflow-y-auto"
+              : "min-h-0 flex-1 overflow-y-auto"
+          }
+        >
           <NearbySlot label={label} divided={now} pending={pending} />
         </div>
       ) : null}

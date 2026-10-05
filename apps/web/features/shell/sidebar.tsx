@@ -60,7 +60,7 @@ export function Sidebar({ authenticated = false }: { authenticated?: boolean }) 
   const pathname = usePathname();
 
   return (
-    <aside className="sticky top-0 hidden h-screen w-16 shrink-0 flex-col border-r border-border bg-nav md:flex lg:w-[15.25rem]">
+    <aside className="sl-nav-bleed sticky top-0 hidden h-screen w-16 shrink-0 flex-col border-r border-border bg-nav md:flex lg:w-[15.25rem]">
       <div className="flex h-full flex-col px-2 py-5 lg:px-3.5">
         <Link href="/" className="mb-8 flex items-center gap-2.5 px-2 text-primary">
           <BrandMark className="h-8 w-8 shrink-0" />

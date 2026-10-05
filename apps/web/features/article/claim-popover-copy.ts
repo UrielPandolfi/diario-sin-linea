@@ -64,6 +64,55 @@ export function claimEvidenceCopy(claim: ArticleClaim | null | undefined): Claim
   };
 }
 
+export type ClaimMarkKind =
+  | "confirmed"
+  | "confirmed_utterance"
+  | "limited_support"
+  | "not_confirmed"
+  | "disputed"
+  | "disproven"
+  | "unevaluated";
+
+/** Higher rank wins the visible mark. A mixed passage must not look fully confirmed. */
+const MARK_RANK: Record<string, number> = {
+  disproven: 70,
+  disputed: 60,
+  not_confirmed: 50,
+  limited_support: 40,
+  unevaluated_failed: 30,
+  unevaluated_pending: 30,
+  unevaluated_skipped: 30,
+  unevaluated: 30,
+  confirmed_utterance: 20,
+  confirmed: 10,
+};
+
+const MARK_KINDS = new Set<string>([
+  "confirmed",
+  "confirmed_utterance",
+  "limited_support",
+  "not_confirmed",
+  "disputed",
+  "disproven",
+  "unevaluated",
+]);
+
+export function claimTriggerMark(claims: ArticleClaim[]): { kind: ClaimMarkKind; label: string | null } {
+  let best = -1;
+  let kind: ClaimMarkKind = "unevaluated";
+  let label: string | null = null;
+  for (const claim of claims) {
+    const raw = claim.presentation?.presentation_kind ?? "";
+    const rank = MARK_RANK[raw] ?? 30;
+    if (rank <= best) continue;
+    best = rank;
+    kind = MARK_KINDS.has(raw) ? (raw as ClaimMarkKind) : "unevaluated";
+    const text = claim.presentation?.verification_label?.trim();
+    label = text ? text : null;
+  }
+  return { kind, label };
+}
+
 export function claimPopoverCopy(claim: ArticleClaim) {
   const copy = claimEvidenceCopy(claim);
   return {
@@ -86,6 +135,25 @@ export function officialDocumentDetailIndex(details: ClaimEvidenceDetail[]): num
     }
   });
   return candidates.length === 1 ? candidates[0] : -1;
+}
+
+export function documentCountSummary(consulted: number | null, supporting: number | null): string | null {
+  if (consulted === null || supporting === null) return null;
+  if (!Number.isInteger(consulted) || !Number.isInteger(supporting)) return null;
+  if (consulted < 0 || supporting < 0) return null;
+  if (consulted === 0) return "Ningún documento consultado";
+  const consultedLabel = consulted === 1 ? "1 documento consultado" : `${consulted} documentos consultados`;
+  const supportLabel =
+    supporting === 0
+      ? "ninguno respalda"
+      : supporting === consulted && supporting === 1
+        ? "lo respalda"
+        : supporting === consulted
+          ? `los ${supporting} respaldan`
+          : supporting === 1
+            ? "1 respalda"
+            : `${supporting} respaldan`;
+  return `${consultedLabel}, ${supportLabel}`;
 }
 
 export function documentsAvailability(copy: ClaimEvidenceCopy): "unknown" | "empty" | "listed" {
