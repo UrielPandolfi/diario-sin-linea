@@ -25,9 +25,13 @@ export function HomeContextBar({ label }: { label: string | null }) {
 
 export function HomeRail({ label }: { label: string | null }) {
   return (
-    <aside className="hidden min-h-screen w-[18rem] shrink-0 overflow-y-auto lg:sticky lg:top-0 lg:block lg:h-screen lg:border-l lg:border-border">
-      <NowPanel />
-      {label ? <NearbyPanel label={label} /> : null}
+    <aside className="hidden w-[18rem] shrink-0 flex-col overflow-hidden lg:sticky lg:top-0 lg:flex lg:h-[calc(100dvh-3.75rem)] lg:border-l lg:border-border">
+      <NowPanel fill />
+      {label ? (
+        <div className="max-h-[40%] shrink-0 overflow-y-auto">
+          <NearbyPanel label={label} />
+        </div>
+      ) : null}
     </aside>
   );
 }

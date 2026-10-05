@@ -5,11 +5,20 @@ import { PublicHero } from "@/features/article/public-hero";
 import { PublicApiError, fetchLive } from "@/lib/api/public";
 import { loginPath } from "@/lib/auth/return-to";
 import type { EventCard as EventCardType } from "@/lib/api/types";
-import { formatClock } from "@/lib/relative-time";
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 
-const POLL_MS = 45_000;
+import {
+  RadarMasthead,
+  RadarScan,
+  RadarStamp,
+  RadarStatus,
+  useElementHeight,
+  useRadarArrivals,
+  useRadarTravel,
+  useTicker,
+} from "./radar-chrome";
+import { LIVE_POLL_MS } from "./radar";
 
 export function LiveTimeline() {
   const [items, setItems] = useState<EventCardType[]>([]);
@@ -17,6 +26,8 @@ export function LiveTimeline() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState(false);
+  const [ready, setReady] = useState(false);
+  const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const sentinel = useRef<HTMLDivElement>(null);
   const paginated = useRef(false);
   const loadingMoreRef = useRef(false);
@@ -27,6 +38,8 @@ export function LiveTimeline() {
       const page = await fetchLive();
       setItems(page.items);
       setCursor(page.next_cursor);
+      setUpdatedAt(Date.now());
+      setReady(true);
       setError(false);
     } catch (error) {
       if (error instanceof PublicApiError && error.status === 401) {
@@ -43,7 +56,7 @@ export function LiveTimeline() {
     void refresh(false);
     const timer = window.setInterval(() => {
       void refresh(true);
-    }, POLL_MS);
+    }, LIVE_POLL_MS);
     return () => window.clearInterval(timer);
   }, [refresh]);
 
@@ -74,41 +87,71 @@ export function LiveTimeline() {
     return () => observer.disconnect();
   }, [cursor, loading, error]);
 
-  if (loading) return <FeedSkeleton />;
-  if (error && items.length === 0) return <FeedError onRetry={() => void refresh(false)} />;
-  if (items.length === 0) {
-    return (
+  const now = useTicker();
+  const { ref: headerRef, height: headerHeight } = useElementHeight<HTMLElement>();
+  const { frameRef, travel } = useRadarTravel(headerHeight);
+  const keys = items.map((item) => item.public_id);
+  const { born, nudging } = useRadarArrivals(keys, ready, now);
+
+  let body: ReactNode;
+  if (loading) body = <FeedSkeleton />;
+  else if (error && items.length === 0) body = <FeedError onRetry={() => void refresh(false)} />;
+  else if (items.length === 0) {
+    body = (
       <FeedEmpty
         title="Nada en vivo por ahora."
         description="Cuando se publique un suceso, va a aparecer acá en orden cronológico."
       />
     );
+  } else {
+    body = (
+      <>
+        <div className="sl-radar-list" data-nudging={nudging ? "true" : undefined}>
+          {items.map((item) => (
+            <Link
+              key={item.public_id}
+              href={`/noticias/${item.slug}`}
+              data-new={born[item.public_id] ? "true" : undefined}
+              className="sl-feed-item sl-radar-item group block border-b border-border py-5 pl-5 pr-4 text-primary md:pl-6 md:pr-6"
+            >
+              <RadarStamp
+                iso={item.updated_at || item.published_at}
+                locality={item.locality}
+                arrivedAt={born[item.public_id]}
+                now={now}
+                className="font-sans text-[12px] uppercase tracking-[0.14em] text-accent"
+              />
+              <p className="mt-1.5 font-heading text-[1.15rem] font-semibold leading-snug">{item.headline}</p>
+              {item.hero_image_url ? (
+                <PublicHero
+                  src={item.hero_image_url}
+                  className="mt-3 overflow-hidden rounded-xl"
+                  sizes="(min-width: 768px) 672px, 100vw"
+                />
+              ) : null}
+            </Link>
+          ))}
+        </div>
+        {cursor ? <div ref={sentinel} className="h-8" /> : null}
+        {loadingMore ? <FeedSkeleton rows={2} /> : null}
+      </>
+    );
   }
 
   return (
     <div>
-      {items.map((item) => (
-        <Link
-          key={item.public_id}
-          href={`/noticias/${item.slug}`}
-          className="sl-feed-item group block border-b border-border px-4 py-5 text-primary md:px-6"
-        >
-          <p className="font-sans text-[12px] uppercase tracking-[0.14em] text-accent">
-            {formatClock(item.updated_at || item.published_at)}
-            {item.locality ? ` · ${item.locality}` : ""}
-          </p>
-          <p className="mt-1.5 font-heading text-[1.15rem] font-semibold leading-snug">{item.headline}</p>
-          {item.hero_image_url ? (
-            <PublicHero
-              src={item.hero_image_url}
-              className="mt-3 overflow-hidden rounded-xl"
-              sizes="(min-width: 768px) 672px, 100vw"
-            />
-          ) : null}
-        </Link>
-      ))}
-      {cursor ? <div ref={sentinel} className="h-8" /> : null}
-      {loadingMore ? <FeedSkeleton rows={2} /> : null}
+      <header
+        ref={headerRef}
+        className="sticky top-0 z-10 border-b border-border bg-background/90 py-3 pl-5 pr-4 backdrop-blur-md md:px-6"
+      >
+        <RadarMasthead now={now} />
+        <h1 className="font-heading text-2xl font-semibold text-primary">En vivo</h1>
+      </header>
+      <div ref={frameRef} className="relative">
+        {travel > 0 && headerHeight > 0 ? <RadarScan stick={headerHeight} travel={travel} /> : null}
+        {body}
+      </div>
+      <RadarStatus now={now} updatedAt={updatedAt} pin />
     </div>
   );
 }

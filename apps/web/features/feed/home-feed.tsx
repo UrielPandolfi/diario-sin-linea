@@ -1,7 +1,6 @@
 "use client";
 
 import { FeedList } from "@/features/feed/feed-list";
-import { FeedTabs, parseVista } from "@/features/feed/feed-tabs";
 import { LocalitySearch } from "@/features/locality/locality-search";
 import { HomeContextBar, HomeRail } from "@/features/shell/home-rail";
 import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
@@ -13,7 +12,6 @@ export function HomeFeed() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const vista = parseVista(searchParams.get("vista"));
   const [place, setPlace] = useState<ReaderPlace | null>(null);
   const [ready, setReady] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -40,7 +38,6 @@ export function HomeFeed() {
     return <div className="h-40 animate-pulse bg-surface" />;
   }
 
-  const sort = vista === "ultimas" ? "latest" : "principal";
   const label = place ? placeLabel(place) : null;
 
   return (
@@ -74,11 +71,10 @@ export function HomeFeed() {
               </div>
             ) : null}
           </div>
-          <FeedTabs />
         </header>
         <FeedList
-          key={`${sort}:${place?.id ?? ""}`}
-          kind={sort}
+          key={place?.id ?? ""}
+          kind="principal"
           emptyTitle="Todavía no hay sucesos publicados."
           emptyDescription="En cuanto se publique algo, lo vas a ver en este feed."
         />
