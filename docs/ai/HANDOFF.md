@@ -1,13 +1,13 @@
 # Handoff
 
-**Fecha:** 2026-10-05
+**Fecha:** 2026-10-06
 
-**Tarea:** Cerrar la barra derecha con un borde, sin alargar sus líneas.
+**Tarea:** Favicon y logo del sitio.
 
 ## Hecho
 
-La barra de inicio, En vivo, Local, Buscar y Guardados tiene solo borde derecho y ocupa el alto de la ventana, así el borde llega hasta abajo. El borde izquierdo lo aporta la columna de al lado. El quinto ítem de Ahora sigue cortado a la mitad.
+El favicon es `favicon.png`, cuadrado y con esquinas redondeadas. El logo de la barra principal es `logo.png`, recortado al texto. En la barra angosta queda el favicon.
 
 ## Validación
 
-A 1280×924 el borde derecho de la barra llega al borde inferior de la ventana, en reposo y al desplazar.
+En `/` a 1440 px el wordmark se ve en la barra izquierda y el `link` de icono apunta a `/favicon.png`.

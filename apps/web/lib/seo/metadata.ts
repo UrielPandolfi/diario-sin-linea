@@ -91,7 +91,7 @@ export function rootMetadata(origin: string, indexable: boolean) {
     },
     description: SITE_DESCRIPTION,
     applicationName: SITE_NAME,
-    icons: { icon: "/mark.svg" },
+    icons: { icon: "/favicon.png" },
     robots: indexable ? { index: true, follow: true } : NO_INDEX_NO_FOLLOW,
     openGraph: {
       type: "website" as const,
