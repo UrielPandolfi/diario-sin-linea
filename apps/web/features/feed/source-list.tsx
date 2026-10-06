@@ -1,6 +1,7 @@
 "use client";
 
 import type { ArticleSource } from "@/lib/api/types";
+import { Newspaper } from "lucide-react";
 import type { ReactNode } from "react";
 
 export function SourceList({ sources }: { sources: ArticleSource[] }) {
@@ -13,7 +14,8 @@ export function SourceList({ sources }: { sources: ArticleSource[] }) {
 
   return (
     <details className="group">
-      <summary className="cursor-pointer list-none font-sans text-xs text-secondary marker:content-none hover:text-primary">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 font-sans text-xs text-secondary marker:content-none hover:text-primary">
+        <Newspaper className="h-4 w-4 shrink-0 text-[#7fb5a8]" strokeWidth={2.25} aria-hidden />
         <span>{compact}</span>
         {extra > 0 ? <span>{` +${extra}`}</span> : null}
         <span className="ml-2 hidden text-muted group-open:inline">Fuentes</span>

@@ -61,8 +61,8 @@ export function Sidebar({ authenticated = false }: { authenticated?: boolean }) 
   return (
     <aside className="sl-nav-bleed sticky top-0 hidden h-screen w-16 shrink-0 flex-col border-r border-border bg-nav md:flex lg:w-[15.25rem]">
       <div className="flex h-full flex-col px-2 py-5 lg:px-3.5">
-        <Link href="/" className="mb-8 flex items-center px-1" aria-label="Sin Línea">
-          <img src="/logo.png" alt="" className="hidden h-7 w-auto max-w-full lg:block" />
+        <Link href="/" className="mb-8 flex w-full items-center px-1" aria-label="Sin Línea">
+          <span className="sl-logo hidden w-full lg:block" />
           <img src="/favicon.png" alt="" className="h-8 w-8 lg:hidden" />
         </Link>
         <nav aria-label="Principal" className="flex flex-1 flex-col gap-0.5">

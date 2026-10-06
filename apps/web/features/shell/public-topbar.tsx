@@ -12,7 +12,7 @@ export function PublicTopBar({ desktop = true, authenticated = false }: { deskto
       }`}
     >
       <Link href="/" className="flex items-center lg:hidden" aria-label="Sin Línea">
-        <img src="/logo.png" alt="" className="h-6 w-auto" />
+        <span className="sl-logo h-8 w-[11.375rem]" />
       </Link>
       <div className="ml-auto flex items-center gap-1">
         {authenticated ? <SignOutButton className="md:hidden" /> : null}

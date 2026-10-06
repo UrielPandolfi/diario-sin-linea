@@ -106,6 +106,20 @@ body {
   }
 }
 
+.sl-logo {
+  display: block;
+  background-color: var(--text-primary);
+  aspect-ratio: 1616 / 284;
+  -webkit-mask-image: url("/logo.png?v=2");
+  mask-image: url("/logo.png?v=2");
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
 body {
   background:
     radial-gradient(980px 420px at 8% -8%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 62%),
@@ -931,6 +945,22 @@ summary::-webkit-details-marker {
     animation: sl-live 2.4s ease-out infinite;
   }
 
+  .sl-home-glow::before {
+    animation: sl-home-glow 4.8s ease-in-out infinite;
+  }
+
+  .sl-home-glow span {
+    animation: sl-home-ring 5.4s ease-out infinite;
+  }
+
+  .sl-home-glow span:nth-child(2) {
+    animation-delay: 1.8s;
+  }
+
+  .sl-home-glow span:nth-child(3) {
+    animation-delay: 3.6s;
+  }
+
   .sl-radar-pulse {
     animation: sl-radar-scan 6.5s linear infinite;
   }
@@ -975,6 +1005,60 @@ summary::-webkit-details-marker {
 
   .sl-btn-primary:hover {
     transform: translateY(-1px);
+  }
+}
+
+.sl-home-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.sl-home-glow::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: 1.25rem;
+  width: 11rem;
+  height: 7rem;
+  transform: translateY(-50%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 34%, transparent), transparent 70%);
+  opacity: 0.55;
+}
+
+.sl-home-glow span {
+  position: absolute;
+  top: 50%;
+  right: 4.5rem;
+  width: 7rem;
+  height: 7rem;
+  margin-top: -3.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 58%, transparent);
+  opacity: 0;
+}
+
+@keyframes sl-home-glow {
+  0%,
+  100% {
+    opacity: 0.38;
+  }
+  50% {
+    opacity: 0.78;
+  }
+}
+
+@keyframes sl-home-ring {
+  0% {
+    transform: scale(0.28);
+    opacity: 0;
+  }
+  16% {
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(2.15);
+    opacity: 0;
   }
 }
 
@@ -1054,6 +1138,9 @@ summary::-webkit-details-marker {
   .sl-enter,
   .sl-hero-img,
   .sl-live-dot,
+  .sl-home-glow,
+  .sl-home-glow::before,
+  .sl-home-glow span,
   .sl-radar-pulse,
   .sl-radar-sweep,
   .sl-radar-wave span,
