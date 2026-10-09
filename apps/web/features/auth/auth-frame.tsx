@@ -3,7 +3,7 @@
 import { loginPath, registerPath, safeReturnTo } from "@/lib/auth/return-to";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, PointerEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 
 export function AuthFrame({
   mode,
@@ -28,6 +28,13 @@ export function AuthFrame({
     if (media.matches) return;
     let frame = 0;
     let running = true;
+    const onMove = (event: globalThis.PointerEvent) => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      if (width === 0 || height === 0) return;
+      glowTarget.current.x = Math.min(1, Math.max(0, event.clientX / width));
+      glowTarget.current.y = Math.min(1, Math.max(0, event.clientY / height));
+    };
     const tick = () => {
       if (!running) return;
       const stage = stageRef.current;
@@ -39,22 +46,14 @@ export function AuthFrame({
       }
       frame = window.requestAnimationFrame(tick);
     };
+    window.addEventListener("pointermove", onMove);
     frame = window.requestAnimationFrame(tick);
     return () => {
       running = false;
+      window.removeEventListener("pointermove", onMove);
       window.cancelAnimationFrame(frame);
     };
   }, []);
-
-  function onStageMove(event: PointerEvent<HTMLElement>) {
-    const stage = stageRef.current;
-    if (!stage) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const rect = stage.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return;
-    glowTarget.current.x = (event.clientX - rect.left) / rect.width;
-    glowTarget.current.y = (event.clientY - rect.top) / rect.height;
-  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -98,9 +97,15 @@ export function AuthFrame({
     <main className="sl-enter grid min-h-screen bg-background lg:grid-cols-2">
         <section
           ref={stageRef}
-          onPointerMove={onStageMove}
           className="sl-auth-stage relative flex min-h-[46vh] flex-col justify-between overflow-hidden px-8 py-10 md:px-14 md:py-16 lg:min-h-screen lg:px-16 xl:px-24"
         >
+          <div className="sl-auth-lines" aria-hidden>
+            <span style={{ top: "16%" }} />
+            <span style={{ top: "34%" }} />
+            <span className="is-cursor" style={{ top: "var(--auth-y)" }} />
+            <span data-warm="" style={{ top: "58%" }} />
+            <span data-warm="" style={{ top: "76%" }} />
+          </div>
           <span className="sl-logo relative z-10 h-9 w-[12.8rem]" role="img" aria-label="Sin Línea" />
           <div className="relative z-10 max-w-md py-16 lg:py-0">
             <h1 className="font-heading text-4xl font-semibold leading-[1.08] tracking-tight text-primary md:text-5xl">

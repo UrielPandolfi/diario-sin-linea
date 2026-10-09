@@ -940,8 +940,10 @@ summary::-webkit-details-marker {
 .sl-auth-stage::after {
   content: "";
   position: absolute;
+  z-index: 0;
   border-radius: 999px;
   pointer-events: none;
+  translate: -50% -50%;
 }
 
 .sl-auth-stage::before {
@@ -949,32 +951,61 @@ summary::-webkit-details-marker {
   height: 46rem;
   left: var(--auth-x);
   top: var(--auth-y);
-  translate: -50% -50%;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent) 34%, transparent), transparent 68%);
 }
 
 .sl-auth-stage::after {
-  width: 34rem;
-  height: 34rem;
-  right: -6rem;
-  bottom: -8rem;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent-ochre) 30%, transparent), transparent 70%);
+  width: 32rem;
+  height: 32rem;
+  left: calc(var(--auth-x) - 16%);
+  top: calc(var(--auth-y) + 20%);
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-ochre) 28%, transparent), transparent 70%);
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .sl-auth-stage::after {
-    animation: sl-auth-drift 18s ease-in-out infinite;
-  }
+.sl-auth-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
 }
 
-@keyframes sl-auth-drift {
-  0%,
-  100% {
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-  50% {
-    transform: translate3d(-12%, -8%, 0) scale(1.12);
-  }
+.sl-auth-lines span {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 1px;
+  opacity: 0.45;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent calc(var(--auth-x) - 34%),
+    color-mix(in srgb, var(--accent) 28%, transparent) calc(var(--auth-x) - 10%),
+    color-mix(in srgb, var(--accent) 72%, white) var(--auth-x),
+    color-mix(in srgb, var(--accent) 28%, transparent) calc(var(--auth-x) + 10%),
+    transparent calc(var(--auth-x) + 34%),
+    transparent 100%
+  );
+  box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+.sl-auth-lines span[data-warm] {
+  opacity: 0.34;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    transparent calc(var(--auth-x) - 30%),
+    color-mix(in srgb, var(--accent-ochre) 24%, transparent) calc(var(--auth-x) - 8%),
+    color-mix(in srgb, var(--accent-ochre) 70%, white) var(--auth-x),
+    color-mix(in srgb, var(--accent-ochre) 24%, transparent) calc(var(--auth-x) + 8%),
+    transparent calc(var(--auth-x) + 30%),
+    transparent 100%
+  );
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent-ochre) 24%, transparent);
+}
+
+.sl-auth-lines span.is-cursor {
+  opacity: 0.8;
+  height: 1.5px;
 }
 
 @media (prefers-reduced-motion: no-preference) {
@@ -1201,8 +1232,7 @@ summary::-webkit-details-marker {
   .sl-feed-item,
   .sl-hit,
   .sl-link-row,
-  .sl-panel,
-  .sl-auth-stage::after {
+  .sl-panel {
     animation: none;
     transition: none;
   }
