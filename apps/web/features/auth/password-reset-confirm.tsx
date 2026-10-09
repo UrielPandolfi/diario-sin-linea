@@ -1,14 +1,14 @@
 "use client";
 
-import { safeReturnTo } from "@/lib/auth/return-to";
-import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 
 export function PasswordResetConfirmForm({ token }: { token: string }) {
-  const router = useRouter();
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [done, setDone] = useState(false);
+  const [noticeSent, setNoticeSent] = useState(false);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -21,17 +21,38 @@ export function PasswordResetConfirmForm({ token }: { token: string }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ token, password }),
       });
-      if (!response.ok) {
+      if (response.status === 400) {
         setError("El enlace no sirve, venció o ya se usó. Pedí uno nuevo.");
         return;
       }
-      router.push(safeReturnTo("/", "/"));
-      router.refresh();
+      if (!response.ok) {
+        setError("No pudimos guardar la contraseña.");
+        return;
+      }
+      const payload = (await response.json()) as { security_notice_sent?: boolean };
+      setNoticeSent(payload.security_notice_sent === true);
+      setDone(true);
     } catch {
       setError("No pudimos guardar la contraseña.");
     } finally {
       setPending(false);
     }
+  }
+
+  if (done) {
+    return (
+      <div className="mt-8 max-w-sm space-y-4">
+        <p className="font-sans text-sm text-secondary">
+          Guardamos la contraseña nueva. Este enlace no abre la sesión: entrá con la contraseña que acabás de elegir.
+          {noticeSent
+            ? " Te enviamos un aviso al email, sin la contraseña."
+            : " No salió el aviso por email."}
+        </p>
+        <Link href="/entrar" className="sl-btn-primary inline-flex">
+          Entrar
+        </Link>
+      </div>
+    );
   }
 
   return (

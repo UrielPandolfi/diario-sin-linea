@@ -227,7 +227,7 @@ Claims `SINGLE_SOURCE` bien resueltos se publicaban como hecho categórico en ti
 
 ## Parcial / stub / posible defecto
 
-- Seguidos, Notificaciones, Seguir, Comentar y los mapas de Inicio y Local salieron de la interfaz. `/seguidos` y `/notificaciones` responden 404. Me gusta sigue siendo personalización, sin lista. Guardados se abre desde Perfil. No hay Poneme al día. No hay login social. La identidad legal del responsable no está publicada. El correo de restablecimiento queda inactivo hasta configurar SMTP.
+- Seguidos, Notificaciones, Seguir, Comentar y los mapas de Inicio y Local salieron de la interfaz. `/seguidos` y `/notificaciones` responden 404. Me gusta sigue siendo personalización, sin lista. Guardados se abre desde Perfil. No hay Poneme al día. No hay login social. La identidad legal del responsable no está publicada. El correo transaccional (confirmación, restablecimiento y aviso de contraseña) queda inactivo hasta configurar Resend, el dominio en Donweb y las variables en Railway. Pasos en `docs/ai/correo.md`.
 - `editorial_hold` se pone `True` en revise UPDATE/CORRECTION; el override de publish no lo pone en `False`.
 - Helpers Rosario / `OUTSIDE_TARGET_LOCALITY` en el gate **no** se usan en `evaluate_editorial_gate`.
 - Filas `LlmUsage` anteriores a A2: USD unknown; atribución inferida de FKs; backfill vs query de embeddings no se parte.

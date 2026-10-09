@@ -49,8 +49,11 @@ export default function PrivacyPage() {
           envía un correo automático por ese caso.
         </p>
         <p>
-          El restablecimiento de contraseña envía un enlace al email de la cuenta solo si hay un
-          servidor de correo configurado. El enlace vence a la hora y sirve una sola vez.
+          Si el correo transaccional está configurado, al crear la cuenta y al pedir un restablecimiento
+          enviamos un enlace a ese email. Guardamos el hash del enlace, no el enlace en claro. El de
+          confirmación vence a las 24 horas y el de restablecimiento a la hora. Cada uno sirve una sola
+          vez. Cambiar la contraseña puede avisar por correo, sin incluirla. Si el envío no sale, no
+          decimos que el mensaje fue entregado.
         </p>
         <p>
           La redacción usa procesamiento automático y modelos de lenguaje para detectar, contrastar y

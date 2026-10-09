@@ -34,7 +34,10 @@ export function PasswordResetRequestForm() {
         return;
       }
       const payload = (await response.json()) as { detail?: string };
-      setMessage(payload.detail ?? "Si hay una cuenta con ese email, enviamos un enlace para elegir una contraseña nueva.");
+      setMessage(
+        payload.detail ??
+          "Si hay una cuenta con ese email y el correo sale, llega un enlace para elegir una contraseña nueva. Si no llega, el envío no se completó.",
+      );
     } catch {
       setError("No pudimos tomar el pedido.");
     } finally {

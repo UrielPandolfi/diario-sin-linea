@@ -19,8 +19,10 @@ export default function TermsPage() {
         </p>
         <h2 className="font-heading text-lg text-primary">Cuenta</h2>
         <p>
-          Crear una cuenta pide un email y una contraseña de al menos 8 caracteres. Esa cuenta permite
-          ver el inicio y usar localidad, Me gusta, Guardados y Perfil. No compartas la contraseña.
+          Crear una cuenta pide un email y una contraseña de al menos 8 caracteres. Si el correo está
+          configurado, llega un enlace para confirmar ese email; la cuenta se puede usar antes de
+          confirmarlo. Esa cuenta permite ver el inicio y usar localidad, Me gusta, Guardados y Perfil.
+          No compartas la contraseña.
         </p>
         <p>
           Podés pedir el restablecimiento desde el ingreso si el correo está configurado, o cambiar la

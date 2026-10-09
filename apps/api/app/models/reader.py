@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import ForeignKey, Integer, String, Uuid
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, TimestampMixin
@@ -19,3 +20,4 @@ class Reader(TimestampMixin, Base):
     )
     locality_step: Mapped[str] = mapped_column(String(16), nullable=False, default="done", server_default="done")
     session_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

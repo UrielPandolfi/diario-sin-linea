@@ -10,6 +10,7 @@ from app.models.pipeline import PipelineRun
 from app.models.provider_cache import ProviderResultCache
 from app.models.reader import Reader
 from app.models.reader_case import ReaderCase, ReaderCaseAction
+from app.models.reader_email_verification import ReaderEmailVerification
 from app.models.reader_password_reset import ReaderPasswordReset
 from app.models.reader_signal import ReaderEventLike, ReaderEventRead, ReaderEventSave
 from app.models.source import Source, SourceItem
@@ -40,6 +41,7 @@ __all__ = [
     "ReaderCaseAction",
     "ReaderEventLike",
     "ReaderEventRead",
+    "ReaderEmailVerification",
     "ReaderEventSave",
     "ReaderPasswordReset",
     "Source",

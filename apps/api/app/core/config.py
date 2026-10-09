@@ -63,12 +63,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000"
     site_url: str = "http://localhost:3000"
     cookie_secure: bool = False
-    smtp_host: str = ""
-    smtp_port: int = 587
-    smtp_username: str = ""
-    smtp_password: str = ""
-    smtp_from: str = ""
-    smtp_tls: bool = True
+    # Correo transaccional (Resend). APP_BASE_URL pisa a SITE_URL solo en los enlaces
+    # del correo. Sin clave, remitente u origen https público, no se afirma un envío.
+    resend_api_key: str = ""
+    email_from: str = ""
+    email_reply_to: str = "contacto@sinlinea.ar"
+    app_base_url: str = ""
 
     openai_api_key: str | None = None
     anthropic_api_key: str | None = None

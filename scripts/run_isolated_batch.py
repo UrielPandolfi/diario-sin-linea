@@ -54,9 +54,8 @@ def _load_env() -> None:
     os.environ["VERIFICATION_REUSE_ENABLED"] = "true"
     os.environ["ARTICLE_IMAGE_ENABLED"] = "false"
     os.environ["USAGE_ENVIRONMENT"] = "experiment"
-    # SMTP del entorno original no se usa: esta corrida no llama al mailer.
-    os.environ["SMTP_HOST"] = ""
-    os.environ["SMTP_PASSWORD"] = ""
+    # El correo transaccional del entorno original no se usa: esta corrida no llama a Resend.
+    os.environ["RESEND_API_KEY"] = ""
 
 
 _load_env()

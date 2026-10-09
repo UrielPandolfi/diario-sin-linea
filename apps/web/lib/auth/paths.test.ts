@@ -29,6 +29,8 @@ test("public sections stay outside the home gate", () => {
     "/privacidad",
     "/terminos",
     "/cuenta/recuperar",
+    "/cuenta/restablecer",
+    "/cuenta/verificar",
     "/entrar",
     "/registro",
     "/admin",

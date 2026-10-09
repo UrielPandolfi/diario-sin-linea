@@ -82,8 +82,8 @@ def test_password_reset_does_not_reveal_the_account(monkeypatch, db_session: Ses
 def test_password_reset_is_single_use_and_closes_old_sessions(monkeypatch, db_session: Session) -> None:
     sent: dict[str, str] = {}
 
-    def send(_settings, *, to: str, subject: str, body: str) -> bool:
-        del subject
+    def send(_settings, *, to: str, subject: str, body: str, html: str | None = None) -> bool:
+        del subject, html
         sent[to] = body
         return True
 

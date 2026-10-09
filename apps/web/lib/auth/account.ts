@@ -14,6 +14,7 @@ export type ReaderPlace = {
 export type ReaderAccount = {
   authenticated: boolean;
   email: string | null;
+  email_verified: boolean | null;
   locality_step: "pending" | "done" | "skipped" | null;
   locality: ReaderPlace | null;
 };
@@ -37,20 +38,22 @@ async function readerFetch(path: string, init?: RequestInit): Promise<Response> 
 export async function fetchReaderAccount(): Promise<ReaderAccount> {
   const response = await readerFetch("/api/v1/auth/session");
   if (!response.ok) {
-    return { authenticated: false, email: null, locality_step: null, locality: null };
+    return { authenticated: false, email: null, email_verified: null, locality_step: null, locality: null };
   }
   const body = (await response.json()) as {
     authenticated?: boolean;
     email?: string;
+    email_verified?: boolean;
     locality_step?: ReaderAccount["locality_step"];
     locality?: ReaderPlace | null;
   };
   if (!body.authenticated) {
-    return { authenticated: false, email: null, locality_step: null, locality: null };
+    return { authenticated: false, email: null, email_verified: null, locality_step: null, locality: null };
   }
   return {
     authenticated: true,
     email: typeof body.email === "string" ? body.email : null,
+    email_verified: typeof body.email_verified === "boolean" ? body.email_verified : null,
     locality_step: body.locality_step ?? null,
     locality: body.locality ?? null,
   };

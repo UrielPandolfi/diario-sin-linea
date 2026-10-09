@@ -29,9 +29,14 @@ export function PasswordChangeForm() {
         setError("No pudimos cambiar la contraseña. Tiene que ser distinta y tener al menos 8 caracteres.");
         return;
       }
+      const payload = (await response.json()) as { security_notice_sent?: boolean };
       setCurrentPassword("");
       setNewPassword("");
-      setMessage("Contraseña actualizada. Las otras sesiones de esta cuenta quedaron cerradas.");
+      setMessage(
+        payload.security_notice_sent
+          ? "Contraseña actualizada. Las otras sesiones quedaron cerradas. Te enviamos un aviso al email, sin la contraseña."
+          : "Contraseña actualizada. Las otras sesiones quedaron cerradas. No salió el aviso por email.",
+      );
     } catch {
       setError("No pudimos cambiar la contraseña.");
     } finally {

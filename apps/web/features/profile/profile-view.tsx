@@ -3,6 +3,7 @@
 import { SignOutButton } from "@/features/auth/sign-out-button";
 import { LocalitySearch } from "@/features/locality/locality-search";
 import { DeletionRequestForm } from "@/features/profile/deletion-request-form";
+import { EmailVerification } from "@/features/profile/email-verification";
 import { PasswordChangeForm } from "@/features/profile/password-change-form";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { fetchReaderAccount, placeLabel, type ReaderPlace } from "@/lib/auth/account";
@@ -12,12 +13,14 @@ import { useEffect, useState } from "react";
 export function ProfileView() {
   const [place, setPlace] = useState<ReaderPlace | null>(null);
   const [email, setEmail] = useState<string | null>(null);
+  const [emailVerified, setEmailVerified] = useState<boolean | null>(null);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     void fetchReaderAccount()
       .then((account) => {
         setEmail(account.email);
+        setEmailVerified(account.email_verified);
         setPlace(account.locality);
       })
       .finally(() => setReady(true));
@@ -35,7 +38,14 @@ export function ProfileView() {
         {email ? email : "Tu cuenta"}
       </p>
 
-      <section className="sl-block sl-enter mt-8 space-y-3 p-5">
+      {email && emailVerified !== null ? (
+        <section className="sl-block sl-enter mt-8 space-y-3 p-5">
+          <h2 className="font-heading text-sm text-primary">Correo</h2>
+          <EmailVerification email={email} verified={emailVerified} />
+        </section>
+      ) : null}
+
+      <section className={`sl-block space-y-3 p-5 ${email && emailVerified !== null ? "mt-4" : "sl-enter mt-8"}`}>
         <h2 className="font-heading text-sm text-primary">Localidad</h2>
         <p className="font-sans text-sm text-secondary">
           {place

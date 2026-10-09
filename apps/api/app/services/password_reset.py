@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
 import secrets
 from datetime import timedelta
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -12,13 +12,10 @@ from sqlalchemy.orm import Session
 from app.core.clock import utc_now
 from app.models.reader import Reader
 from app.models.reader_password_reset import ReaderPasswordReset
+from app.services.auth_tokens import hash_token
 from app.services.reader_auth import hash_password
 
 RESET_TTL = timedelta(hours=1)
-
-
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
 def issue_reset(session: Session, reader: Reader) -> str:
@@ -26,7 +23,7 @@ def issue_reset(session: Session, reader: Reader) -> str:
     session.add(
         ReaderPasswordReset(
             reader_id=reader.id,
-            token_hash=_hash_token(raw),
+            token_hash=hash_token(raw),
             expires_at=utc_now() + RESET_TTL,
         )
     )
@@ -36,7 +33,7 @@ def issue_reset(session: Session, reader: Reader) -> str:
 
 def confirm_reset(session: Session, token: str, password: str) -> Reader | None:
     row = session.scalar(
-        select(ReaderPasswordReset).where(ReaderPasswordReset.token_hash == _hash_token(token))
+        select(ReaderPasswordReset).where(ReaderPasswordReset.token_hash == hash_token(token))
     )
     now = utc_now()
     if row is None or row.used_at is not None or row.expires_at <= now:
@@ -57,3 +54,16 @@ def confirm_reset(session: Session, token: str, password: str) -> Reader | None:
     reader.session_generation = int(reader.session_generation or 0) + 1
     session.flush()
     return reader
+
+
+def invalidate_resets(session: Session, reader_id: UUID) -> None:
+    now = utc_now()
+    pending = session.scalars(
+        select(ReaderPasswordReset).where(
+            ReaderPasswordReset.reader_id == reader_id,
+            ReaderPasswordReset.used_at.is_(None),
+        )
+    ).all()
+    for row in pending:
+        row.used_at = now
+    session.flush()

@@ -16,6 +16,7 @@ export function AuthFrame({
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [mailNote, setMailNote] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const register = mode === "register";
   const destination = safeReturnTo(next, "/");
@@ -59,6 +60,7 @@ export function AuthFrame({
     event.preventDefault();
     setPending(true);
     setError(null);
+    setMailNote(null);
     try {
       const response = await fetch(register ? "/api/v1/auth/register" : "/api/v1/auth/login", {
         method: "POST",
@@ -82,7 +84,11 @@ export function AuthFrame({
         setError("No se pudo conectar con la API.");
         return;
       }
-      const body = (await response.json()) as { locality_step?: string };
+      const body = (await response.json()) as { locality_step?: string; email_verification?: string };
+      if (register && body.email_verification === "failed") {
+        setMailNote("La cuenta quedó creada, pero no salió el correo de confirmación. Podés reenviarlo desde Perfil.");
+        return;
+      }
       const askLocality = register || body.locality_step === "pending";
       router.push(askLocality ? `/onboarding?next=${encodeURIComponent(destination)}` : destination);
       router.refresh();
@@ -175,6 +181,14 @@ export function AuthFrame({
                 </Link>
               </p>
             )}
+            {mailNote ? (
+              <p className="font-sans text-sm text-secondary">
+                {mailNote}{" "}
+                <Link href={`/onboarding?next=${encodeURIComponent(destination)}`} className="underline">
+                  Continuar
+                </Link>
+              </p>
+            ) : null}
             {error ? (
               <p role="alert" className="font-sans text-sm text-accent-ochre">
                 {error}
