@@ -108,6 +108,29 @@ def test_session_does_not_leak_another_reader(db_session: Session) -> None:
         assert second.get("/api/v1/feed").status_code == 200
 
 
+def test_deleted_reader_drops_the_signed_cookie(db_session: Session) -> None:
+    with TestClient(app) as client:
+        authenticate_reader(client, email="borrado@sinlinea.test")
+        reader = db_session.scalar(select(Reader).where(Reader.email == "borrado@sinlinea.test"))
+        assert reader is not None
+        token = client.cookies.get("sl_reader")
+        assert token
+        live = client.get("/api/v1/auth/session")
+        assert live.json()["authenticated"] is True
+        assert "Max-Age=0" not in (live.headers.get("set-cookie") or "")
+        db_session.delete(reader)
+        db_session.commit()
+        session = client.get("/api/v1/auth/session")
+        assert session.status_code == 200
+        assert session.json() == {"authenticated": False}
+        assert "Max-Age=0" in (session.headers.get("set-cookie") or "")
+        client.cookies.set("sl_reader", token)
+        feed = client.get("/api/v1/feed")
+        assert feed.status_code == 401
+        assert feed.json()["detail"] == "No autenticado"
+        assert "Max-Age=0" in (feed.headers.get("set-cookie") or "")
+
+
 def test_expired_reader_session_can_still_read_a_published_article(db_session: Session) -> None:
     event, article = _seed(db_session, locality="Rosario", headline="Nota con sesión vencida", hash_key="authexp")
     _publish_passed(db_session, event)

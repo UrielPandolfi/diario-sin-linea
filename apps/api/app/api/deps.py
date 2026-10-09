@@ -26,9 +26,15 @@ def optional_reader(request: Request, db: DbSession) -> Reader | None:
     return reader
 
 
+class StaleReaderSession(Exception):
+    """La cookie está firmada, pero el lector ya no existe o la generación no coincide."""
+
+
 def require_reader(request: Request, db: DbSession) -> Reader:
     reader = optional_reader(request, db)
     if reader is None:
+        if request.cookies.get(READER_COOKIE):
+            raise StaleReaderSession()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="No autenticado")
     return reader
 

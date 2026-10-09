@@ -81,6 +81,10 @@ def _attach_session(response: Response, reader: Reader) -> None:
     )
 
 
+def drop_stale_reader_cookie(response: Response) -> None:
+    _clear_session(response)
+
+
 def _clear_session(response: Response) -> None:
     response.delete_cookie(
         READER_COOKIE,
@@ -170,9 +174,16 @@ def logout() -> JSONResponse:
 
 
 @router.get("/session")
-def session(db: DbSession, reader: Annotated[Reader | None, Depends(optional_reader)]) -> JSONResponse:
+def session(
+    request: Request,
+    db: DbSession,
+    reader: Annotated[Reader | None, Depends(optional_reader)],
+) -> JSONResponse:
     if reader is None:
-        return JSONResponse({"authenticated": False}, headers=_NO_STORE)
+        response = JSONResponse({"authenticated": False}, headers=_NO_STORE)
+        if request.cookies.get(READER_COOKIE):
+            _clear_session(response)
+        return response
     return JSONResponse(
         {"authenticated": True, **_account(db, reader, include_ok=False)},
         headers=_NO_STORE,

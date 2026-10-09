@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from starlette.middleware.sessions import SessionMiddleware
 
 from app.api.admin import router as admin_router
-from app.api.auth import router as auth_router
+from app.api.auth import drop_stale_reader_cookie, router as auth_router
+from app.api.deps import StaleReaderSession
 from app.api.engagement import router as engagement_router, saved_router
 from app.api.geo import router as geo_router
 from app.api.admin_cases import router as admin_cases_router
@@ -22,6 +24,12 @@ assert_admin_password(settings.admin_password)
 
 def create_app() -> FastAPI:
     application = FastAPI(title="Sin Línea API", version="0.1.0")
+
+    @application.exception_handler(StaleReaderSession)
+    async def drop_stale_reader(_request, _exc: StaleReaderSession) -> JSONResponse:
+        response = JSONResponse({"detail": "No autenticado"}, status_code=401, headers={"Cache-Control": "private, no-store"})
+        drop_stale_reader_cookie(response)
+        return response
 
     @application.middleware("http")
     async def transparency_private(request, call_next):
