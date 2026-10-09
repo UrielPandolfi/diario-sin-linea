@@ -86,6 +86,7 @@
 }
 
 [data-theme="dark"] .sl-nav-link[aria-current="page"],
+[data-theme="dark"] .sl-nav-link[data-current="true"],
 [data-theme="dark"] .sl-mobile-link[aria-current="page"] {
   background: #1b2925;
 }
@@ -652,6 +653,7 @@ summary::-webkit-details-marker {
 }
 
 .sl-nav-link[aria-current="page"],
+.sl-nav-link[data-current="true"],
 .sl-mobile-link[aria-current="page"] {
   background: var(--hover);
   color: var(--text-primary);
@@ -1151,7 +1153,8 @@ summary::-webkit-details-marker {
   .sl-chip,
   .sl-feed-item,
   .sl-hit,
-  .sl-link-row {
+  .sl-link-row,
+  .sl-panel {
     animation: none;
     transition: none;
   }

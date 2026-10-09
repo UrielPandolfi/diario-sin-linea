@@ -1,13 +1,13 @@
 # Handoff
 
-**Fecha:** 2026-10-06
+**Fecha:** 2026-10-09
 
-**Tarea:** Wordmark sin fondo, más grande, y con el color del texto.
+**Tarea:** Reordenar la barra lateral: perfil abajo y menú «Más».
 
 ## Hecho
 
-El logo de la barra ya no tiene el rectángulo oscuro. Se recortó al wordmark y usa el color del texto: claro en oscuro, `#252c29` en claro.
+En la barra, Perfil quedó al final (debajo de Salir). En el lugar que ocupaba hay tres puntos («Más»). El panel abre Transparencia, Cómo funciona y Contacto, cada uno con icono y texto.
 
 ## Validación
 
-En `/` a 1280 px mide 207×36. En claro el fondo pintado es `rgb(37, 44, 41)`, igual que el texto.
+`tsc --noEmit` en `apps/web` pasó. En el navegador, a 959 px y a 1280 px, el panel muestra las tres entradas y recibe el clic. El front sigue en `next dev` (http://localhost:3000); la API, Postgres, Redis y el worker están arriba, sin Beat.
