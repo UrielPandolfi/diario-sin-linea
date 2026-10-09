@@ -11,11 +11,11 @@ import {
   themeCookie,
 } from "./theme";
 
-test("first visit without stored preference is light, not OS dark", () => {
-  assert.equal(DEFAULT_THEME, "light");
-  assert.equal(resolveTheme(undefined), "light");
-  assert.equal(resolveTheme(null), "light");
-  assert.equal(resolveTheme("system"), "light");
+test("first visit without stored preference is dark, not the OS scheme", () => {
+  assert.equal(DEFAULT_THEME, "dark");
+  assert.equal(resolveTheme(undefined), "dark");
+  assert.equal(resolveTheme(null), "dark");
+  assert.equal(resolveTheme("system"), "dark");
   assert.equal(parseTheme("dark"), "dark");
   assert.equal(parseTheme("light"), "light");
   assert.equal(parseTheme("auto"), null);

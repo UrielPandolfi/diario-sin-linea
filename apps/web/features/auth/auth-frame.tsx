@@ -1,10 +1,9 @@
 "use client";
 
-import { BrandMark } from "@/features/shell/brand-mark";
 import { loginPath, registerPath, safeReturnTo } from "@/lib/auth/return-to";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, PointerEvent, useEffect, useRef, useState } from "react";
 
 export function AuthFrame({
   mode,
@@ -20,6 +19,42 @@ export function AuthFrame({
   const [pending, setPending] = useState(false);
   const register = mode === "register";
   const destination = safeReturnTo(next, "/");
+  const stageRef = useRef<HTMLElement>(null);
+  const glow = useRef({ x: 0.34, y: 0.46 });
+  const glowTarget = useRef({ x: 0.34, y: 0.46 });
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (media.matches) return;
+    let frame = 0;
+    let running = true;
+    const tick = () => {
+      if (!running) return;
+      const stage = stageRef.current;
+      if (stage) {
+        glow.current.x += (glowTarget.current.x - glow.current.x) * 0.08;
+        glow.current.y += (glowTarget.current.y - glow.current.y) * 0.08;
+        stage.style.setProperty("--auth-x", `${(glow.current.x * 100).toFixed(2)}%`);
+        stage.style.setProperty("--auth-y", `${(glow.current.y * 100).toFixed(2)}%`);
+      }
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => {
+      running = false;
+      window.cancelAnimationFrame(frame);
+    };
+  }, []);
+
+  function onStageMove(event: PointerEvent<HTMLElement>) {
+    const stage = stageRef.current;
+    if (!stage) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const rect = stage.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    glowTarget.current.x = (event.clientX - rect.left) / rect.width;
+    glowTarget.current.y = (event.clientY - rect.top) / rect.height;
+  }
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -60,16 +95,14 @@ export function AuthFrame({
   }
 
   return (
-    <main className="sl-enter min-h-screen bg-background">
-      <div className="mx-auto grid min-h-screen max-w-[1100px] lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <section className="relative flex flex-col justify-between overflow-hidden px-8 py-10 md:px-14 md:py-16">
-          <div className="sl-orb -right-24 bottom-0" aria-hidden />
-          <div className="sl-orb-warm sl-orb -left-24 top-0" aria-hidden />
-          <div className="flex items-center gap-2 text-primary">
-            <BrandMark className="h-9 w-9" />
-            <span className="font-heading text-sm font-medium uppercase tracking-[0.18em]">Sin Línea</span>
-          </div>
-          <div className="max-w-md py-16 lg:py-0">
+    <main className="sl-enter grid min-h-screen bg-background lg:grid-cols-2">
+        <section
+          ref={stageRef}
+          onPointerMove={onStageMove}
+          className="sl-auth-stage relative flex min-h-[46vh] flex-col justify-between overflow-hidden px-8 py-10 md:px-14 md:py-16 lg:min-h-screen lg:px-16 xl:px-24"
+        >
+          <span className="sl-logo relative z-10 h-9 w-[12.8rem]" role="img" aria-label="Sin Línea" />
+          <div className="relative z-10 max-w-md py-16 lg:py-0">
             <h1 className="font-heading text-4xl font-semibold leading-[1.08] tracking-tight text-primary md:text-5xl">
               Entendé qué está pasando.
             </h1>
@@ -77,10 +110,10 @@ export function AuthFrame({
               Información basada en hechos, fuentes y evidencia.
             </p>
           </div>
-          <p className="hidden font-sans text-xs text-muted lg:block">Medio informativo centrado en sucesos.</p>
+          <p className="relative z-10 hidden font-sans text-xs text-muted lg:block">Medio informativo centrado en sucesos.</p>
         </section>
 
-        <section className="flex flex-col justify-center border-t border-border bg-surface/50 px-8 py-12 lg:border-l lg:border-t-0 lg:px-14">
+        <section className="flex flex-col justify-center border-t border-border bg-background px-8 py-12 lg:border-l lg:border-t-0 lg:px-14 xl:px-20">
           <p className="font-heading text-xs uppercase tracking-[0.16em] text-accent">
             {register ? "Cuenta nueva" : "Ingreso"}
           </p>
@@ -154,7 +187,6 @@ export function AuthFrame({
             )}
           </p>
         </section>
-      </div>
     </main>
   );
 }

@@ -2,12 +2,12 @@
 
 **Fecha:** 2026-10-09
 
-**Tarea:** Reordenar la barra lateral: perfil abajo y menú «Más».
+**Tarea:** Tema oscuro por defecto y login a ancho completo.
 
 ## Hecho
 
-En la barra, Perfil quedó al final (debajo de Salir). En el lugar que ocupaba hay tres puntos («Más»). El panel abre Transparencia, Cómo funciona y Contacto, cada uno con icono y texto.
+Quien entra por primera vez ve el sitio en oscuro. Una preferencia ya guardada no cambia. El ingreso ocupa todo el ancho: el panel izquierdo llega al borde, usa el wordmark y un brillo que sigue el cursor.
 
 ## Validación
 
-`tsc --noEmit` en `apps/web` pasó. En el navegador, a 959 px y a 1280 px, el panel muestra las tres entradas y recibe el clic. El front sigue en `next dev` (http://localhost:3000); la API, Postgres, Redis y el worker están arriba, sin Beat.
+`lib/theme.test.ts` pasó. En un navegador sin cookies, `/entrar` a ~1920 px tiene `data-theme=dark`, el panel empieza en x=0 y el brillo se desplaza con el puntero.

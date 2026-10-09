@@ -1,6 +1,6 @@
 export const THEME_COOKIE = "sl_theme";
 export const THEME_STORAGE_KEY = "sl-theme";
-export const DEFAULT_THEME = "light" as const;
+export const DEFAULT_THEME = "dark" as const;
 
 export type Theme = "light" | "dark";
 

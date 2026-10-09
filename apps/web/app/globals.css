@@ -930,6 +930,53 @@ summary::-webkit-details-marker {
   background: radial-gradient(circle, color-mix(in srgb, var(--accent-ochre) 28%, transparent), transparent 68%);
 }
 
+.sl-auth-stage {
+  --auth-x: 34%;
+  --auth-y: 46%;
+  background: var(--nav);
+}
+
+.sl-auth-stage::before,
+.sl-auth-stage::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.sl-auth-stage::before {
+  width: 46rem;
+  height: 46rem;
+  left: var(--auth-x);
+  top: var(--auth-y);
+  translate: -50% -50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 34%, transparent), transparent 68%);
+}
+
+.sl-auth-stage::after {
+  width: 34rem;
+  height: 34rem;
+  right: -6rem;
+  bottom: -8rem;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-ochre) 30%, transparent), transparent 70%);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sl-auth-stage::after {
+    animation: sl-auth-drift 18s ease-in-out infinite;
+  }
+}
+
+@keyframes sl-auth-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(-12%, -8%, 0) scale(1.12);
+  }
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .sl-enter {
     animation: sl-panel 480ms cubic-bezier(0.22, 0.61, 0.36, 1) both;
@@ -1154,7 +1201,8 @@ summary::-webkit-details-marker {
   .sl-feed-item,
   .sl-hit,
   .sl-link-row,
-  .sl-panel {
+  .sl-panel,
+  .sl-auth-stage::after {
     animation: none;
     transition: none;
   }
