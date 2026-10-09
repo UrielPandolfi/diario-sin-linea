@@ -2,12 +2,12 @@
 
 **Fecha:** 2026-10-09
 
-**Tarea:** Atenuar el brillo del ingreso.
+**Tarea:** Mostrar la recuperación de contraseña en la pantalla de ingreso.
 
 ## Hecho
 
-En el panel izquierdo de `/entrar` y `/registro`, el resplandor y las líneas de luz quedaron más bajos y más difusos. Siguen la posición del cursor en toda la ventana.
+`/cuenta/recuperar`, `/cuenta/restablecer` y `/cuenta/verificar` salieron del layout público. Comparten el panel de `/entrar` y no muestran la barra lateral, aunque haya sesión.
 
 ## Validación
 
-Captura a 1920×1080, sin sesión: el panel sigue al borde izquierdo y el brillo se ve suave, sin un núcleo marcado.
+En local, con sesión: `/cuenta/recuperar` a 1440×900 no tiene `aside` ni `sl-shell`; el formulario avisa si el pedido no sale. `/cuenta/restablecer` y `/cuenta/verificar` usan el mismo panel. `/contacto` sigue con la barra. Sin cookie, `/entrar` y `/cuenta/recuperar` responden 200 con `sl-auth-stage`. Producción no se desplegó.

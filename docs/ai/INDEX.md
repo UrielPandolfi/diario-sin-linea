@@ -39,9 +39,9 @@ Routers (`main.py`): `api/health.py`, `api/auth.py`, `api/engagement.py` (Me gus
 | Modelos | `models/` (`event`, `source`, `claim`, `article`, `pipeline`, `reader_case`, `llm_usage`, `llm_price`) |
 | Continuidad entre chats | `docs/ai/HANDOFF.md` |
 
-Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`, `/privacidad`, `/terminos`, `/transparencia`, `/cuenta/recuperar`, `/cuenta/restablecer`, `/cuenta/verificar`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil`, `/guardados` y `/transparencia` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]`, `/como-funciona`, `/privacidad` y `/terminos` siguen abiertas. `/seguidos` y `/notificaciones` responden 404. Cuenta: `/entrar`, `/registro`. Cliente: `apps/web/lib/api/`, `features/`.
+Web pública: `apps/web/app/(public)/` (`/`, `/buscar`, `/local`, `/en-vivo`, `/noticias/[slug]`, `/contacto`, `/seguimiento/[token]`, `/perfil`, `/guardados`, `/privacidad`, `/terminos`, `/transparencia`). `/`, `/en-vivo`, `/local`, `/buscar`, `/onboarding`, `/perfil`, `/guardados` y `/transparencia` piden sesión de lector. La nota publicada (`/noticias/[slug]`), `/contacto`, `/seguimiento/[token]`, `/como-funciona`, `/privacidad` y `/terminos` siguen abiertas. `/seguidos` y `/notificaciones` responden 404. Cuenta: `/entrar`, `/registro`, `/cuenta/recuperar`, `/cuenta/restablecer`, `/cuenta/verificar`. Cliente: `apps/web/lib/api/`, `features/`.
 
-`/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral.
+`/como-funciona` queda fuera de `(public)`: es una landing con chrome propio (`features/how-it-works/`), sin el `AppShell` ni la barra lateral. `/cuenta/recuperar`, `/cuenta/restablecer` y `/cuenta/verificar` también quedan fuera: usan la misma pantalla que `/entrar`.
 
 ## Validación (comandos en CI / README)
 

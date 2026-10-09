@@ -1,3 +1,4 @@
+import { AuthStage } from "@/features/auth/auth-stage";
 import { PasswordResetConfirmForm } from "@/features/auth/password-reset-confirm";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -13,11 +14,11 @@ export default async function ResetPage({ searchParams }: { searchParams: Promis
   const params = await searchParams;
   const token = typeof params.token === "string" ? params.token : "";
   return (
-    <div className="mx-auto min-h-screen max-w-measure px-4 py-8 md:px-6">
-      <p className="font-sans text-[12px] uppercase tracking-[0.16em] text-accent">Cuenta</p>
-      <h1 className="mt-2 font-heading text-3xl font-semibold text-primary">Elegí una contraseña nueva</h1>
+    <AuthStage>
+      <p className="font-heading text-xs uppercase tracking-[0.16em] text-accent">Cuenta</p>
+      <h2 className="mt-3 font-heading text-2xl font-medium text-primary">Elegí una contraseña nueva</h2>
       {token.length < 20 ? (
-        <p className="mt-4 font-sans text-sm text-secondary">
+        <p className="mt-4 max-w-sm font-sans text-sm text-secondary">
           Falta un enlace válido.{" "}
           <Link href="/cuenta/recuperar" className="underline">
             Pedí uno nuevo
@@ -27,6 +28,9 @@ export default async function ResetPage({ searchParams }: { searchParams: Promis
       ) : (
         <PasswordResetConfirmForm token={token} />
       )}
-    </div>
+      <p className="mt-6 font-sans text-sm text-secondary">
+        <Link href="/entrar">Volver a ingresar</Link>
+      </p>
+    </AuthStage>
   );
 }
