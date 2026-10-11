@@ -129,15 +129,72 @@ class ReplicateImageProvider:
                 os.environ["REPLICATE_API_TOKEN"] = previous
         return _coerce_bytes(output)
 
-    def _record_image(self, *, failed: bool) -> None:
+    def generate_avatar(self, prompt: str, *, seed: int) -> bytes:
+        settings = get_settings()
+        size = int(settings.avatar_image_size)
+        return self._run(
+            settings.avatar_image_model,
+            {
+                "prompt": prompt,
+                "negative_prompt": "photorealistic, text, watermark, logo, multiple people",
+                "width": size,
+                "height": size,
+                "num_outputs": 1,
+                "scheduler": "K_EULER",
+                "num_inference_steps": 4,
+                "guidance_scale": 0,
+                "seed": seed,
+            },
+        )
+
+    def _run(self, model: str, payload: dict[str, object]) -> bytes:
+        settings = get_settings()
+        token = (settings.replicate_api_token or "").strip()
+        if not token:
+            raise HeroImageError("missing_replicate_token", "Falta REPLICATE_API_TOKEN", 503)
+        prompt = str(payload.get("prompt") or "").strip()
+        if not prompt:
+            raise HeroImageError("empty_prompt", "El modelo no devolvió un prompt", 502)
+        runner = self.runner or replicate.run
+        previous = os.environ.get("REPLICATE_API_TOKEN")
+        os.environ["REPLICATE_API_TOKEN"] = token
+        try:
+            output = runner(model, input=payload)
+        except HeroImageError:
+            self._record_image(failed=True, model=model)
+            raise
+        except Exception as exc:
+            self._record_image(failed=True, model=model)
+            if _is_timeout(exc):
+                raise HeroImageError(
+                    "timeout",
+                    "La generación de imagen excedió el tiempo de espera",
+                    504,
+                ) from exc
+            raise HeroImageError(
+                "replicate_error",
+                "No se pudo generar la imagen",
+                502,
+            ) from exc
+        else:
+            self._record_image(failed=False, model=model)
+        finally:
+            if previous is None:
+                os.environ.pop("REPLICATE_API_TOKEN", None)
+            else:
+                os.environ["REPLICATE_API_TOKEN"] = previous
+        return _coerce_bytes(output)
+
+    def _record_image(self, *, failed: bool, model: str | None = None) -> None:
         from app.core.config import get_settings
         from app.services.usage_recorder import record_llm_usage
 
+        chosen = model or get_settings().article_image_model
         record_llm_usage(
             provider="replicate",
-            model=get_settings().article_image_model,
+            model=chosen,
             call_kind="image",
             failed=failed,
             usage_reported=not failed,
-            request_options={"model": get_settings().article_image_model},
+            request_options={"model": chosen},
         )

@@ -29,6 +29,7 @@ from app.services.reader_auth import (
     hash_password,
     issue_reader_token,
     normalize_email,
+    normalize_username,
     password_matches,
 )
 
@@ -51,9 +52,37 @@ class Credentials(BaseModel):
         return email
 
 
+class RegisterCredentials(Credentials):
+    username: str = Field(min_length=3, max_length=20)
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, value: str) -> str:
+        username = normalize_username(value)
+        if username is None:
+            raise ValueError("nombre de usuario inválido")
+        return username
+
+
+class UsernameUpdate(BaseModel):
+    username: str = Field(min_length=3, max_length=20)
+
+    @field_validator("username")
+    @classmethod
+    def clean_username(cls, value: str) -> str:
+        username = normalize_username(value)
+        if username is None:
+            raise ValueError("nombre de usuario inválido")
+        return username
+
+
 def _account(db: DbSession, reader: Reader, *, include_ok: bool) -> dict:
+    from app.services.avatar_service import reader_avatar_url
+
     payload: dict = {
         "email": reader.email,
+        "username": reader.username,
+        "avatar_url": reader_avatar_url(db, reader.id),
         "locality_step": reader.locality_step,
         "locality": reader_locality_payload(db, reader),
         "email_verified": reader.email_verified_at is not None,
@@ -113,12 +142,15 @@ def _deliver_password_notice(settings, reader: Reader) -> bool:
 
 
 @router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(payload: Credentials, db: DbSession) -> JSONResponse:
+def register(payload: RegisterCredentials, db: DbSession) -> JSONResponse:
     settings = get_settings()
+    if db.scalar(select(Reader).where(Reader.username == payload.username)) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese nombre de usuario ya está en uso")
     reader = Reader(
         id=uuid4(),
         email=payload.email,
         password_hash=hash_password(payload.password),
+        username=payload.username,
         locality_step="pending",
     )
     db.add(reader)
@@ -184,6 +216,9 @@ def session(
         if request.cookies.get(READER_COOKIE):
             _clear_session(response)
         return response
+    from app.services.avatar_service import request_reader_avatar
+
+    request_reader_avatar(db, reader)
     return JSONResponse(
         {"authenticated": True, **_account(db, reader, include_ok=False)},
         headers=_NO_STORE,
@@ -365,10 +400,28 @@ class EmailVerificationConfirm(BaseModel):
 
 @router.post("/email-verification/confirm")
 def confirm_email_verification(payload: EmailVerificationConfirm, db: DbSession) -> JSONResponse:
+    from app.services.avatar_service import request_reader_avatar
+
     reader = confirm_verification(db, payload.token.strip())
     if reader is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invalid_token")
+    request_reader_avatar(db, reader)
     return JSONResponse({"ok": True}, headers=_NO_STORE)
+
+
+@router.put("/username")
+def set_username(
+    payload: UsernameUpdate,
+    db: DbSession,
+    reader: Annotated[Reader, Depends(require_reader)],
+) -> JSONResponse:
+    if reader.username:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="username_already_set")
+    if db.scalar(select(Reader).where(Reader.username == payload.username)) is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Ese nombre de usuario ya está en uso")
+    reader.username = payload.username
+    db.flush()
+    return JSONResponse(_account(db, reader, include_ok=True), headers=_NO_STORE)
 
 
 @router.post("/deletion-request", status_code=status.HTTP_201_CREATED)

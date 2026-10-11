@@ -77,3 +77,8 @@ Solo políticas con evidencia de intención (spec, test que las fija, comentario
 - La localidad de interés es opcional y vive en el lector (`interest_locality_id`, código oficial en texto). Provincia y país salen de `geo_localities`. Después del registro se puede elegir u omitir; ese paso no se repite. Quien ya tenía cuenta no queda bloqueado. El catálogo de Argentina se carga con `python -m app.geo.load_localities` desde el CSV oficial de GeoRef (`localidades.csv`, v2.0). La búsqueda consulta esa tabla, no el servicio externo. Tests: `test_geo_localities.py`. `/`, `/en-vivo`, `/local` y `/buscar` exigen sesión y no se indexan. `/contacto` y `/como-funciona` siguen en el sitemap.
 - Deploys con `VERCEL_ENV` distinto de `production` reciben `X-Robots-Tag: noindex, nofollow`. Si `VERCEL_ENV` no existe, no se aplica ese escudo.
 - Title y description de una noticia son el titular y el summary editoriales. No hay keywords ni títulos SEO paralelos.
+
+## Comentarios
+
+- El nombre de usuario se pide al registrarse: único, 3 a 20 caracteres (`letras`, números y `_`), guardado en minúsculas. Quien ya tenía cuenta lo carga una sola vez en el perfil. Sin ese nombre no se comenta. El email no se publica.
+- Solo un lector con el correo verificado comenta o responde. Hay un solo nivel de respuesta. Un comentario anónimo oculta el nombre y la foto y conserva el lector. Tests: `test_comments.py`.

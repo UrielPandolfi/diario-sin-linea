@@ -5,6 +5,7 @@ import { GuestSignupBanner } from "@/features/auth/guest-signup-banner";
 import { LikeButton } from "@/features/article/like-button";
 import { SaveButton } from "@/features/article/save-button";
 import { ArticleBody } from "@/features/article/article-body";
+import { ArticleComments } from "@/features/article/article-comments";
 import { PublicHero } from "@/features/article/public-hero";
 import { ReadingSizeToggle, useReadingSize } from "@/features/article/reading-controls";
 import { formatArticleStamp, readingMinutes } from "@/features/article/reading";
@@ -199,6 +200,8 @@ export function ArticleView({
             claims={article.claims}
             sourceKey={`${article.slug}:${article.published_version ?? ""}`}
           />
+
+          <ArticleComments slug={article.slug} returnTo={returnTo ?? href} />
 
           <div className="mt-10 xl:hidden">
             <ArticleDossier history={history} sources={article.sources} />

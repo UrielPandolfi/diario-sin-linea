@@ -15,6 +15,8 @@ export type ReaderAccount = {
   authenticated: boolean;
   email: string | null;
   email_verified: boolean | null;
+  username: string | null;
+  avatar_url: string | null;
   locality_step: "pending" | "done" | "skipped" | null;
   locality: ReaderPlace | null;
 };
@@ -38,24 +40,63 @@ async function readerFetch(path: string, init?: RequestInit): Promise<Response> 
 export async function fetchReaderAccount(): Promise<ReaderAccount> {
   const response = await readerFetch("/api/v1/auth/session");
   if (!response.ok) {
-    return { authenticated: false, email: null, email_verified: null, locality_step: null, locality: null };
+    return {
+      authenticated: false,
+      email: null,
+      email_verified: null,
+      username: null,
+      avatar_url: null,
+      locality_step: null,
+      locality: null,
+    };
   }
   const body = (await response.json()) as {
     authenticated?: boolean;
     email?: string;
     email_verified?: boolean;
+    username?: string | null;
+    avatar_url?: string | null;
     locality_step?: ReaderAccount["locality_step"];
     locality?: ReaderPlace | null;
   };
   if (!body.authenticated) {
-    return { authenticated: false, email: null, email_verified: null, locality_step: null, locality: null };
+    return {
+      authenticated: false,
+      email: null,
+      email_verified: null,
+      username: null,
+      avatar_url: null,
+      locality_step: null,
+      locality: null,
+    };
   }
   return {
     authenticated: true,
     email: typeof body.email === "string" ? body.email : null,
     email_verified: typeof body.email_verified === "boolean" ? body.email_verified : null,
+    username: typeof body.username === "string" ? body.username : null,
+    avatar_url: typeof body.avatar_url === "string" ? body.avatar_url : null,
     locality_step: body.locality_step ?? null,
     locality: body.locality ?? null,
+  };
+}
+
+export async function saveReaderUsername(username: string): Promise<{ username: string; avatar_url: string | null }> {
+  const response = await readerFetch("/api/v1/auth/username", {
+    method: "PUT",
+    body: JSON.stringify({ username }),
+  });
+  if (response.status === 409) {
+    const failure = (await response.json()) as { detail?: unknown };
+    throw new Error(failure.detail === "username_already_set" ? "already_set" : "taken");
+  }
+  if (!response.ok) {
+    throw new Error("invalid");
+  }
+  const body = (await response.json()) as { username?: string; avatar_url?: string | null };
+  return {
+    username: typeof body.username === "string" ? body.username : username.trim().toLowerCase(),
+    avatar_url: typeof body.avatar_url === "string" ? body.avatar_url : null,
   };
 }
 

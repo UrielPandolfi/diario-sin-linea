@@ -12,6 +12,8 @@ Frontend público: `SITE_URL` es el origen canónico; metadata App Router, Open 
 
 Tras commit de `PublishService` / `EditorialService.revise` (y fill-gap admin `already_published`), `HeroImageService` intenta una portada si `ARTICLE_IMAGE_ENABLED` y `hero_image_url` está vacío. El prompt sale de DeepSeek (`IMAGE_PROMPT`, titular y bajada) y la imagen de `black-forest-labs/flux-schnell` en Replicate; los bytes se guardan en `article_hero_images.png_bytes` (WEBP por defecto, `content_type` real) y la URL pública es `/api/v1/media/heroes/{id}.webp`. No entra a detection, research, claims, verification, writing ni audit. Un fallo deja la URL null y no deshace la publicación. El GET público no genera. La plantilla Pillow ya no corre.
 
+Comentarios de un nivel en `GET/POST /api/v1/articles/{clave}/comments` (migración `0025_reader_comments`). El GET es público. El POST pide sesión, correo verificado y nombre de usuario; el check anónimo omite nombre y foto en la respuesta y deja `reader_id`. Confirmar el correo no genera la foto en el request: después del commit, `generate_reader_avatar` usa `bytedance/sdxl-lightning-4step` (512 px, WebP en `reader_avatars`) y se sirve en `GET /api/v1/media/avatars/{id}.webp`. Si Replicate o el broker fallan, el correo sigue verificado. Quien ya estaba verificado y no tiene foto dispara la misma tarea al abrir la sesión. En `USAGE_ENVIRONMENT=test` no se encola.
+
 Ingesta RSS (HTML no soportado en `ingestion_service.py`). Beat `poll_monitored_sources` cada `monitored_source_poll_interval_seconds` (default 300) si `auto_poll_enabled` (interruptor en la barra de Admin, default activo); cada poll inspecciona `monitored_source_poll_limit` entradas recientes (default 5) antes de descargar HTML. Gate editorial en detección (`editorial_gate.py`). Un `Article` por evento; versiones; `editorial_hold` bloquea el enqueue autónomo de publish.
 
 Admin Track A: `/admin/publications` (estado actual vs ejecuciones de período), `/admin/estadisticas` (solo lectura: embudo, descarte, Track B, etiquetas), costos estimados con libro/snapshot (`0014_llm_costs`), procedencia de cuerpo (`body_source`), skip de cuota persistido, fallo histórico ≠ fallo abierto. Atribución 1:1 de `LlmUsage`; backfill de embeddings separado.
@@ -22,7 +24,7 @@ Writing captura el contrato (`expected_central`, `decision_by_claim_id`, `suppor
 
 ## Tests que existen (no = pasados ahora)
 
-Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`. Frontend: lint/typecheck/build en CI más `npm test` (`lib/seo/seo.test.ts`, `claim-popover-copy.test.ts`, `article-body.test.tsx`). Cards públicas leen `hero_image_url`.
+Backend: además de la suite previa, `test_hero_image`, `test_editorial_evidence`, `test_audit_policy`, `test_publication_outcome`, `test_admin_publications`, `test_llm_costs`, `test_sitemap_articles`, `test_comments`. Frontend: lint/typecheck/build en CI más `npm test` (`lib/seo/seo.test.ts`, `claim-popover-copy.test.ts`, `article-body.test.tsx`). Cards públicas leen `hero_image_url`.
 
 ## Hallazgos de cableado (no decisiones)
 

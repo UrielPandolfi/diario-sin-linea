@@ -18,7 +18,15 @@ from uuid import UUID
 READER_COOKIE = "sl_reader"
 READER_SESSION_TTL = 14 * 24 * 60 * 60
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_USERNAME = re.compile(r"^[a-z0-9_]{3,20}$")
 _DUMMY_HASH: str | None = None
+
+
+def normalize_username(value: str) -> str | None:
+    username = value.strip().lower()
+    if _USERNAME.fullmatch(username) is None:
+        return None
+    return username
 
 
 def normalize_email(value: str) -> str | None:

@@ -354,6 +354,38 @@ def publish_event_article(self, event_id: str, trigger: str = "audit") -> dict:
         session.close()
 
 
+@celery_app.task(
+    bind=True,
+    name="app.workers.tasks.generate_reader_avatar",
+    max_retries=2,
+    retry_backoff=True,
+)
+def generate_reader_avatar(self, reader_id: str) -> dict:
+    from app.services.avatar_service import AvatarService, release_avatar_enqueue
+
+    current = get_settings()
+    parsed = UUID(reader_id)
+    if current.usage_environment == "test":
+        return {"skipped": True}
+    if not current.avatar_image_enabled:
+        release_avatar_enqueue(parsed)
+        return {"skipped": True}
+    session = SessionLocal()
+    try:
+        AvatarService(session).generate(parsed)
+        session.commit()
+        return {"ok": True}
+    except Exception as exc:
+        session.rollback()
+        if int(self.request.retries or 0) >= int(self.max_retries or 0):
+            release_avatar_enqueue(parsed)
+            logger.exception("reader_id=%s stage=avatar status=failed", reader_id)
+            return {"ok": False, "error": exc.__class__.__name__}
+        raise self.retry(exc=exc)
+    finally:
+        session.close()
+
+
 def _is_existing_event_link(result: dict) -> bool:
     if result.get("created"):
         return False

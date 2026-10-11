@@ -158,7 +158,10 @@ def test_register_verification_is_single_use_and_does_not_block_login(
     email = "verificar@sinlinea.test"
     password = "clave-segura-1"
     with TestClient(app) as client:
-        created = client.post("/api/v1/auth/register", json={"email": email, "password": password})
+        created = client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": password, "username": "verificar"},
+        )
         assert created.status_code == 201
         assert created.json()["email_verified"] is False
         assert created.json()["email_verification"] == "sent"
@@ -204,7 +207,7 @@ def test_expired_verification_and_unknown_email_do_not_confirm(
     with TestClient(app) as client:
         created = client.post(
             "/api/v1/auth/register",
-            json={"email": email, "password": "clave-segura-1"},
+            json={"email": email, "password": "clave-segura-1", "username": "vencemail"},
         )
         assert created.status_code == 201
         token = _token_from(outbox.to(email)[0]["body"])
@@ -316,7 +319,10 @@ def test_failed_delivery_does_not_claim_success_or_keep_the_token(
     monkeypatch.setattr("app.api.auth.send_email", lambda *_args, **_kwargs: False)
     email = "falla-mail@sinlinea.test"
     with TestClient(app) as client:
-        created = client.post("/api/v1/auth/register", json={"email": email, "password": "clave-segura-1"})
+        created = client.post(
+            "/api/v1/auth/register",
+            json={"email": email, "password": "clave-segura-1", "username": "fallamail"},
+        )
         assert created.status_code == 201
         assert created.json()["email_verification"] == "failed"
         assert created.json()["email_verification_sent"] is False

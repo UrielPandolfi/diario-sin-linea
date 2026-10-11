@@ -109,6 +109,9 @@ class Settings(BaseSettings):
     article_image_num_inference_steps: int = 4
     article_image_megapixels: str = "1"
     article_image_go_fast: bool = True
+    avatar_image_enabled: bool = True
+    avatar_image_model: str = "bytedance/sdxl-lightning-4step"
+    avatar_image_size: int = 512
 
     # current conserva los modelos del entorno. candidate cambia solo los roles listados.
     # Lista vacía con candidate = todos los roles del perfil candidato.

@@ -10,6 +10,7 @@ from app.api.engagement import router as engagement_router, saved_router
 from app.api.geo import router as geo_router
 from app.api.admin_cases import router as admin_cases_router
 from app.api.cases import router as cases_router
+from app.api.comments import router as comments_router
 from app.api.health import router as health_router
 from app.api.public import router as public_router
 from app.api.transparency import router as transparency_router
@@ -61,6 +62,7 @@ def create_app() -> FastAPI:
     application.include_router(public_router)
     application.include_router(transparency_router)
     application.include_router(cases_router)
+    application.include_router(comments_router)
     application.include_router(admin_router)
     application.include_router(admin_cases_router)
     return application

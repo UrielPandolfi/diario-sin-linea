@@ -15,6 +15,7 @@ export function AuthFrame({
 }) {
   const router = useRouter();
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [mailNote, setMailNote] = useState<string | null>(null);
@@ -32,18 +33,33 @@ export function AuthFrame({
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(register ? { email, password, username } : { email, password }),
       });
       if (response.status === 401) {
         setError("Email o contraseña incorrectos.");
         return;
       }
       if (response.status === 409) {
-        setError("Ese email ya tiene cuenta.");
+        let detail = "";
+        try {
+          const failure = (await response.json()) as { detail?: unknown };
+          detail = typeof failure.detail === "string" ? failure.detail : "";
+        } catch {
+          detail = "";
+        }
+        setError(
+          detail === "Ese nombre de usuario ya está en uso"
+            ? "Ese nombre de usuario ya está en uso."
+            : "Ese email ya tiene cuenta.",
+        );
         return;
       }
       if (response.status === 422) {
-        setError("Revisá el email y usá una contraseña de al menos 8 caracteres.");
+        setError(
+          register
+            ? "Revisá el email, el nombre de usuario (3 a 20 letras, números o _) y una contraseña de al menos 8 caracteres."
+            : "Revisá el email y usá una contraseña de al menos 8 caracteres.",
+        );
         return;
       }
       if (!response.ok) {
@@ -91,6 +107,22 @@ export function AuthFrame({
                 className="sl-input mt-1"
               />
             </label>
+            {register ? (
+              <label className="block font-sans text-sm text-secondary" htmlFor="reader-username">
+                Nombre de usuario
+                <input
+                  id="reader-username"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(event) => setUsername(event.target.value)}
+                  required
+                  minLength={3}
+                  maxLength={20}
+                  pattern="[A-Za-z0-9_]{3,20}"
+                  className="sl-input mt-1"
+                />
+              </label>
+            ) : null}
             <label className="block font-sans text-sm text-secondary" htmlFor="reader-password">
               Contraseña
               <input

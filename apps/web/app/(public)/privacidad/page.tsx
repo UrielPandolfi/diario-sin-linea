@@ -22,7 +22,9 @@ export default function PrivacyPage() {
         <p>
           Si creás una cuenta, guardamos el email y una contraseña cifrada. No guardamos la contraseña
           en texto plano. La localidad es opcional y la elegís vos; la usamos para ordenar noticias
-          cercanas.
+          cercanas. El nombre de usuario es público cuando comentás sin marcarlo como anónimo. Un
+          comentario anónimo sigue asociado a la cuenta: no se muestra el nombre ni la foto, pero no
+          queda desligado del lector.
         </p>
         <h2 className="font-heading text-lg text-primary">Actividad en la cuenta</h2>
         <p>

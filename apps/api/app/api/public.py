@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse, Response
 
 from app.api.deps import DbSession, require_reader
 from app.models import ArticleHeroImage
+from app.models.reader_avatar import ReaderAvatar
 from app.models.reader import Reader
 from app.services.feed_ranking import DEFAULT_LIMIT, FeedRankingService, clamp_limit
 from app.services.geo_localities import reader_locality_payload
@@ -40,6 +41,19 @@ def get_hero_image_png(article_id: UUID, db: DbSession, v: str | None = None) ->
 @router.get("/media/heroes/{article_id}.webp")
 def get_hero_image_webp(article_id: UUID, db: DbSession, v: str | None = None) -> Response:
     return _hero_file(article_id, db, v)
+
+
+@router.get("/media/avatars/{reader_id}.webp")
+def get_reader_avatar(reader_id: UUID, db: DbSession, v: str | None = None) -> Response:
+    del v
+    row = db.get(ReaderAvatar, reader_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Imagen no encontrada")
+    return Response(
+        content=bytes(row.image_bytes),
+        media_type=row.content_type or "image/webp",
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
 
 
 @router.get("/articles/{key}")

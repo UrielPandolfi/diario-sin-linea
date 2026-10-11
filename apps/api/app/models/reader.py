@@ -21,3 +21,5 @@ class Reader(TimestampMixin, Base):
     locality_step: Mapped[str] = mapped_column(String(16), nullable=False, default="done", server_default="done")
     session_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    username: Mapped[str | None] = mapped_column(String(20), unique=True, nullable=True)
+    avatar_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

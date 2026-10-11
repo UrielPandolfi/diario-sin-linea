@@ -60,7 +60,7 @@ def test_register_login_logout_and_private_feed(db_session: Session) -> None:
 
         created = client.post(
             "/api/v1/auth/register",
-            json={"email": "Lector@SinLinea.test", "password": "clave-segura-1"},
+            json={"email": "Lector@SinLinea.test", "password": "clave-segura-1", "username": "lector"},
         )
         assert created.status_code == 201
         assert created.json()["ok"] is True
@@ -71,7 +71,7 @@ def test_register_login_logout_and_private_feed(db_session: Session) -> None:
         assert "scrypt$" not in created.text
         duplicate = client.post(
             "/api/v1/auth/register",
-            json={"email": "lector@sinlinea.test", "password": "clave-segura-1"},
+            json={"email": "lector@sinlinea.test", "password": "clave-segura-1", "username": "otro_lector"},
         )
         assert duplicate.status_code == 409
 
