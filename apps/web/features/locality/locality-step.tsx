@@ -1,8 +1,8 @@
 "use client";
 
 import { LocalitySearch } from "@/features/locality/locality-search";
-import { BrandMark } from "@/features/shell/brand-mark";
 import { safeReturnTo } from "@/lib/auth/return-to";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 export function LocalityStep({ next }: { next: string | null }) {
@@ -16,10 +16,9 @@ export function LocalityStep({ next }: { next: string | null }) {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center bg-background px-6 py-12">
-      <div className="flex items-center gap-2 text-primary">
-        <BrandMark className="h-8 w-8" />
-        <span className="font-heading text-sm font-medium uppercase tracking-[0.18em]">Sin Línea</span>
-      </div>
+      <Link href="/" className="inline-flex items-center" aria-label="Sin Línea">
+        <span className="sl-logo h-8 w-[11.375rem]" />
+      </Link>
       <h1 className="mt-10 font-heading text-3xl font-semibold text-primary">
         ¿De qué localidad querés estar al tanto?
       </h1>

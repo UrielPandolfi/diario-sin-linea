@@ -1,6 +1,5 @@
 "use client";
 
-import { BrandMark } from "@/features/shell/brand-mark";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { loginPath } from "@/lib/auth/return-to";
 import Link from "next/link";
@@ -37,11 +36,8 @@ export function LandingHeader() {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-background/85 backdrop-blur-sm">
       <div className="mx-auto flex h-14 max-w-[1240px] items-center justify-between gap-4 px-5 md:h-16 md:px-8">
-        <Link href="/como-funciona" className="flex items-center gap-2.5 text-primary">
-          <BrandMark className="h-7 w-7 shrink-0" />
-          <span className="font-heading text-[13px] font-medium uppercase tracking-[0.16em] text-primary">
-            Sin Línea
-          </span>
+        <Link href="/" className="flex items-center" aria-label="Sin Línea">
+          <span className="sl-logo h-8 w-[11.375rem]" />
         </Link>
 
         <nav aria-label="Secciones" className="hidden items-center gap-7 lg:flex">
