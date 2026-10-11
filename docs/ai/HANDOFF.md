@@ -1,13 +1,13 @@
 # Handoff
 
-**Fecha:** 2026-10-09
+**Fecha:** 2026-10-11
 
-**Tarea:** Cortar el bucle entre inicio e ingreso cuando la base ya no tiene al lector.
+**Tarea:** El selector de localidad en el registro no devolvía Rosario en producción.
 
 ## Hecho
 
-La cookie `sl_reader` se firmaba en el navegador y el middleware la daba por válida aunque el lector no existiera. `/` cargaba, el feed respondía 401 y mandaba a `/entrar`; `/entrar` veía la cookie y volvía a `/`. Ahora la web pregunta `GET /api/v1/auth/session` en las rutas con sesión y, si el lector no está, borra la cookie y deja el ingreso. La API también borra esa cookie en `/session` y en el 401 de una ruta que la exigía.
+La web y la API ya hablaban: `GET /api/v1/geo/localities` respondía 200 con `{"items":[]}`. `geo_localities` tenía 0 filas porque el deploy no corre la carga. Se ejecutó `python -m app.geo.load_localities` en la API de producción: 4028 filas. `ros` incluye Rosario (Santa Fe).
 
 ## Validación
 
-Tests de `reader-gate` en la web y `test_deleted_reader_drops_the_signed_cookie` en la API. Producción no se desplegó: el bucle sigue en https://www.sinlinea.ar hasta publicar web y API. Mientras tanto, borrar las cookies de ese sitio corta el ciclo.
+Conteo en la base de producción y `search_localities("ros")` desde el servicio de la API. No hay cambio de código ni tests nuevos.
