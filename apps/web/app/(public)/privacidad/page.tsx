@@ -41,8 +41,10 @@ export default function PrivacyPage() {
         <p>
           Usamos cookies propias e indispensables: <code>sl_reader</code> mantiene la sesión,{" "}
           <code>sl_admin</code> la sesión del panel interno y <code>sl_theme</code> recuerda el tema
-          claro u oscuro. No hay herramientas de analítica ni publicidad de terceros, así que no hay
-          un aviso para aceptar o rechazar rastreo.
+          claro u oscuro. No hay publicidad de terceros ni una cookie de analítica. En sinlinea.ar y
+          www.sinlinea.ar, en el despliegue de producción, Plausible cuenta visitas de página sin
+          cookies y sin nombre, correo ni identificador de cuenta. El panel interno no entra en ese
+          conteo. No hace falta un aviso para aceptar o rechazar rastreo.
         </p>
         <h2 className="font-heading text-lg text-primary">Otros tratamientos</h2>
         <p>

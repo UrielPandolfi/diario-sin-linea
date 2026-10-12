@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { Inter, Newsreader } from "next/font/google";
+import { PlausibleAnalytics } from "@/components/plausible-analytics";
 import { InitialThemeProvider } from "@/components/theme-provider";
 import { ThemeScript } from "@/components/theme-script";
+import { isPlausibleEnabled } from "@/lib/analytics/plausible";
 import { JsonLd } from "@/lib/seo/json-ld-script";
 import { organizationJsonLd } from "@/lib/seo/json-ld";
 import { rootMetadata } from "@/lib/seo/metadata";
@@ -33,8 +35,13 @@ export function generateMetadata(): Metadata {
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
   const origin = getSiteUrl();
+  const headerStore = await headers();
   const cookieStore = await cookies();
   const theme = resolveTheme(cookieStore.get(THEME_COOKIE)?.value);
+  const analytics = isPlausibleEnabled(
+    process.env,
+    headerStore.get("x-forwarded-host") ?? headerStore.get("host"),
+  );
   return (
     <html
       lang="es-AR"
@@ -46,6 +53,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <ThemeScript />
       </head>
       <body className="min-h-screen bg-background font-sans text-primary antialiased">
+        <PlausibleAnalytics enabled={analytics} />
         <JsonLd data={organizationJsonLd(origin)} />
         <InitialThemeProvider theme={theme}>{children}</InitialThemeProvider>
       </body>
